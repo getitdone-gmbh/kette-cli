@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "bin": { "kette": "bin/kette.mjs" },
-  "files": ["bin", "src", "package.json"],
+  "license": "MIT",
+  "files": ["bin", "src", "package.json", "LICENSE"],
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "release": "node scripts/release.mjs"

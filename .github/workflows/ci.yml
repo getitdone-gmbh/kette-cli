@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          tar -czf dist/kette-cli-test.tgz bin src package.json
+          tar -czf dist/kette-cli-test.tgz bin src package.json LICENSE
           $sum = (Get-FileHash dist/kette-cli-test.tgz -Algorithm SHA256).Hash.ToLower()
           @{ version = 'test'; cli = @{ version = 'test'; url = 'kette-cli-test.tgz'; sha256 = $sum }; bundles = @{} } | ConvertTo-Json -Depth 4 | Set-Content dist/manifest.json
       - name: Installer ausführen
