@@ -7,26 +7,59 @@ curl -fsSL https://kette.itdone.de/install | sh          # macOS, Linux
 irm https://kette.itdone.de/install.ps1 | iex              # Windows
 ```
 
+## Editionen
+| | Community | Enterprise (Die Kette) |
+|---|---|---|
+| Kern-Regeln und Architektur-Muster mit ADR-Vorlage | ja | ja |
+| Projektprofil `.kette/profile.json` und `kette doctor` | ja | ja |
+| Plugin `kette-engineering-core` | ja | ja |
+| Stack- und Plattform-Profile | | ja |
+| Vorlagen für CI, Docker und Deploy, Prüfungen (tsconfig, ESLint, dependency-cruiser, gitleaks) | | ja |
+| Plugin `kette-engineering` mit Code-Reviewer | | ja |
+| Bezug | frei, ohne Schlüssel | mit Lizenzschlüssel der Kette (Solo oder Team), `kette login <key>` |
+| Updates | jederzeit | 12 Monate ab Kauf, die installierte Version bleibt dauerhaft nutzbar |
+
+Im Projektprofil steht die Edition im Feld `tier`: `community` oder `enterprise`. Die Werte `free` und `kette` aus Version 0.1.0 werden weiter gelesen, `kette doctor` weist auf den neuen Namen hin.
+
 ## Befehle
 | Befehl | Zweck |
 |---|---|
-| `kette init [ordner]` | neues Projekt: Profil, Agenten-Hinweise, ADR-Vorlage, Plugins; mit Kette-Lizenz auch CI-, Docker- und Prüfvorlagen |
+| `kette init [ordner]` | neues Projekt: Profil, Agenten-Hinweise, ADR-Vorlage, Plugins; in Enterprise auch CI-, Docker- und Prüfvorlagen |
 | `kette add` | bestehendes Repo anbinden: erkennt Stack und Plattform, überschreibt nichts, zeigt den Plan |
-| `kette doctor` | Projekt und Einrichtung prüfen, `--ci` für Pipelines |
-| `kette update` | neues Regelwerk laden und Plugins aktualisieren |
+| `kette doctor` | Projekt und Einrichtung prüfen, zeigt Edition, Version und Updates bis; `--ci` für Pipelines, ohne Netz |
+| `kette update` | neues Regelwerk laden und Plugins aktualisieren (Community über das Manifest, Enterprise über den Lieferdienst) |
 | `kette profile` | Projektprofil anzeigen |
-| `kette login <key>` | Kette-Lizenz hinterlegen (folgt mit dem Lizenzweg in chain-delivery) |
+| `kette login <key>` | Enterprise freischalten: Schlüssel prüfen, Paket laden und prüfen, Plugins installieren |
+| `kette logout` | Schlüssel und Enterprise-Paket von diesem Rechner entfernen (das Gerät gibt der Support frei) |
 
 Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`.
 
-## Grundsätze
-- Kein sudo, alles unter `~/.kette` (überschreibbar mit `KETTE_HOME`).
-- Jeder Download wird gegen die SHA-256 aus dem Manifest geprüft.
-- Vorhandene Dateien werden nie überschrieben, `CLAUDE.md` bekommt höchstens eine Verweiszeile.
-- Keine Cloud-Aktionen, kein Deploy. Infrastruktur entsteht als Code im Repo.
-- Eigene Spiegel für Firmen und Offline-Umgebungen über `KETTE_MIRROR`.
+## Was der Installer tut
+- Prüft Node.js 20 oder neuer, git und tar.
+- Lädt `manifest.json` und die CLI vom Spiegel und prüft die SHA-256 aus dem Manifest. Passt sie nicht, bricht er ab.
+- Entpackt die CLI nach `~/.kette/cli/<version>` und legt `~/.kette/bin/kette` an.
+- Ergänzt den PATH: `install.sh` hängt `export PATH="$HOME/.kette/bin:$PATH"` an `~/.zshrc` (zsh), `~/.bashrc` (bash) oder sonst `~/.profile`, nur wenn die Zeile fehlt, und zeigt, was er geändert hat. `install.ps1` ergänzt den PATH des Benutzers.
+
+## Was der Installer nicht tut
+- Kein sudo, keine Änderungen außerhalb von `~/.kette` und der einen Zeile in der Shell-Startdatei.
+- Keine Cloud-Aktionen, kein Deploy, keine Konten. Infrastruktur entsteht als Code im Repo.
+- Kein Überschreiben vorhandener Dateien. `CLAUDE.md` bekommt höchstens eine Verweiszeile.
+- Keine Telemetrie. Der Lieferdienst sieht nur Schlüssel, Geräte-ID, CLI-Version und die IP-Adresse, und das nur bei `kette login` und `kette update` in Enterprise.
+
+## Umgebungsvariablen
+| Variable | Standard | Zweck |
+|---|---|---|
+| `KETTE_HOME` | `~/.kette` | Ablage für CLI, Pakete, Schlüssel (`credentials`, Rechte 600) und Geräte-ID |
+| `KETTE_MIRROR` | `https://kette.itdone.de/dl` | Spiegel für Manifest, CLI und Community-Paket, z. B. für Firmen und Offline-Umgebungen |
+| `KETTE_DELIVERY` | `https://app-kette-delivery-833790b5.itdone.cloud` | Lieferdienst für Enterprise (Vertrag: [docs/install-api.md](docs/install-api.md)) |
+| `KETTE_NO_MODIFY_PATH` | nicht gesetzt | `1` lässt die Shell-Startdatei unverändert, der Installer zeigt dann die Zeile zum Selbsteintragen |
 
 ## Veröffentlichen
 `npm run release` baut aus `../kette-engineering` (oder `KETTE_ENGINEERING`) nach `dist/`:
-- `install.sh`, `install.ps1`, `manifest.json`, `kette-cli-<version>.tgz`, `kette-free-<version>.tgz` (öffentlich unter `https://kette.itdone.de/dl/`)
-- `private/kette-kette-<version>.tgz` (nur über den Lizenzweg, nie öffentlich)
+- `install.sh`, `install.ps1`, `manifest.json`, `kette-cli-<version>.tgz`, `kette-community-<version>.tgz` (öffentlich unter `https://kette.itdone.de/dl/`)
+- `private/kette-enterprise-<version>.tgz` und `private/kette-enterprise.json` (`{version, sha256, published_at}`), nie öffentlich
+
+`npm run release -- --publish-enterprise` lädt das Enterprise-Paket zusätzlich mit `gh release create` als Release `v<version>` in das private Repo `alexfriedl/kette-engineering`. Das Skript bricht ab, wenn das Repo nicht privat ist, kette-engineering offene Änderungen hat oder der Commit nicht gepusht ist. Ohne den Schalter zeigt es nur den Befehl.
+
+## Lizenz
+MIT, siehe [LICENSE](LICENSE). Die Enterprise-Inhalte der Kette stehen unter eigener Lizenz im Paket.
