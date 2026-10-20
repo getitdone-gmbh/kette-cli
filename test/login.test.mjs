@@ -82,7 +82,7 @@ test('login zieht die Rechte einer vorhandenen Schlüsseldatei auf 600 und behä
 
 const failing = [
   ['401 unbekannter Schlüssel', KEYS.unknown, /kennen wir nicht.*Kaufbestätigung/],
-  ['403 widerrufen', KEYS.revoked, /widerrufen oder erstattet.*Support.*Community-Edition bleibt nutzbar/],
+  ['403 widerrufen', KEYS.revoked, /widerrufen oder erstattet.*info@itdone\.de.*Community-Edition bleibt nutzbar/],
   ['403 falsches Angebot', KEYS.other, /anderen Angebot.*Solo oder Team/],
   ['429 Gerätegrenze', KEYS.full, /Gerätegrenze.*3 von 3 Geräten.*Support/],
 ];
