@@ -25,3 +25,11 @@ test('Profil aus 0.1.0 wird gelesen, ohne das Original zu ändern', () => {
   assert.deepEqual(normalizeProfile({ version: 1 }), { version: 1 });
   assert.equal(normalizeProfile(null), null);
 });
+
+test('isNewer vergleicht Versionen numerisch', async () => {
+  const { isNewer } = await import('../src/editions.mjs');
+  assert.equal(isNewer('0.2.0', '0.1.0'), true);
+  assert.equal(isNewer('0.1.0', '0.2.0'), false);
+  assert.equal(isNewer('0.10.0', '0.9.9'), true);
+  assert.equal(isNewer('0.2.0', '0.2.0'), false);
+});

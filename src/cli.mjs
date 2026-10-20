@@ -8,7 +8,7 @@ import { describe, print, apply } from './plan.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
 import { hasClaude, installPlugins, installedPlugins } from './claude.mjs';
 import { credentialsFile, delivery, home, mirror } from './paths.mjs';
-import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, pluginsFor } from './editions.mjs';
+import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, pluginsFor, isNewer } from './editions.mjs';
 import { credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -269,7 +269,7 @@ async function update(opts) {
     const r = installPlugins(setActiveBundle(dir), pluginsFor(tier));
     if (!r.ok) console.log(`Plugins nicht aktualisiert (${r.reason}).`);
   }
-  if (manifest.cli && manifest.cli.version !== VERSION) console.log(`Neue CLI ${manifest.cli.version} verfügbar: curl -fsSL https://kette.itdone.de/install | sh`);
+  if (manifest.cli && isNewer(manifest.cli.version, VERSION)) console.log(`Neue CLI ${manifest.cli.version} verfügbar: curl -fsSL https://kette.itdone.de/install | sh`);
   console.log(`Regelwerk ${manifest.version} installiert.`);
   return 0;
 }

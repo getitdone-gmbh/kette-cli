@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { COMMUNITY, ENTERPRISE, editionLabel, pluginsFor } from './editions.mjs';
+import { COMMUNITY, ENTERPRISE, editionLabel, pluginsFor, isNewer } from './editions.mjs';
 import { DeliveryError, KEY_PATTERN, deviceId, downloadErrorText, latest, readCredentials, removeCredentials, requestToken, writeCredentials } from './delivery.mjs';
 import { DownloadError, fetchManifest, installEntry, installedBundle, readState, removeState, setActiveBundle, writeState } from './manifest.mjs';
 import { hasClaude, installPlugins, uninstallPlugin } from './claude.mjs';
@@ -85,7 +85,7 @@ export function logout(opts) {
 async function cliHint(cli) {
   try {
     const m = await fetchManifest();
-    if (m.cli && m.cli.version !== cli) console.log(`Neue CLI ${m.cli.version} verfügbar: curl -fsSL https://kette.itdone.de/install | sh`);
+    if (m.cli && isNewer(m.cli.version, cli)) console.log(`Neue CLI ${m.cli.version} verfügbar: curl -fsSL https://kette.itdone.de/install | sh`);
   } catch (err) {
     console.log(`HINW  CLI-Version nicht geprüft (${err.message})`);
   }
