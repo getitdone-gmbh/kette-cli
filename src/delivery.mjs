@@ -17,6 +17,7 @@ const MESSAGES = {
   wrong_offer: () => 'Dieser Schlüssel gehört zu einem anderen Angebot, nicht zur Kette. Den Schlüssel aus der Kaufbestätigung der Kette (Solo oder Team) verwenden.',
   device_limit: (body) => `Die Gerätegrenze dieser Lizenz ist erreicht${seatsText(body.seats)}. Ein altes Gerät gibt der Support frei, dafür ${SUPPORT}. Für mehr Geräte gibt es die Team-Lizenz.`,
   rate_limited: () => 'Zu viele Anfragen in kurzer Zeit. Eine Minute warten und dann erneut versuchen.',
+  unavailable: () => `Der Lieferdienst kann das Enterprise-Paket gerade nicht bereitstellen. In ein paar Minuten erneut versuchen, bleibt es dabei, ${SUPPORT}. Die Community-Edition bleibt nutzbar.`,
 };
 
 export class DeliveryError extends Error {
