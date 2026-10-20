@@ -1,5 +1,5 @@
 #!/bin/sh
-# kette Installer: lädt die CLI, prüft die Prüfsumme und legt sie unter ~/.kette ab. Kein sudo, keine Cloud-Aktionen.
+# kette Installer: lädt die CLI, prüft die Prüfsumme, legt sie unter ~/.kette ab und ergänzt den PATH. Kein sudo, keine Cloud-Aktionen.
 set -eu
 
 MIRROR="${KETTE_MIRROR:-https://kette.itdone.de/dl}"
@@ -7,6 +7,41 @@ KETTE_HOME="${KETTE_HOME:-$HOME/.kette}"
 
 say() { printf '%s\n' "$*"; }
 fail() { printf 'kette: %s\n' "$*" >&2; exit 1; }
+
+# Startdatei der Login-Shell: zsh, bash, sonst ~/.profile
+rc_file() {
+  case "$(basename "${SHELL:-sh}")" in
+    zsh) printf '%s\n' "$HOME/.zshrc" ;;
+    bash) printf '%s\n' "$HOME/.bashrc" ;;
+    *) printf '%s\n' "$HOME/.profile" ;;
+  esac
+}
+
+# Trägt das bin-Verzeichnis in die Startdatei ein, nur wenn es fehlt; KETTE_NO_MODIFY_PATH=1 lässt alles unverändert
+add_to_path() {
+  BIN="$KETTE_HOME/bin"
+  if [ "$BIN" = "$HOME/.kette/bin" ]; then LINE='export PATH="$HOME/.kette/bin:$PATH"'
+  else LINE="export PATH=\"$BIN:\$PATH\""; fi
+  RC=$(rc_file)
+  if [ -f "$RC" ] && grep -qF "$LINE" "$RC"; then return 0; fi
+  case ":$PATH:" in *":$BIN:"*) return 0 ;; esac
+  if [ "${KETTE_NO_MODIFY_PATH:-}" = "1" ]; then
+    say ""
+    say "PATH nicht geändert (KETTE_NO_MODIFY_PATH=1). Von Hand ergänzen, z. B. in $RC:"
+    say "  $LINE"
+    return 0
+  fi
+  if ! { printf '\n# kette\n%s\n' "$LINE" >> "$RC"; } 2>/dev/null; then
+    say ""
+    say "$RC ist nicht beschreibbar. Von Hand ergänzen:"
+    say "  $LINE"
+    return 0
+  fi
+  say ""
+  say "PATH ergänzt in $RC:"
+  say "  $LINE"
+  say "Neues Terminal öffnen oder einmal ausführen: . \"$RC\""
+}
 
 command -v node >/dev/null 2>&1 || fail "Node.js 20 oder neuer fehlt. Installieren über https://nodejs.org und erneut starten."
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
@@ -43,14 +78,7 @@ chmod +x "$DEST/bin/kette.mjs"
 ln -sf "$DEST/bin/kette.mjs" "$KETTE_HOME/bin/kette"
 
 say "Installiert: $KETTE_HOME/bin/kette ($VERSION)"
-case ":$PATH:" in
-  *":$KETTE_HOME/bin:"*) ;;
-  *)
-    say ""
-    say "Noch in den PATH aufnehmen, z. B. in ~/.zshrc oder ~/.bashrc:"
-    say "  export PATH=\"$KETTE_HOME/bin:\$PATH\""
-    ;;
-esac
+add_to_path
 say ""
 say "Weiter mit:"
 say "  kette init mein-projekt   neues Projekt"

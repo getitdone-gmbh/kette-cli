@@ -31,8 +31,12 @@ try {
   Write-Host "Installiert: $bin\kette.cmd ($($manifest.cli.version))"
   $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
   if (-not ($userPath -split ';' | Where-Object { $_ -eq $bin })) {
-    [Environment]::SetEnvironmentVariable('Path', "$bin;$userPath", 'User')
-    Write-Host "PATH ergänzt um $bin (neues Terminal öffnen)."
+    if ($env:KETTE_NO_MODIFY_PATH -eq '1') {
+      Write-Host "PATH nicht geändert (KETTE_NO_MODIFY_PATH=1). Von Hand $bin in den PATH des Benutzers aufnehmen."
+    } else {
+      [Environment]::SetEnvironmentVariable('Path', "$bin;$userPath", 'User')
+      Write-Host "PATH ergänzt um $bin (neues Terminal öffnen)."
+    }
   }
   Write-Host ''
   Write-Host 'Weiter mit:'
