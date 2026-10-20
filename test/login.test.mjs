@@ -35,7 +35,10 @@ before(async () => {
       const sum = b.key === KEYS.badsum ? '0'.repeat(64) : bundles[current].sha256;
       return json(res, 200, { edition: 'enterprise', version: current, url: `${server.url}/install/download/${current}`, sha256: sum, expires_at: UNTIL, updates_until: UNTIL, seats: { used: 1, max: 3 } });
     }
-    if (url.pathname === '/install/latest') return json(res, 200, { version: current, available: current, updates_until: UNTIL });
+    if (url.pathname === '/install/latest') {
+      if (req.method !== 'POST') return json(res, 405, { error: 'method_not_allowed' });
+      return json(res, 200, { version: current, available: current, updates_until: UNTIL });
+    }
     const m = url.pathname.match(/^\/install\/download\/(.+)$/);
     if (m && bundles[m[1]]) { res.writeHead(200, { 'content-type': 'application/gzip' }); return res.end(bundles[m[1]].buf); }
     if (m && m[1] === 'expired') return json(res, 410, {});

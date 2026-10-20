@@ -28,13 +28,15 @@ Antworten:
 - `403` `{ "error": "wrong_offer" }` (Schlüssel gehört nicht zur Familie kette)
 - `429` `{ "error": "device_limit", "seats": { "used": 3, "max": 3 } }`
 - `503` `{ "error": "unavailable" }` (Paketquelle nicht erreichbar oder keine passende Version vorhanden)
-- Begrenzung gegen Raten: höchstens 10 Anfragen pro Minute je Lizenzschlüssel und 60 je gemeldeter IP, dann `429 { "error": "rate_limited" }`. (Die Plattform liefert nur Node-Adressen, deshalb führt der Schlüssel.)
+- Begrenzung gegen Raten: höchstens 10 Anfragen pro Minute je Lizenzschlüssel; fehlgeschlagene Anfragen (bad_request, invalid_key) zählen zusätzlich mit höchstens 60 pro Minute je gemeldeter IP, dann `429 { "error": "rate_limited" }`. (Die Plattform liefert nur Node-Adressen, deshalb führt der Schlüssel.)
 
 ### GET /install/download/:token
 Streamt das Paket (`application/gzip`). Abgelaufener oder falscher Token: `410` bzw. `404`.
 
-### GET /install/latest?key=…&device=…
-`200` `{ "version": "…" (neueste Version überhaupt), "available": "…", "updates_until": "…", "changelog": "…" }`. `available` ist die neueste Version, die dieser Schlüssel bekommt. Gleiche Fehlercodes wie oben.
+### POST /install/latest
+Anfrage (JSON): `{ "key": "CDP-…", "device": "<uuid>" }` (POST, damit der Schlüssel nicht in Zugriffslogs von Proxys landet; GET antwortet 405).
+
+`200` `{ "version": "…" (neueste Version überhaupt), "available": "…", "updates_until": "…", "changelog": "…" }`. `available` ist die neueste Version, die dieser Schlüssel bekommt. Registriert kein neues Gerät (nur `/install/token` belegt Geräte). Gleiche Fehlercodes wie oben.
 
 ## Woher die Pakete kommen
 `kette-cli` (`npm run release`) lädt `kette-enterprise-<version>.tgz` plus `kette-enterprise.json` (`{version, sha256, published_at}`) als Asset in ein GitHub-Release des privaten Repos `alexfriedl/kette-engineering` (Tag `v<version>`). chain-delivery liest die Releases mit `GITHUB_TOKEN`, wie heute bei `claude-design-agent-pack`. Nie öffentlich hosten.

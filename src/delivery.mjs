@@ -60,9 +60,13 @@ export function requestToken({ key, device, cli }) {
   });
 }
 
+// POST statt Query-String, damit der Schlüssel nicht in Zugriffslogs landet
 export function latest({ key, device }) {
-  const q = new URLSearchParams({ key, device });
-  return call(`${delivery()}/install/latest?${q}`);
+  return call(`${delivery()}/install/latest`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ key, device }),
+  });
 }
 
 // Geräte-ID wird einmal erzeugt und bleibt, damit ein erneuter Login kein neues Gerät belegt
