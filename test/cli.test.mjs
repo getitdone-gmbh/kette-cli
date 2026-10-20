@@ -1,13 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { tmp, write } from './helpers.mjs';
 import { detectPlatform, detectStack } from '../src/detect.mjs';
 import { describe as describePlan, apply } from '../src/plan.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kette-test-'));
-const write = (dir, f, c) => { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); };
 
 test('erkennt Next.js und NestJS mit Prisma im Monorepo', () => {
   const d = tmp();

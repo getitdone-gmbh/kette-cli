@@ -1,13 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fetchManifest, installBundle, installedBundle, readState } from './manifest.mjs';
+import { fetchManifest, installBundle, installedBundle, readState, setActiveBundle } from './manifest.mjs';
 import { detectPlatform, detectStack } from './detect.mjs';
 import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
 import { hasClaude, installPlugins, installedPlugins } from './claude.mjs';
-import { credentialsFile, home, mirror } from './paths.mjs';
+import { credentialsFile, delivery, home, mirror } from './paths.mjs';
+import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, pluginsFor } from './editions.mjs';
+import { credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -63,7 +65,8 @@ Befehle:
   kette doctor          Projekt und Einrichtung prüfen (--ci für Pipelines)
   kette update          Neueste Version des Regelwerks laden
   kette profile         Projektprofil anzeigen
-  kette login <key>     Kette-Lizenz hinterlegen (schaltet Plattform-Profile und Code-Reviewer frei)
+  kette login <key>     Enterprise (Die Kette) freischalten: Plattform-Profile, Prüfungen, Code-Reviewer
+  kette logout          Lizenzschlüssel und Enterprise-Paket von diesem Rechner entfernen
   kette version
 
 Optionen:
@@ -91,13 +94,12 @@ function parse(argv) {
   return opts;
 }
 
-const tierOf = () => (fs.existsSync(credentialsFile()) && installedBundle('kette') ? 'kette' : 'free');
 const listArg = (s) => (s ? s.split(',').map((x) => x.trim()).filter(Boolean) : null);
 
 async function ensureBundle(tier) {
   const have = installedBundle(tier);
   if (have) return have.dir;
-  console.log(`Lade Regelwerk (${tier}) von ${mirror()} ...`);
+  console.log(`Lade Regelwerk (${editionLabel(tier)}) von ${mirror()} ...`);
   return installBundle(await fetchManifest(), tier);
 }
 
@@ -138,7 +140,7 @@ function agentNote() {
 Dieses Projekt folgt dem Regelwerk der Kette. Agenten lesen zuerst \`.kette/profile.json\`.
 
 - Regeln in dieser Reihenfolge anwenden: Overlays der Firma, Plattform, Stack, Architektur-Muster, Kern.
-- Skills: \`engineering-rules\`, \`architecture-patterns\`, mit Kette-Lizenz zusätzlich \`platform-profile\` und der Agent \`code-reviewer\`.
+- Skills: \`engineering-rules\`, \`architecture-patterns\`, in der Edition Enterprise (Die Kette) zusätzlich \`platform-profile\` und der Agent \`code-reviewer\`.
 - Schwer umkehrbare Entscheidungen als ADR unter \`docs/adr/\` festhalten (Vorlage \`docs/adr/0000-vorlage.md\`).
 - Eine Kern-Regel gilt, solange kein ADR sie ausdrücklich außer Kraft setzt.
 - Infrastruktur nur als Code erzeugen und mit plan bzw. what-if prüfen. apply, Deploy und zerstörende Migrationen führt ein Mensch aus.
@@ -152,7 +154,7 @@ function planFor(root, profile, bundleDir, tier) {
     { path: 'CLAUDE.md', mode: 'append', marker: '@.kette/README.md', content: '@.kette/README.md\n', note: 'Verweis auf die Kette-Regeln' },
     { path: 'docs/adr/0000-vorlage.md', content: fs.readFileSync(path.join(bundleDir, 'rules', 'architecture', 'adr-vorlage.md'), 'utf8') },
   ];
-  if (tier === 'kette') {
+  if (tier === ENTERPRISE) {
     const tpl = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'templates');
     for (const [from, to] of PLATFORM_FILES[profile.platform.id] || []) {
       const src = path.join(tpl, from);
@@ -182,9 +184,9 @@ async function setup(root, opts, isNew) {
   if (errors.length) throw new Error(`Profil ungültig: ${errors.join('; ')}`);
 
   const described = describe(planFor(root, profile, bundleDir, tier), root);
-  console.log(`\n${opts.dryRun ? 'Würde anlegen' : 'Plan'} in ${path.resolve(root)} (Stufe ${tier}):`);
+  console.log(`\n${opts.dryRun ? 'Würde anlegen' : 'Plan'} in ${path.resolve(root)} (Edition ${editionLabel(tier)}):`);
   print(described);
-  if (tier === 'free') console.log('\n  Plattform-Vorlagen, Prüfungen und Code-Reviewer gibt es mit der Kette-Lizenz (kette login).');
+  if (tier === COMMUNITY) console.log('\n  Plattform-Vorlagen, Prüfungen und Code-Reviewer gibt es in der Edition Enterprise (Die Kette): kette login <key>');
   else if (!PLATFORM_FILES[profile.platform.id]) console.log(`\n  Für ${profile.platform.id} gibt es noch keine Vorlagen (Status: ${platformStatus(bundleDir, profile.platform.id) || 'unbekannt'}).`);
   if (opts.dryRun) return 0;
   if (!(await confirm('\nSo anlegen?', opts.yes))) { console.log('Abgebrochen, nichts geschrieben.'); return 1; }
@@ -194,10 +196,11 @@ async function setup(root, opts, isNew) {
   console.log('Dateien geschrieben.');
 
   if (!opts.noPlugins) {
-    const plugins = tier === 'kette' ? ['kette-engineering-core', 'kette-engineering'] : ['kette-engineering-core'];
-    const r = installPlugins(bundleDir, plugins);
+    const plugins = pluginsFor(tier);
+    const link = setActiveBundle(bundleDir);
+    const r = installPlugins(link, plugins);
     if (r.ok) console.log(`Claude-Code-Plugins installiert: ${plugins.join(', ')}`);
-    else console.log(`Plugins nicht installiert (${r.reason}). Von Hand: claude plugin marketplace add ${bundleDir} && claude plugin install kette-engineering-core@kette-engineering`);
+    else console.log(`Plugins nicht installiert (${r.reason}). Von Hand: claude plugin marketplace add ${link} && claude plugin install kette-engineering-core@kette-engineering`);
   }
   console.log('\nFertig. Prüfen mit: kette doctor');
   return 0;
@@ -227,21 +230,24 @@ async function doctor(root, opts) {
   }
   const tier = tierOf();
   const bundle = installedBundle(tier);
-  line(Boolean(bundle), `Regelwerk installiert (Stufe ${tier}${bundle ? `, Version ${bundle.version}` : ''})`);
-  const profile = readProfile(root);
+  edition(tier, { line, warn });
+  line(Boolean(bundle), `Regelwerk installiert (${editionLabel(tier)}${bundle ? `, Version ${bundle.version}` : ''})`);
+  const raw = readProfile(root);
+  const profile = normalizeProfile(raw);
   line(Boolean(profile), '.kette/profile.json vorhanden');
+  if (raw && isLegacyTier(raw.tier)) warn(`Profil nutzt den alten Wert tier "${raw.tier}", gelesen als "${profile.tier}". In .kette/profile.json auf "${profile.tier}" ändern.`);
   if (profile && bundle) {
     const errs = validate(loadSchema(bundle.dir), profile);
     line(errs.length === 0, `Profil gültig${errs.length ? `: ${errs.join('; ')}` : ''}`);
     const status = platformStatus(bundle.dir, profile.platform?.id);
     if (status === 'vorschau') warn(`Plattform ${profile.platform.id} ist noch Vorschau (ohne belegtes Referenzprojekt)`);
-    if (profile.tier === 'kette' && tier !== 'kette') warn('Profil verlangt die Kette-Lizenz, hier ist nur der freie Kern installiert');
+    if (profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn('Profil verlangt die Edition Enterprise (Die Kette), hier ist nur Community installiert. Freischalten mit: kette login <key>');
     for (const o of profile.overlays || []) warn(`Overlay ${o.source} wird von Agenten geladen, hier nicht geprüft`);
   }
   if (!opts.ci && bundle && hasClaude()) {
     const list = installedPlugins();
     line(/kette-engineering-core/.test(list), 'Plugin kette-engineering-core installiert');
-    if (tier === 'kette') line(/kette-engineering@/.test(list), 'Plugin kette-engineering installiert');
+    if (tier === ENTERPRISE) line(/kette-engineering@/.test(list), 'Plugin kette-engineering installiert');
   }
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md verweist auf die Kette-Regeln');
@@ -250,8 +256,9 @@ async function doctor(root, opts) {
 }
 
 async function update(opts) {
+  if (credentialsStatus() === 'valid') return updateEnterprise(opts, VERSION);
   const manifest = await fetchManifest();
-  const tier = tierOf();
+  const tier = COMMUNITY;
   const have = installedBundle(tier);
   if (have?.version === manifest.version) { console.log(`Aktuell (Version ${manifest.version}).`); return 0; }
   console.log(`Neue Version ${manifest.version}${have ? ` (installiert: ${have.version})` : ''}.`);
@@ -259,7 +266,7 @@ async function update(opts) {
   if (opts.dryRun) return 0;
   const dir = await installBundle(manifest, tier);
   if (!opts.noPlugins) {
-    const r = installPlugins(dir, tier === 'kette' ? ['kette-engineering-core', 'kette-engineering'] : ['kette-engineering-core']);
+    const r = installPlugins(setActiveBundle(dir), pluginsFor(tier));
     if (!r.ok) console.log(`Plugins nicht aktualisiert (${r.reason}).`);
   }
   if (manifest.cli && manifest.cli.version !== VERSION) console.log(`Neue CLI ${manifest.cli.version} verfügbar: curl -fsSL https://kette.itdone.de/install | sh`);
@@ -267,10 +274,19 @@ async function update(opts) {
   return 0;
 }
 
-async function login(key) {
-  if (!key || !/^CDP(-[A-Z0-9]{5}){4}$/.test(key)) throw new Error('Lizenzschlüssel im Format CDP-XXXXX-XXXXX-XXXXX-XXXXX angeben');
-  console.log('Die Freischaltung per Lizenzschlüssel kommt mit dem nächsten Update. Bis dahin kommen die Kette-Inhalte als Paket per Mail.');
-  return 2;
+// Edition ohne Netz aus Zugangsdaten und gespeichertem Login-Stand, damit doctor --ci offline bleibt
+function edition(tier, { line, warn }) {
+  const creds = credentialsStatus();
+  if (creds === 'broken') line(false, `Zugangsdaten in ${credentialsFile()} beschädigt. Neu anmelden: kette logout && kette login <key>`);
+  if (tier === COMMUNITY) {
+    if (creds === 'valid') line(false, 'Lizenz hinterlegt, aber das Enterprise-Paket fehlt. Nachladen mit: kette update');
+    else line(true, `Edition ${editionLabel(COMMUNITY)}`);
+    return;
+  }
+  const state = loginState() || {};
+  line(true, `Edition ${editionLabel(ENTERPRISE)}, Version ${installedBundle(ENTERPRISE).version}, Updates bis ${formatDate(state.updates_until)}`);
+  if (state.updates_until && new Date(state.updates_until) < new Date()) warn(`Update-Zeitraum endete am ${formatDate(state.updates_until)}. Die installierte Version bleibt nutzbar, neue Versionen gibt es mit einer Verlängerung.`);
+  if (process.platform !== 'win32' && (fs.statSync(credentialsFile()).mode & 0o077)) warn(`${credentialsFile()} ist für andere lesbar. Beheben mit: chmod 600 ${credentialsFile()}`);
 }
 
 export async function main(argv) {
@@ -288,8 +304,9 @@ export async function main(argv) {
     if (cmd === 'doctor') return await doctor('.', opts);
     if (cmd === 'update') return await update(opts);
     if (cmd === 'profile') { const p = readProfile('.'); console.log(p ? JSON.stringify(p, null, 2) : 'Kein .kette/profile.json in diesem Ordner.'); return p ? 0 : 1; }
-    if (cmd === 'login') return await login(arg);
-    if (cmd === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), ...readState() }, null, 2)); return 0; }
+    if (cmd === 'login') return await login(arg, opts, VERSION);
+    if (cmd === 'logout') return logout(opts);
+    if (cmd === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...readState() }, null, 2)); return 0; }
     console.error(`Unbekannter Befehl: ${cmd}\n`);
     console.log(HELP);
     return 1;
