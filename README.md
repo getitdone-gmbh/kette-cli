@@ -24,15 +24,19 @@ Im Projektprofil steht die Edition im Feld `tier`: `community` oder `enterprise`
 ## Befehle
 | Befehl | Zweck |
 |---|---|
-| `kette init [ordner]` | neues Projekt: Profil, Agenten-Hinweise, ADR-Vorlage, Plugins; in Enterprise auch CI-, Docker- und Prüfvorlagen |
-| `kette add` | bestehendes Repo anbinden: erkennt Stack und Plattform, überschreibt nichts, zeigt den Plan |
-| `kette doctor` | Projekt und Einrichtung prüfen, zeigt Edition, Version und Updates bis; `--ci` für Pipelines, ohne Netz |
+| `kette init [ordner]` | neues Projekt: Profil, Agenten-Hinweise, ADR-Vorlage, Plugins; in Enterprise auch CI-, Docker- und Prüfvorlagen. Endet mit einer Zusammenfassung: was im Projekt entstand, was in Claude Code aktiv ist, nächste Schritte |
+| `kette add` | bestehendes Repo anbinden: erkennt Stack und Plattform, überschreibt nichts, zeigt den Plan und weist auf eine veraltete `.kette/README.md` hin |
+| `kette doctor` | Projekt und Einrichtung prüfen, zeigt Edition, Version, Updates bis und wo Regelwerk und Plugins liegen; `--ci` für Pipelines, ohne Netz |
+| `kette rules [thema]` | installierte Regeln ohne Netz: Übersicht mit Kern-Regeln und Architektur-Mustern, in Enterprise auch Stack- und Plattform-Profile mit Status; mit Thema die Regel lesen, z. B. `kette rules fehler`, `kette rules modular-monolith`; `--path` zeigt die Dateipfade |
 | `kette update` | neues Regelwerk laden und Plugins aktualisieren (Community über das Manifest, Enterprise über den Lieferdienst) |
 | `kette profile` | Projektprofil anzeigen |
 | `kette login <key>` | Enterprise freischalten: Schlüssel prüfen, Paket laden und prüfen, Plugins installieren |
 | `kette logout` | Schlüssel und Enterprise-Paket von diesem Rechner entfernen (das Gerät gibt der Support frei) |
 
-Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`.
+Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`.
+
+## Wo die Regeln liegen
+Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`, die Verweiszeile in `CLAUDE.md` und die ADR-Vorlage. Das Regelwerk selbst liegt auf dem Rechner unter `~/.kette/bundles/active/` und ist in Claude Code als Plugin `kette-engineering-core` aktiv (Skills `engineering-rules`, `architecture-patterns`), in Enterprise zusätzlich `kette-engineering` (`platform-profile`, `code-reviewer`). Ansehen mit `kette rules`.
 
 ## Was der Installer tut
 - Prüft Node.js 20 oder neuer, git und tar.
