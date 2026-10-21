@@ -25,6 +25,11 @@ test('fehlende, doppelte oder vertauschte Markierungen ändern nichts', () => {
   for (const c of cases) assert.equal(renewNote(c, note), null, JSON.stringify(c));
 });
 
+test('CRLF-Datei: nur der neue Block bekommt CRLF, Zeilen außerhalb bleiben unverändert', () => {
+  const next = renewNote(`Kopf\n${BEGIN}\r\nalt\r\n${END}\r\nNotiz LF\nNotiz CRLF\r\n`, note);
+  assert.equal(next, `Kopf\n${note.replace(/\n/g, '\r\n')}Notiz LF\nNotiz CRLF\r\n`);
+});
+
 test('CRLF bleibt CRLF, auch beim Erkennen der alten Fassung', () => {
   const next = renewNote(`Kopf\r\n${BEGIN}\r\nalt\r\n${END}\r\nNotiz\r\n`, note);
   assert.equal(next, `Kopf\r\n${note.replace(/\n/g, '\r\n')}Notiz\r\n`);

@@ -71,7 +71,10 @@ function tarball(dir, file) {
   const entries = ['.', ...walk(dir).map((f) => `./${path.relative(dir, f).split(path.sep).join('/')}`).sort()];
   for (const e of entries) fs.utimesSync(path.join(dir, e), sourceTime, sourceTime);
   const tar = execFileSync('tar', [...TAR_FLAGS, '--no-recursion', '-cf', '-', '-C', dir, '-T', '-'], { input: entries.join('\n') + '\n', maxBuffer: 1 << 30, env: { ...process.env, COPYFILE_DISABLE: '1' } });
-  fs.writeFileSync(file, zlib.gzipSync(tar, { level: 9 }));
+  const gz = zlib.gzipSync(tar, { level: 9 });
+  // Byte 9 im gzip-Kopf nennt das Betriebssystem; fest auf 255 (unbekannt), damit macOS und Linux dieselben Bytes liefern
+  gz[9] = 255;
+  fs.writeFileSync(file, gz);
 }
 
 function pack(name, entries, extra = {}) {
@@ -131,10 +134,11 @@ const before = { community: readJson(path.join(dist, 'manifest.json')), enterpri
 const clash = [
   before.community?.version === version && before.community.bundles?.community?.sha256 !== manifest.bundles.community.sha256 && 'Community',
   before.enterprise?.version === version && before.enterprise.sha256 !== enterpriseMeta.sha256 && 'Enterprise',
+  before.community?.cli?.version === cliVersion && before.community.cli.sha256 !== manifest.cli.sha256 && `CLI ${cliVersion}`,
 ].filter(Boolean);
 if (clash.length) {
   fs.rmSync(out, { recursive: true, force: true });
-  throw new Error(`dist enthält schon Version ${version} mit anderem Inhalt (${clash.join(', ')}). Erst committen, damit eine neue Version entsteht, oder dist bewusst löschen.`);
+  throw new Error(`dist enthält schon Version ${version} mit anderem Inhalt (${clash.join(', ')}). Erst committen (bei der CLI die Version in package.json erhöhen), damit eine neue Version entsteht, oder dist bewusst löschen.`);
 }
 
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');

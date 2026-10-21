@@ -67,23 +67,18 @@ ${END}
 const count = (text, mark) => text.split(mark).length - 1;
 
 // Neuer Dateiinhalt mit erneuertem Block; null, wenn die Markierungen nicht genau einmal und in richtiger Reihenfolge stehen
-// und die Datei keine unveränderte alte Fassung ist. Zeilenenden der Datei (CRLF oder LF) bleiben erhalten
+// und die Datei keine unveränderte alte Fassung ist. Nutzt die Datei CRLF, bekommt der neue Block CRLF; Zeilen außerhalb bleiben Byte für Byte
 export function renewNote(current, note) {
-  const crlf = current.includes('\r\n');
-  const text = crlf ? current.replace(/\r\n/g, '\n') : current;
-  const next = renewText(text, note);
-  if (next === null || !crlf) return next;
-  return next.replace(/\n/g, '\r\n');
-}
-
-function renewText(text, note) {
-  if (count(text, BEGIN_MARK) === 1 && count(text, END) === 1) {
-    const begin = text.search(BEGIN_LINE);
-    const end = text.indexOf(END);
+  const block = current.includes('\r\n') ? note.replace(/\n/g, '\r\n') : note;
+  if (count(current, BEGIN_MARK) === 1 && count(current, END) === 1) {
+    const begin = current.search(BEGIN_LINE);
+    const end = current.indexOf(END);
     if (begin < 0 || begin > end) return null;
-    const after = end + END.length + (text[end + END.length] === '\n' ? 1 : 0);
-    return text.slice(0, begin) + note + text.slice(after);
+    const rest = current.slice(end + END.length);
+    const eol = rest.startsWith('\r\n') ? 2 : rest.startsWith('\n') ? 1 : 0;
+    return current.slice(0, begin) + block + rest.slice(eol);
   }
-  if (count(text, BEGIN_MARK) || count(text, END)) return null;
-  return LEGACY_NOTES.has(crypto.createHash('sha256').update(text).digest('hex')) ? note : null;
+  if (count(current, BEGIN_MARK) || count(current, END)) return null;
+  const normalized = current.replace(/\r\n/g, '\n');
+  return LEGACY_NOTES.has(crypto.createHash('sha256').update(normalized).digest('hex')) ? block : null;
 }

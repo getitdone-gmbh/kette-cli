@@ -24,13 +24,15 @@ function marketplaces() {
 }
 
 const insideKette = (p) => !path.relative(bundlesDir(), path.resolve(p)).startsWith('..');
-// Plugin-ID als ganzes Wort, damit kette-engineering@kette nicht kette-engineering@kette-engineering trifft
-const listed = (list, id) => new RegExp(`(^|\\s)${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`, 'm').test(list);
+// Plugin-ID als ganzes Wort, damit kette-engineering@kette nicht kette-engineering@kette-engineering trifft; list null (Liste nicht lesbar) trifft nie
+const listed = (list, id) => list !== null && new RegExp(`(^|\\s)${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`, 'm').test(list);
 
-// Erfolg zeigt die Plugin-Liste danach, nicht der Text der Antwort
+// Erfolg zeigt die Plugin-Liste danach, nicht der Text der Antwort; ist die Liste nicht lesbar, entscheidet der Exit-Status
 function uninstall(id) {
   const r = run(['plugin', 'uninstall', id]);
-  return listed(installedPlugins(), id) ? { ok: false, reason: output(r) || `${id} ist nach dem Entfernen noch installiert` } : { ok: true };
+  const list = installedPlugins();
+  const gone = list === null ? r.status === 0 : !listed(list, id);
+  return gone ? { ok: true } : { ok: false, reason: output(r) || `${id} ist nach dem Entfernen noch installiert` };
 }
 
 // Hinweis auf Plugins eines fremden Marketplaces, die zusätzlich zu kette aktiv sind und Skills doppelt zeigen
@@ -78,7 +80,8 @@ export function installPlugins(source, plugins, retire = []) {
   if (moved && !insideKette(known.path)) return { ok: false, reason: `Marketplace ${MARKETPLACE} zeigt auf ${known.path}. Umstellen mit: claude plugin marketplace remove ${MARKETPLACE} && claude plugin marketplace add "${source}"` };
   const list = retire.length ? installedPlugins() : '';
   const retired = [];
-  for (const p of retire.filter((name) => listed(list, pluginId(name)))) {
+  // Ohne lesbare Liste jedes Plugin der anderen Edition zu entfernen versuchen, statt es stillschweigend zu überspringen
+  for (const p of retire.filter((name) => list === null || listed(list, pluginId(name)))) {
     const r = uninstall(pluginId(p));
     if (!r.ok) return r;
     retired.push(pluginId(p));
@@ -121,9 +124,10 @@ export function uninstallPlugin(name) {
   return uninstall(pluginId(name));
 }
 
+// Ausgabe von claude plugin list, null wenn der Aufruf scheitert
 export function installedPlugins() {
   const r = run(['plugin', 'list']);
-  return r.status === 0 ? r.stdout : '';
+  return r.status === 0 ? r.stdout : null;
 }
 
 export const pluginInstalled = (name, list = installedPlugins()) => listed(list, pluginId(name));

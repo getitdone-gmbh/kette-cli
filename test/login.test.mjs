@@ -212,6 +212,30 @@ test('logout entfernt Enterprise-Plugins vor dem Umschalten, prüft per Liste un
   assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'design-system-agents@kette']);
 });
 
+test('logout meldet den Fehler, wenn weder die Plugin-Liste noch das Entfernen gelingt', { skip: process.platform === 'win32' }, async () => {
+  await run('login', KEYS.ok, '--no-plugins');
+  const claude = fakeClaude([], ['kette-engineering-core@kette', ...ENTERPRISE_IDS].join('\n'), {
+    'plugin list': { code: 1, out: 'list kaputt' },
+    'plugin uninstall kette-engineering@kette': { code: 1, out: 'gesperrt' },
+  });
+  let out;
+  try { ({ out } = await run('logout')); } finally { claude.restore(); }
+  assert.match(out, /Plugin kette-engineering nicht entfernt \(gesperrt\)\. Von Hand: claude plugin uninstall kette-engineering@kette/);
+  assert.doesNotMatch(out, /Plugin design-system-agents nicht entfernt/);
+  assert.ok(claude.installed().includes('kette-engineering@kette'));
+});
+
+test('login versucht ui-gesetze auch ohne lesbare Plugin-Liste zu entfernen und meldet ein Scheitern', { skip: process.platform === 'win32' }, async () => {
+  const claude = fakeClaude([], 'ui-gesetze@kette\n', {
+    'plugin list': { code: 1, out: 'list kaputt' },
+    'plugin uninstall ui-gesetze@kette': { code: 1, out: 'gesperrt' },
+  });
+  let out;
+  try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
+  assert.match(out, /Plugins nicht installiert \(gesperrt\)/);
+  assert.ok(!claude.calls().some((c) => c.startsWith('plugin install')));
+});
+
 test('logout installiert Community aus dem lokalen Paket und nennt kette update, wenn ui-gesetze darin fehlt', { skip: process.platform === 'win32' }, async () => {
   const old = path.join(kh, 'bundles', 'community', '0.20261020.7');
   write(old, '.claude-plugin/marketplace.json', '{"name":"kette","plugins":[]}');

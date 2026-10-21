@@ -293,7 +293,8 @@ async function doctor(root, opts) {
   }
   if (!opts.ci && bundle && hasClaude()) {
     const list = installedPlugins();
-    for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installiert`);
+    if (list === null) line(false, 'Plugin-Liste von Claude Code nicht lesbar (claude plugin list scheitert)');
+    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installiert`);
   }
   if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir);
   const md = path.join(root, 'CLAUDE.md');
