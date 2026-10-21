@@ -6,7 +6,7 @@ import { detectPlatform, detectStack } from './detect.mjs';
 import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
-import { hasClaude, installPlugins, installedPlugins } from './claude.mjs';
+import { MARKETPLACE, hasClaude, installPlugins, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, pluginsFor, pluginSummary, isNewer } from './editions.mjs';
 import { rules, tilde } from './rules.mjs';
@@ -151,7 +151,7 @@ Dieses Projekt folgt dem Regelwerk der Kette. Agenten lesen zuerst \`.kette/prof
 
 ## Wo die Regeln liegen
 - Auf diesem Rechner unter \`~/.kette/bundles/active/\`: \`rules/core\`, \`rules/architecture\`, in Enterprise auch \`profiles/\` und \`checks/\`.
-- In Claude Code als Plugin \`kette-engineering-core\` (Skills \`engineering-rules\`, \`architecture-patterns\`), in Enterprise zusätzlich \`kette-engineering\` (\`platform-profile\`, \`code-reviewer\`).
+- In Claude Code als Plugin \`kette-engineering-core@kette\` (Skills \`engineering-rules\`, \`architecture-patterns\`), in Enterprise zusätzlich \`kette-engineering@kette\` (\`platform-profile\`, \`code-reviewer\`).
 - Ansehen mit \`kette rules\`, prüfen mit \`kette doctor\`.
 `;
 }
@@ -210,7 +210,7 @@ async function setup(root, opts, isNew) {
   if (!opts.noPlugins) {
     rulesDir = setActiveBundle(bundleDir);
     plugins = installPlugins(rulesDir, pluginsFor(tier));
-    if (!plugins.ok) console.log(`Plugins nicht installiert (${plugins.reason}). Von Hand: claude plugin marketplace add ${rulesDir} && claude plugin install kette-engineering-core@kette-engineering`);
+    if (!plugins.ok) console.log(`Plugins nicht installiert (${plugins.reason}). Von Hand: claude plugin marketplace add ${rulesDir} && claude plugin install ${pluginId('kette-engineering-core')}`);
   }
   console.log(summary(described, tier, plugins.ok, rulesDir));
   return 0;
@@ -233,7 +233,7 @@ function summary(described, tier, pluginsOk, rulesDir) {
   return [
     '',
     `Fertig. Im Projekt: ${changed.length ? changed.join(', ') : 'nichts geändert, alles schon vorhanden'}`,
-    pluginsOk ? `Regeln aktiv in Claude Code: ${pluginSummary(tier)}` : `Regeln in Claude Code noch nicht aktiv (Plugins: ${pluginSummary(tier)})`,
+    pluginsOk ? `Regeln aktiv in Claude Code: ${pluginSummary(tier, MARKETPLACE)}` : `Regeln in Claude Code noch nicht aktiv (Plugins: ${pluginSummary(tier, MARKETPLACE)})`,
     `Regelwerk auf diesem Rechner: ${tilde(rulesDir)}, ansehen mit: kette rules`,
     'Nächste Schritte:',
     ...steps.map((s, i) => `  ${i + 1}. ${s}`),
@@ -281,8 +281,7 @@ async function doctor(root, opts) {
   }
   if (!opts.ci && bundle && hasClaude()) {
     const list = installedPlugins();
-    line(/kette-engineering-core/.test(list), 'Plugin kette-engineering-core installiert');
-    if (tier === ENTERPRISE) line(/kette-engineering@/.test(list), 'Plugin kette-engineering installiert');
+    for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installiert`);
   }
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md verweist auf die Kette-Regeln');

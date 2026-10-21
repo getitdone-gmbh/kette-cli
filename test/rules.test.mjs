@@ -106,7 +106,7 @@ test('init endet mit Zusammenfassung, .kette/README.md sagt, wo die Regeln liege
   assert.equal(result, 0);
   const tail = out.slice(out.indexOf('Fertig.'));
   assert.match(tail, /^Fertig\. Im Projekt: \.kette\/profile\.json, \.kette\/README\.md, CLAUDE\.md, docs\/adr\/0000-vorlage\.md\n/);
-  assert.match(tail, /Regeln in Claude Code noch nicht aktiv \(Plugins: kette-engineering-core \(engineering-rules, architecture-patterns\)\)/);
+  assert.match(tail, /Regeln in Claude Code noch nicht aktiv \(Plugins: kette-engineering-core@kette \(engineering-rules, architecture-patterns\)\)/);
   assert.match(tail, /ansehen mit: kette rules/);
   assert.match(tail, /1\. kette doctor\n  2\. Claude Code im Projekt öffnen .*\n  3\. kette login <key>/);
   assert.ok(tail.split('\n').length <= 10);
@@ -114,7 +114,7 @@ test('init endet mit Zusammenfassung, .kette/README.md sagt, wo die Regeln liege
   const note = fs.readFileSync(path.join(root, '.kette', 'README.md'), 'utf8');
   assert.match(note, /## Wo die Regeln liegen/);
   assert.match(note, /~\/\.kette\/bundles\/active\//);
-  assert.match(note, /kette-engineering-core/);
+  assert.match(note, /kette-engineering-core@kette/);
   assert.match(note, /kette rules/);
 });
 

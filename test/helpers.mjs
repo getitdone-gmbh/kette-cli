@@ -20,7 +20,7 @@ export function tarball(srcDir, entries = ['.']) {
 // Minimales Regelwerk-Paket mit Marketplace und Schema, reicht für init und doctor
 export function fakeBundle(version) {
   const d = tmp();
-  write(d, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'kette-engineering', version, plugins: [] }));
+  write(d, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'kette', version, plugins: [] }));
   write(d, 'VERSION', version + '\n');
   write(d, 'rules/architecture/adr-vorlage.md', '# ADR\n');
   write(d, 'schema/profile.schema.json', JSON.stringify({
@@ -52,13 +52,15 @@ export async function capture(fn) {
   try { return { result: await fn(), out: lines.join('\n') }; } finally { console.log = orig; }
 }
 
-// Ersetzt claude im PATH durch ein Skript, das Aufrufe protokolliert; list ist die Antwort auf marketplace list --json
-export function fakeClaude(list = []) {
+// Ersetzt claude im PATH durch ein Skript, das Aufrufe protokolliert; list ist die Antwort auf marketplace list --json, plugins die auf plugin list
+export function fakeClaude(list = [], plugins = '') {
   const bin = tmp();
   const log = path.join(bin, 'calls.log');
   const listFile = path.join(bin, 'list.json');
+  const pluginsFile = path.join(bin, 'plugins.txt');
   fs.writeFileSync(listFile, JSON.stringify(list));
-  write(bin, 'claude', `#!/bin/sh\necho "$*" >> "${log}"\ncase "$*" in "plugin marketplace list --json") cat "${listFile}";; esac\nexit 0\n`);
+  fs.writeFileSync(pluginsFile, plugins);
+  write(bin, 'claude', `#!/bin/sh\necho "$*" >> "${log}"\ncase "$*" in "plugin marketplace list --json") cat "${listFile}";; "plugin list") cat "${pluginsFile}";; esac\nexit 0\n`);
   fs.chmodSync(path.join(bin, 'claude'), 0o755);
   const orig = process.env.PATH;
   process.env.PATH = `${bin}${path.delimiter}${orig}`;

@@ -169,22 +169,47 @@ test('login installiert beide Plugins über den festen Pfad des aktiven Pakets',
   assert.equal(fs.realpathSync(link), fs.realpathSync(path.join(kh, 'bundles', 'enterprise', V1)));
   const calls = claude.calls();
   assert.ok(calls.includes(`plugin marketplace add ${link}`));
-  assert.ok(calls.includes('plugin install kette-engineering-core@kette-engineering'));
-  assert.ok(calls.includes('plugin install kette-engineering@kette-engineering'));
+  assert.ok(calls.includes('plugin install kette-engineering-core@kette'));
+  assert.ok(calls.includes('plugin install kette-engineering@kette'));
 });
 
-test('ein Marketplace auf ein altes Paket unter ~/.kette wird umgestellt', { skip: process.platform === 'win32' }, async () => {
-  const claude = fakeClaude([{ name: 'kette-engineering', source: 'directory', path: path.join(kh, 'bundles', 'free', '0.20261020.7') }]);
+test('ein Marketplace kette auf ein altes Paket unter ~/.kette wird umgestellt', { skip: process.platform === 'win32' }, async () => {
+  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: path.join(kh, 'bundles', 'community', '0.20261020.7') }]);
   try { await run('login', KEYS.ok); } finally { claude.restore(); }
   const calls = claude.calls();
-  const rm = calls.indexOf('plugin marketplace remove kette-engineering');
+  const rm = calls.indexOf('plugin marketplace remove kette');
   assert.ok(rm >= 0 && calls.indexOf(`plugin marketplace add ${path.join(kh, 'bundles', 'active')}`) > rm);
 });
 
-test('ein fremder Marketplace gleichen Namens bleibt unangetastet', { skip: process.platform === 'win32' }, async () => {
-  const claude = fakeClaude([{ name: 'kette-engineering', source: 'directory', path: '/repos/kette-engineering' }]);
+test('ein fremder Marketplace kette bleibt unangetastet', { skip: process.platform === 'win32' }, async () => {
+  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: '/repos/kette' }]);
   let out;
   try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
-  assert.match(out, /Plugins nicht installiert \(Marketplace kette-engineering zeigt auf \/repos\/kette-engineering/);
+  assert.match(out, /Plugins nicht installiert \(Marketplace kette zeigt auf \/repos\/kette\./);
   assert.ok(!claude.calls().some((c) => /marketplace (remove|add)|plugin install/.test(c)));
+});
+
+test('Migration: der alte, selbst angelegte Marketplace kette-engineering wird durch kette ersetzt', { skip: process.platform === 'win32' }, async () => {
+  const claude = fakeClaude([{ name: 'kette-engineering', source: 'directory', path: path.join(kh, 'bundles', 'active') }]);
+  let out;
+  try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
+  const calls = claude.calls();
+  const rm = calls.indexOf('plugin marketplace remove kette-engineering');
+  assert.ok(calls.indexOf('plugin uninstall kette-engineering-core@kette-engineering') < rm);
+  assert.ok(calls.indexOf('plugin uninstall kette-engineering@kette-engineering') < rm);
+  assert.ok(rm >= 0 && calls.indexOf(`plugin marketplace add ${path.join(kh, 'bundles', 'active')}`) > rm);
+  assert.ok(calls.includes('plugin install kette-engineering@kette'));
+  assert.doesNotMatch(out, /doppelt/);
+});
+
+test('Migration: kette-engineering auf ein Entwickler-Repo bleibt, kette kommt dazu, Hinweis auf doppelte Skills', { skip: process.platform === 'win32' }, async () => {
+  const plugins = 'Installed plugins:\n\n  ❯ kette-engineering-core@kette-engineering\n    Status: enabled\n';
+  const claude = fakeClaude([{ name: 'kette-engineering', source: 'directory', path: '/repos/kette-engineering' }], plugins);
+  let out;
+  try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
+  const calls = claude.calls();
+  assert.ok(!calls.some((c) => /marketplace remove|uninstall/.test(c)));
+  assert.ok(calls.includes(`plugin marketplace add ${path.join(kh, 'bundles', 'active')}`));
+  assert.ok(calls.includes('plugin install kette-engineering-core@kette'));
+  assert.match(out, /HINW  Marketplace kette-engineering \(\/repos\/kette-engineering\) bleibt unangetastet\. .*Skills erscheinen doppelt\. Deaktivieren mit: claude plugin disable kette-engineering-core@kette-engineering$/m);
 });

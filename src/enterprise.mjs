@@ -3,7 +3,7 @@ import path from 'node:path';
 import { COMMUNITY, ENTERPRISE, editionLabel, pluginsFor, isNewer } from './editions.mjs';
 import { DeliveryError, KEY_PATTERN, deviceId, downloadErrorText, latest, readCredentials, removeCredentials, requestToken, writeCredentials } from './delivery.mjs';
 import { DownloadError, fetchManifest, installEntry, installedBundle, readState, removeState, setActiveBundle, writeState } from './manifest.mjs';
-import { hasClaude, installPlugins, uninstallPlugin } from './claude.mjs';
+import { hasClaude, installPlugins, pluginId, uninstallPlugin } from './claude.mjs';
 import { bundlesDir, credentialsFile, delivery } from './paths.mjs';
 
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
@@ -45,7 +45,7 @@ function plugins(dir, opts) {
   const names = pluginsFor(ENTERPRISE);
   const r = installPlugins(link, names);
   if (r.ok) console.log(`Claude-Code-Plugins installiert: ${names.join(', ')}`);
-  else console.log(`Plugins nicht installiert (${r.reason}). Von Hand: claude plugin marketplace add ${link} && claude plugin install kette-engineering@kette-engineering`);
+  else console.log(`Plugins nicht installiert (${r.reason}). Von Hand: claude plugin marketplace add ${link} && claude plugin install ${pluginId('kette-engineering')}`);
 }
 
 export async function login(rawKey, opts, cli) {
@@ -73,7 +73,7 @@ export function logout(opts) {
   const link = setActiveBundle(community?.dir || null);
   if (!opts.noPlugins && hasClaude()) {
     const r = uninstallPlugin('kette-engineering');
-    if (!r.ok) console.log(`Plugin kette-engineering nicht entfernt (${r.reason}). Von Hand: claude plugin uninstall kette-engineering@kette-engineering`);
+    if (!r.ok) console.log(`Plugin kette-engineering nicht entfernt (${r.reason}). Von Hand: claude plugin uninstall ${pluginId('kette-engineering')}`);
     if (link) installPlugins(link, pluginsFor(COMMUNITY));
   }
   console.log('Abgemeldet. Lizenzschlüssel und Enterprise-Paket sind von diesem Rechner entfernt.');

@@ -18,7 +18,7 @@ const PLUGIN_CONTENTS = {
   'kette-engineering-core': ['engineering-rules', 'architecture-patterns'],
   'kette-engineering': ['platform-profile', 'code-reviewer'],
 };
-export const pluginSummary = (tier) => pluginsFor(tier).map((p) => `${p} (${PLUGIN_CONTENTS[p].join(', ')})`).join(', ');
+export const pluginSummary = (tier, market) => pluginsFor(tier).map((p) => `${p}@${market} (${PLUGIN_CONTENTS[p].join(', ')})`).join(', ');
 
 // Profil aus 0.1.0 mit tier free oder kette auf die neuen Namen bringen, ohne die Datei zu ändern
 export function normalizeProfile(profile) {
