@@ -31,7 +31,9 @@ const listed = (list, id) => list !== null && new RegExp(`(^|\\s)${id.replace(/[
 function uninstall(id) {
   const r = run(['plugin', 'uninstall', id]);
   const list = installedPlugins();
-  const gone = list === null ? r.status === 0 : !listed(list, id);
+  // Antwort von Claude Code, wenn das Plugin schon fehlt: gilt als entfernt
+  const absent = /not found in installed plugins/i.test(output(r));
+  const gone = list === null ? r.status === 0 || absent : !listed(list, id);
   return gone ? { ok: true } : { ok: false, reason: output(r) || `${id} ist nach dem Entfernen noch installiert` };
 }
 

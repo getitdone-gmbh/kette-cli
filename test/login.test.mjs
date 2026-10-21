@@ -236,6 +236,20 @@ test('login versucht ui-gesetze auch ohne lesbare Plugin-Liste zu entfernen und 
   assert.ok(!claude.calls().some((c) => c.startsWith('plugin install')));
 });
 
+test('ohne lesbare Plugin-Liste gilt "not found in installed plugins" als schon entfernt, andere Fehler nicht', { skip: process.platform === 'win32' }, async () => {
+  await run('login', KEYS.ok, '--no-plugins');
+  const missing = (id) => ({ code: 1, out: `✘ Failed to uninstall plugin "${id}": Plugin "${id}" not found in installed plugins` });
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nkette-engineering@kette\n', {
+    'plugin list': { code: 1, out: 'list kaputt' },
+    'plugin uninstall design-system-agents@kette': missing('design-system-agents@kette'),
+    'plugin uninstall design-review-pack@kette': missing('design-review-pack@kette'),
+  });
+  let out;
+  try { ({ out } = await run('logout')); } finally { claude.restore(); }
+  assert.doesNotMatch(out, /nicht entfernt/);
+  assert.ok(!claude.installed().includes('kette-engineering@kette'));
+});
+
 test('logout installiert Community aus dem lokalen Paket und nennt kette update, wenn ui-gesetze darin fehlt', { skip: process.platform === 'win32' }, async () => {
   const old = path.join(kh, 'bundles', 'community', '0.20261020.7');
   write(old, '.claude-plugin/marketplace.json', '{"name":"kette","plugins":[]}');

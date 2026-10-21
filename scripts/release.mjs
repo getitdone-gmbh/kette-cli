@@ -132,13 +132,13 @@ const enterpriseMeta = { version, sha256: hash(enterprise), published_at: new Da
 const readJson = (f) => (fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : null);
 const before = { community: readJson(path.join(dist, 'manifest.json')), enterprise: readJson(path.join(dist, 'private', 'kette-enterprise.json')) };
 const clash = [
-  before.community?.version === version && before.community.bundles?.community?.sha256 !== manifest.bundles.community.sha256 && 'Community',
-  before.enterprise?.version === version && before.enterprise.sha256 !== enterpriseMeta.sha256 && 'Enterprise',
+  before.community?.version === version && before.community.bundles?.community?.sha256 !== manifest.bundles.community.sha256 && `Community-Paket ${version}`,
+  before.enterprise?.version === version && before.enterprise.sha256 !== enterpriseMeta.sha256 && `Enterprise-Paket ${version}`,
   before.community?.cli?.version === cliVersion && before.community.cli.sha256 !== manifest.cli.sha256 && `CLI ${cliVersion}`,
 ].filter(Boolean);
 if (clash.length) {
   fs.rmSync(out, { recursive: true, force: true });
-  throw new Error(`dist enthält schon Version ${version} mit anderem Inhalt (${clash.join(', ')}). Erst committen (bei der CLI die Version in package.json erhöhen), damit eine neue Version entsteht, oder dist bewusst löschen.`);
+  throw new Error(`dist enthält schon dieselbe Version mit anderem Inhalt: ${clash.join(', ')}. Erst committen (bei der CLI die Version in package.json erhöhen), damit eine neue Version entsteht, oder dist bewusst löschen.`);
 }
 
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
