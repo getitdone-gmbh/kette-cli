@@ -98,3 +98,9 @@ test('rules in Enterprise liest Stack- und Plattform-Profile', async () => {
 test('rules ohne installiertes Regelwerk nennt den nächsten Schritt', async () => {
   await assert.rejects(run('rules'), /Kein Regelwerk auf diesem Rechner\. Laden mit: kette init .*kette update/);
 });
+
+test('doctor zeigt, wo Regelwerk und Plugins liegen', async () => {
+  const d = rulebook('community');
+  const { out } = await run('doctor', '--ci');
+  assert.match(out, new RegExp(`INFO  Regelwerk und Plugins liegen in .*${path.basename(path.dirname(d))}`));
+});

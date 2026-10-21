@@ -7,9 +7,9 @@ import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
 import { hasClaude, installPlugins, installedPlugins } from './claude.mjs';
-import { credentialsFile, delivery, home, mirror } from './paths.mjs';
+import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, pluginsFor, isNewer } from './editions.mjs';
-import { rules } from './rules.mjs';
+import { rules, tilde } from './rules.mjs';
 import { credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -236,6 +236,7 @@ async function doctor(root, opts) {
   const bundle = installedBundle(tier);
   edition(tier, { line, warn });
   line(Boolean(bundle), `Regelwerk installiert (${editionLabel(tier)}${bundle ? `, Version ${bundle.version}` : ''})`);
+  if (bundle) console.log(`INFO  Regelwerk und Plugins liegen in ${tilde(fs.existsSync(activeBundleLink()) ? activeBundleLink() : bundle.dir)}`);
   const raw = readProfile(root);
   const profile = normalizeProfile(raw);
   line(Boolean(profile), '.kette/profile.json vorhanden');
