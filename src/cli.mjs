@@ -12,6 +12,8 @@ import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, no
 import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
 import { credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
+import { SCOPE } from './npmrc.mjs';
+import { ciToken, figma, npmChecks, scopeLine } from './npm-access.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -69,7 +71,10 @@ Befehle:
   kette rules [thema]   Installierte Regeln zeigen, mit Thema die Regel lesen (--path für Dateipfade)
   kette profile         Projektprofil anzeigen
   kette login <key>     Enterprise (Die Kette) freischalten: Agenten, Gates, Plattform-Profile, Prüfungen
-  kette logout          Lizenzschlüssel und Enterprise-Paket von diesem Rechner entfernen
+  kette logout          Lizenzschlüssel, Enterprise-Paket und npm-Zugang von diesem Rechner entfernen
+  kette token ci create <name> | list | revoke <id>
+                        CI-Tokens für npm ci in Pipelines (Solo 2, Team 5, belegen kein Gerät)
+  kette figma           Aktuelles Figma-Release der Kette laden (--out ordner)
   kette version
 
 Optionen:
@@ -80,6 +85,9 @@ Optionen:
   --patterns a,b        Muster festlegen
   --no-plugins          Claude-Code-Plugins nicht installieren
   --path                Bei kette rules die Dateipfade statt des Inhalts zeigen
+  --no-npm              Bei kette login und update den npm-Zugang nicht einrichten
+  --npm-replace         Eine vorhandene @getitdone-gmbh-Zeile in ~/.npmrc auskommentieren und die Kette eintragen
+  --out ordner          Zielordner für kette figma
 
 Der Installer legt nie Cloud-Ressourcen an und deployt nichts. Infrastruktur entsteht als Code im Repo.`;
 
@@ -92,7 +100,9 @@ function parse(argv) {
     else if (a === '--no-plugins') opts.noPlugins = true;
     else if (a === '--ci') opts.ci = true;
     else if (a === '--path') opts.path = true;
-    else if (['--stack', '--platform', '--patterns', '--name'].includes(a)) opts[a.slice(2)] = argv[++i];
+    else if (a === '--no-npm') opts.noNpm = true;
+    else if (a === '--npm-replace') opts.npmReplace = true;
+    else if (['--stack', '--platform', '--patterns', '--name', '--out'].includes(a)) opts[a.slice(2)] = argv[++i];
     else if (a === '--help' || a === '-h') opts.help = true;
     else opts._.push(a);
   }
@@ -174,6 +184,8 @@ function planFor(root, profile, bundleDir, tier, noteTier) {
     { path: 'docs/adr/0000-vorlage.md', content: fs.readFileSync(path.join(bundleDir, 'rules', 'architecture', 'adr-vorlage.md'), 'utf8') },
   ];
   if (tier === ENTERPRISE) {
+    // nur die Scope-Zeile, nie ein Token: die Datei darf ins Repo, der Token kommt aus ~/.npmrc oder dem CI-Secret
+    plan.push({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'Design-System-Pakete über die Kette, ohne Token' });
     const tpl = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'templates');
     for (const [from, to] of PLATFORM_FILES[profile.platform.id] || []) {
       const src = path.join(tpl, from);
@@ -297,6 +309,7 @@ async function doctor(root, opts) {
     else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installiert`);
   }
   if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir);
+  if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md verweist auf die Kette-Regeln');
   console.log(problems ? `\n${problems} Punkt(e) offen` : '\nalles in Ordnung');
@@ -384,7 +397,13 @@ export async function main(argv) {
     }
     if (cmd === 'profile') { const p = readProfile('.'); console.log(p ? JSON.stringify(p, null, 2) : 'Kein .kette/profile.json in diesem Ordner.'); return p ? 0 : 1; }
     if (cmd === 'login') return await login(arg, opts, VERSION);
-    if (cmd === 'logout') return logout(opts);
+    if (cmd === 'logout') return await logout(opts);
+    if (cmd === 'token') {
+      const [, kind, action, value] = opts._;
+      if (kind !== 'ci') throw new Error('Aufruf: kette token ci create <bezeichnung> | list | revoke <id>');
+      return await ciToken(action, value);
+    }
+    if (cmd === 'figma') return await figma(opts);
     if (cmd === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...readState() }, null, 2)); return 0; }
     console.error(`Unbekannter Befehl: ${cmd}\n`);
     console.log(HELP);

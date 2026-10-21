@@ -6,6 +6,10 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 export const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kette-test-'));
+
+// Tests schreiben nie in die echte ~/.npmrc
+process.env.NPM_CONFIG_USERCONFIG = path.join(tmp(), 'user.npmrc');
+delete process.env.npm_config_userconfig;
 export const write = (dir, f, c) => { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); };
 export const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
@@ -17,9 +21,10 @@ export function tarball(srcDir, entries = ['.']) {
   return { buf, sha256: sha256(buf) };
 }
 
-// Minimales Regelwerk-Paket mit Marketplace und Schema, reicht für init und doctor
-export function fakeBundle(version, plugins = ['kette-engineering-core', 'ui-gesetze', 'kette-engineering', 'design-system-agents', 'design-review-pack']) {
+// Minimales Regelwerk-Paket mit Marketplace und Schema, reicht für init und doctor; extra sind weitere Dateien (Pfad: Inhalt)
+export function fakeBundle(version, plugins = ['kette-engineering-core', 'ui-gesetze', 'kette-engineering', 'design-system-agents', 'design-review-pack'], extra = {}) {
   const d = tmp();
+  for (const [f, c] of Object.entries(extra)) write(d, f, c);
   write(d, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'kette', version, plugins: [] }));
   write(d, 'VERSION', version + '\n');
   write(d, 'rules/architecture/adr-vorlage.md', '# ADR\n');

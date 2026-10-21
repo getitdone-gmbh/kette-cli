@@ -5,6 +5,7 @@ import { DeliveryError, KEY_PATTERN, deviceId, downloadErrorText, latest, readCr
 import { DownloadError, fetchManifest, installEntry, installedBundle, readState, removeState, setActiveBundle, writeState } from './manifest.mjs';
 import { editionHints, hasClaude, installEdition, pluginId, uninstallPlugin } from './claude.mjs';
 import { bundlesDir, credentialsFile, delivery } from './paths.mjs';
+import { ensureNpm, setupNpm, teardownNpm } from './npm-access.mjs';
 
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
 
@@ -57,14 +58,21 @@ export async function login(rawKey, opts, cli) {
   console.log(`Lade ${editionLabel(ENTERPRISE)} ${g.version} ...`);
   const dir = await install(g);
   plugins(dir, opts);
+  // nach /install/token, denn erst dort wird das Gerät registriert
+  await setupNpm(key, opts);
   const seats = g.seats?.max ? `, Geräte ${g.seats.used} von ${g.seats.max}` : '';
   console.log(`\nAngemeldet: ${editionLabel(ENTERPRISE)}, Version ${g.version}, Updates bis ${formatDate(g.updates_until)}${seats}.`);
   console.log('Bestehende Projekte bekommen die Enterprise-Vorlagen und den Ablauf mit Agenten und Gates mit: kette add');
   return 0;
 }
 
-export function logout(opts) {
-  if (credentialsStatus() === 'none' && !installedBundle(ENTERPRISE)) { console.log('Nicht angemeldet, nichts zu tun.'); return 0; }
+export async function logout(opts) {
+  if (credentialsStatus() === 'none' && !installedBundle(ENTERPRISE)) {
+    if (!(await teardownNpm(null))) console.log('Nicht angemeldet, nichts zu tun.');
+    return 0;
+  }
+  // solange der Schlüssel noch da ist: npm-Token widerrufen, dann nur den Kette-Block entfernen
+  await teardownNpm(credentialsStatus() === 'valid' ? readCredentials() : null);
   const claude = !opts.noPlugins && hasClaude();
   // Erst die Enterprise-Plugins entfernen, solange der Marketplace noch auf das Enterprise-Paket zeigt
   if (claude) {
@@ -103,12 +111,18 @@ export async function updateEnterprise(opts, cli) {
   if (info.version && info.available && info.version !== info.available) {
     console.log(`Version ${info.version} ist erschienen, der Update-Zeitraum dieser Lizenz endete am ${formatDate(info.updates_until)}. Installierbar bleibt ${info.available}, für neuere Versionen die Lizenz verlängern.`);
   }
-  if (have && have.version === info.available) { console.log(`Aktuell (${editionLabel(ENTERPRISE)} ${have.version}).`); await cliHint(cli); return 0; }
+  if (have && have.version === info.available) {
+    console.log(`Aktuell (${editionLabel(ENTERPRISE)} ${have.version}).`);
+    if (!opts.dryRun) await ensureNpm(key, opts);
+    await cliHint(cli);
+    return 0;
+  }
   console.log(`Neue ${editionLabel(ENTERPRISE)}-Version ${info.available}${have ? ` (installiert: ${have.version})` : ''}.`);
   if (info.changelog) console.log(info.changelog);
   if (opts.dryRun) return 0;
   const dir = await install(await grant(key, cli));
   plugins(dir, opts);
+  await ensureNpm(key, opts);
   await cliHint(cli);
   console.log(`${editionLabel(ENTERPRISE)} ${readState().login.version} installiert.`);
   return 0;

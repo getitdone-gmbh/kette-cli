@@ -18,6 +18,10 @@ const MESSAGES = {
   device_limit: (body) => `Die Gerätegrenze dieser Lizenz ist erreicht${seatsText(body.seats)}. Ein altes Gerät gibt der Support frei, dafür ${SUPPORT}. Für mehr Geräte gibt es die Team-Lizenz.`,
   rate_limited: () => 'Zu viele Anfragen in kurzer Zeit. Eine Minute warten und dann erneut versuchen.',
   unavailable: () => `Der Lieferdienst kann das Enterprise-Paket gerade nicht bereitstellen. In ein paar Minuten erneut versuchen, bleibt es dabei, ${SUPPORT}. Die Community-Edition bleibt nutzbar.`,
+  device_unknown: () => 'Dieses Gerät ist bei der Lizenz noch nicht angemeldet. Zuerst kette login <key> ausführen.',
+  ci_token_limit: (body) => `Die Lizenz hat schon ${body.used} von ${body.max} CI-Tokens. Ein altes mit kette token ci revoke <id> widerrufen (Liste: kette token ci list).`,
+  expired: () => 'Der Download-Link ist abgelaufen (gültig 15 Minuten). Den Befehl einfach erneut ausführen.',
+  not_found: () => `Nicht gefunden. Den Befehl erneut ausführen, bleibt es dabei, ${SUPPORT}.`,
 };
 
 export class DeliveryError extends Error {
@@ -68,6 +72,20 @@ export function latest({ key, device }) {
     body: JSON.stringify({ key, device }),
   });
 }
+
+const postJson = (path, body) => call(`${delivery()}${path}`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
+// npm-Zugang (docs/install-api.md, Abschnitt npm-Registry): Gerätetoken, CI-Tokens, Figma-Links
+export const registryToken = ({ key, device }) => postJson('/registry/token', { key, device });
+export const revokeRegistryToken = ({ key, device }) => postJson('/registry/token/revoke', { key, device });
+export const createCiToken = ({ key, device, label }) => postJson('/registry/ci-tokens/create', { key, device, label });
+export const listCiTokens = ({ key, device }) => postJson('/registry/ci-tokens/list', { key, device });
+export const revokeCiToken = ({ key, device, id }) => postJson('/registry/ci-tokens/revoke', { key, device, id });
+export const figmaLinks = ({ key }) => postJson('/figma/links', { key });
 
 // Geräte-ID wird einmal erzeugt und bleibt, damit ein erneuter Login kein neues Gerät belegt
 export function deviceId() {

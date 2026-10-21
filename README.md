@@ -34,10 +34,35 @@ Im Projektprofil steht die Edition im Feld `tier`: `community` oder `enterprise`
 | `kette rules [thema]` | installierte Regeln ohne Netz: Übersicht mit Kern-Regeln und Architektur-Mustern, in Enterprise auch Stack- und Plattform-Profile mit Status; mit Thema die Regel lesen, z. B. `kette rules fehler`, `kette rules modular-monolith`; `--path` zeigt die Dateipfade |
 | `kette update` | neues Regelwerk laden und Plugins aktualisieren (Community über das Manifest, Enterprise über den Lieferdienst); im Projekt auch den Kette-Block in `.kette/README.md` erneuern |
 | `kette profile` | Projektprofil anzeigen |
-| `kette login <key>` | Enterprise freischalten: Schlüssel prüfen, Paket laden und prüfen, Plugins installieren |
-| `kette logout` | Schlüssel und Enterprise-Paket von diesem Rechner entfernen (das Gerät gibt der Support frei) |
+| `kette login <key>` | Enterprise freischalten: Schlüssel prüfen, Paket laden und prüfen, Plugins installieren, npm-Zugang für die Design-System-Pakete in `~/.npmrc` eintragen |
+| `kette logout` | Schlüssel, Enterprise-Paket und npm-Zugang von diesem Rechner entfernen, den npm-Token widerrufen (das Gerät gibt der Support frei) |
+| `kette token ci create <name>` / `list` / `revoke <id>` | CI-Tokens für `npm ci` in Pipelines: Solo 2, Team 5, belegen kein Gerät, werden nur beim Erstellen angezeigt |
+| `kette figma` | aktuelles Figma-Release der Kette laden, Prüfsummen prüfen, Import-Reihenfolge zeigen; `--out ordner` |
 
-Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`.
+Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out ordner`.
+
+## npm-Pakete des Design Systems (Enterprise)
+`kette login` holt für dieses Gerät einen eigenen npm-Token und schreibt einen markierten Block in die Benutzer-npmrc (`NPM_CONFIG_USERCONFIG`, sonst `~/.npmrc`, Rechte 600):
+
+```
+# >>> kette: managed by kette login, removed by kette logout
+@getitdone-gmbh:registry=https://npm.kette.itdone.de/
+//npm.kette.itdone.de/:_authToken=kt_...
+# <<< kette
+```
+
+`kette logout` widerruft den Token und entfernt nur diesen Block. Steht in der npmrc schon eine eigene `@getitdone-gmbh:registry`-Zeile, bleibt sie unangetastet und der Schritt entfällt; `--npm-replace` kommentiert sie aus, `kette logout` stellt sie wieder her. `kette init` und `kette add` schreiben in Enterprise-Projekten nur die Scope-Zeile in die Projekt-`.npmrc` (ohne Token, darf ins Repo). `kette update` stellt einen neuen Token aus, wenn der Block fehlt oder die Registry den Token ablehnt. `kette doctor` prüft Block, Token und ob ein Token in einer Datei im Git steht.
+
+Pipelines bekommen einen CI-Token (`kette token ci create "GitHub Actions"`) als Secret `KETTE_NPM_TOKEN`:
+
+```yaml
+- uses: actions/setup-node@v4
+  with: { node-version: 22, registry-url: https://npm.kette.itdone.de/, scope: '@getitdone-gmbh' }
+- run: npm ci
+  env: { NODE_AUTH_TOKEN: ${{ secrets.KETTE_NPM_TOKEN }} }
+```
+
+GitLab und andere: `npm config set //npm.kette.itdone.de/:_authToken "$KETTE_NPM_TOKEN"` im Job. yarn berry: in `.yarnrc.yml` `npmScopes: { getitdone-gmbh: { npmRegistryServer: "https://npm.kette.itdone.de/", npmAuthToken: "${KETTE_NPM_TOKEN}" } }` (schreibt die CLI nicht).
 
 ## Wo die Regeln liegen
 Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`, die Verweiszeile in `CLAUDE.md` und die ADR-Vorlage. Das Regelwerk selbst liegt auf dem Rechner unter `~/.kette/bundles/active/` und ist in Claude Code als Plugins aktiv: in Community `kette-engineering-core@kette` (Skills `engineering-rules`, `architecture-patterns`) und `ui-gesetze@kette`, in Enterprise `kette-engineering-core@kette`, `kette-engineering@kette` (`platform-profile`, `code-reviewer`), `design-system-agents@kette` und `design-review-pack@kette`. Ansehen mit `kette rules`, was jedes Plugin mitbringt zeigt `kette doctor`.
@@ -59,11 +84,11 @@ Der Marketplace der ausgelieferten Pakete heißt in Claude Code `kette`. Bis Ver
 ## Was der Installer nicht tut
 - Kein sudo, keine Änderungen außerhalb von `~/.kette` und der einen Zeile in der Shell-Startdatei.
 - Keine Cloud-Aktionen, kein Deploy, keine Konten. Infrastruktur entsteht als Code im Repo.
-- Kein Überschreiben vorhandener Dateien. `CLAUDE.md` bekommt höchstens eine Verweiszeile.
-- Keine Telemetrie. Der Lieferdienst sieht nur Schlüssel, Geräte-ID, CLI-Version und die IP-Adresse, und das nur bei `kette login` und `kette update` in Enterprise.
+- Kein Überschreiben vorhandener Dateien. `CLAUDE.md` bekommt höchstens eine Verweiszeile, die Projekt-`.npmrc` höchstens die Scope-Zeile, die Benutzer-npmrc nur den markierten Kette-Block.
+- Keine Telemetrie. Der Lieferdienst sieht nur Schlüssel, Geräte-ID, CLI-Version und die IP-Adresse, und das nur bei `kette login`, `kette update`, `kette token` und `kette figma` in Enterprise.
 
 ## Entfernen
-1. Falls eingeloggt: `kette logout`. Den Geräteplatz der Lizenz gibt nur der Support frei.
+1. Falls eingeloggt: `kette logout` (entfernt auch den npm-Block aus `~/.npmrc`). Den Geräteplatz der Lizenz gibt nur der Support frei.
 2. Plugins und Marketplace aus Claude Code entfernen:
    ```sh
    claude plugin uninstall design-review-pack@kette
@@ -84,6 +109,8 @@ Die Dateien im Projekt (`.kette/`, Verweiszeile in `CLAUDE.md`, ADR-Vorlage) ble
 | `KETTE_HOME` | `~/.kette` | Ablage für CLI, Pakete, Schlüssel (`credentials`, Rechte 600) und Geräte-ID |
 | `KETTE_MIRROR` | `https://kette.itdone.de/dl` | Spiegel für Manifest, CLI und Community-Paket, z. B. für Firmen und Offline-Umgebungen |
 | `KETTE_DELIVERY` | `https://app-kette-delivery-833790b5.itdone.cloud` | Lieferdienst für Enterprise (Vertrag: [docs/install-api.md](docs/install-api.md)) |
+| `KETTE_REGISTRY` | `https://npm.kette.itdone.de/` | Registry für die Scope-Zeile, bis ein Login die Adresse vom Lieferdienst übernimmt |
+| `NPM_CONFIG_USERCONFIG` | `~/.npmrc` | Benutzer-npmrc, in die `kette login` den Block schreibt (wie npm) |
 | `KETTE_NO_MODIFY_PATH` | nicht gesetzt | `1` lässt die Shell-Startdatei unverändert, der Installer zeigt dann die Zeile zum Selbsteintragen |
 
 ## Veröffentlichen
