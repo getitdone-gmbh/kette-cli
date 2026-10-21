@@ -29,6 +29,7 @@ function bundleWithPlugins() {
   const d = tmp();
   write(d, 'plugins/kette-engineering-core/skills/engineering-rules/SKILL.md', 'x');
   write(d, 'plugins/kette-engineering-core/skills/architecture-patterns/SKILL.md', 'x');
+  write(d, 'plugins/kette-engineering-core/agents/kette-check.md', 'x');
   write(d, 'plugins/kette-engineering-core/skills/kein-skill/README.md', 'x');
   write(d, 'plugins/kette-engineering/agents/code-reviewer.md', 'x');
   write(d, 'plugins/kette-engineering/skills/platform-profile/SKILL.md', 'x');
@@ -40,11 +41,11 @@ function bundleWithPlugins() {
 
 test('Inhalt der Plugins wird aus den Ordnern im Paket gezählt', () => {
   const d = bundleWithPlugins();
-  assert.deepEqual(pluginContents(d, 'kette-engineering-core'), { agents: [], skills: ['architecture-patterns', 'engineering-rules'], commands: [] });
+  assert.deepEqual(pluginContents(d, 'kette-engineering-core'), { agents: ['kette-check'], skills: ['architecture-patterns', 'engineering-rules'], commands: [] });
   assert.deepEqual(pluginContents(d, 'design-system-agents').commands, ['/feature-loop']);
   assert.equal(pluginContents(d, 'design-review-pack'), null);
   assert.equal(pluginContents(null, 'kette-engineering'), null);
-  assert.equal(pluginSummary(ENTERPRISE, 'kette', d), 'kette-engineering-core@kette (Skills architecture-patterns, engineering-rules), kette-engineering@kette (Agent code-reviewer, Skill platform-profile), design-system-agents@kette (4 Agenten, Skill loop-contract, Befehl /feature-loop), design-review-pack@kette');
+  assert.equal(pluginSummary(ENTERPRISE, 'kette', d), 'kette-engineering-core@kette (Agent kette-check, Skills architecture-patterns, engineering-rules), kette-engineering@kette (Agent code-reviewer, Skill platform-profile), design-system-agents@kette (4 Agenten, Skill loop-contract, Befehl /feature-loop), design-review-pack@kette');
   const details = pluginDetails(ENTERPRISE, 'kette', d);
   assert.deepEqual(details[2], { id: 'design-system-agents@kette', lines: ['Agenten (4): a, b, c, d', 'Skills (1): loop-contract', 'Befehle (1): /feature-loop'] });
   assert.deepEqual(details[3].lines, ['nicht im Paket enthalten']);

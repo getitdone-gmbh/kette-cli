@@ -14,7 +14,7 @@ irm https://kette.itdone.de/install.ps1 | iex              # Windows
 | Projektprofil `.kette/profile.json` und `kette doctor` | ja | ja |
 | Plugin `kette-engineering-core@kette` | ja | ja |
 | Plugin `ui-gesetze@kette`: UI-Gesetze, Interaktion, WCAG 2.2 AA (3 Skills) | ja | im Design-Review-Pack enthalten |
-| Ablauf in `.kette/README.md` | Muster und ADR, Regeln beim Bau, Selbstprüfung, Definition of Done | Rollen als Subagenten, Pflicht-Gates, `/feature-loop` |
+| Ablauf in `.kette/README.md` | Muster und ADR, Regeln beim Bau, Prüfung mit dem Agenten `kette-check`, Definition of Done | Rollen als Subagenten, Pflicht-Gates, `/feature-loop` |
 | Stack- und Plattform-Profile | | ja |
 | Vorlagen für CI, Docker und Deploy, Prüfungen (tsconfig, ESLint, dependency-cruiser, gitleaks) | | ja |
 | Plugin `kette-engineering@kette` mit Code-Reviewer | | ja |

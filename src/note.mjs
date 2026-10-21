@@ -32,15 +32,15 @@ Kleine Korrekturen (Tippfehler, eine Zeile) direkt umsetzen und mit Schritt 4 pr
 
 Ein ganzes Feature mit allen Rollen, Fix-Schleife und Laufprotokoll: \`/feature-loop start <Feature>\` (in Claude Code \`/design-system-agents:feature-loop\`).
 
-Die Agenten, Gates und \`/feature-loop\` brauchen Die Kette auf dem Rechner (\`kette login <key>\`). Fehlen sie, gelten Muster und ADR, \`engineering-rules\` beim Bau und eine Selbstprüfung gegen die Regeln, und \`kette doctor\` zeigt, was fehlt.
+Die Agenten, Gates und \`/feature-loop\` brauchen Die Kette auf dem Rechner (\`kette login <key>\`). Fehlen sie, gelten Muster und ADR, \`engineering-rules\` beim Bau und die Prüfung mit \`kette-engineering-core:kette-check\`, und \`kette doctor\` zeigt, was fehlt.
 
 Infrastruktur nur als Code erzeugen und mit plan bzw. what-if prüfen. apply, Deploy und zerstörende Migrationen führt ein Mensch aus.`;
 
 const COMMUNITY_FLOW = `## Ablauf für jede Änderung
 1. Vor dem Bau: das Architektur-Muster wählen (Skill \`architecture-patterns\`, im Profil unter \`patterns\`) und schwer umkehrbare Entscheidungen als ADR unter \`docs/adr/\` festhalten (Vorlage \`docs/adr/0000-vorlage.md\`).
 2. Beim Bau: Skill \`engineering-rules\` laden und danach arbeiten (Lesbarkeit, Struktur, Fehler, Tests, Sicherheit, Abhängigkeiten, Logging, Änderungen).
-3. Danach Selbstprüfung: den Diff Regel für Regel gegen \`engineering-rules\` und das gewählte Muster prüfen und Verstöße beheben. Bei Änderungen an der Oberfläche zusätzlich gegen die Skills \`ui-laws\`, \`interaction-principles\` und \`a11y-standards\`.
-4. Fertig ist eine Änderung, wenn Tests für neue Logik, Typprüfung und Lint grün sind, kein Regelverstoß offen ist, jede schwer umkehrbare Entscheidung ein ADR hat und Infrastruktur nur als Code entstanden ist. apply, Deploy und zerstörende Migrationen führt ein Mensch aus.
+3. Nach der Umsetzung prüfen: den Subagenten \`kette-engineering-core:kette-check\` den Diff gegen die Kern-Regeln und das gewählte Muster prüfen lassen, jeden Befund beheben und erneut prüfen lassen. Bei Änderungen an der Oberfläche zusätzlich gegen die Skills \`ui-laws\`, \`interaction-principles\` und \`a11y-standards\` prüfen.
+4. Fertig ist eine Änderung, wenn Tests für neue Logik, Typprüfung und Lint grün sind, kein Befund von \`kette-check\` offen ist, jede schwer umkehrbare Entscheidung ein ADR hat und Infrastruktur nur als Code entstanden ist. apply, Deploy und zerstörende Migrationen führt ein Mensch aus.
 
 Agenten für Anforderung, Architektur und Umsetzung sowie unabhängige Gates (Code-Reviewer, QA, Design-Review) gibt es mit Die Kette (Edition Enterprise): \`kette login <key>\`.`;
 

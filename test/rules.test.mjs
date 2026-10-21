@@ -21,6 +21,7 @@ function rulebook(tier, { profiles = false } = {}) {
   write(d, 'profiles/platform/index.json', JSON.stringify([{ id: 'github-docker', name: 'GitHub + Docker', status: 'belegt' }, { id: 'gitlab', name: 'GitLab', status: 'vorschau' }]));
   write(d, 'plugins/kette-engineering-core/skills/engineering-rules/SKILL.md', 'x');
   write(d, 'plugins/kette-engineering-core/skills/architecture-patterns/SKILL.md', 'x');
+  write(d, 'plugins/kette-engineering-core/agents/kette-check.md', 'x');
   for (const s of ['ui-laws', 'interaction-principles', 'a11y-standards']) write(d, `plugins/ui-gesetze/skills/${s}/SKILL.md`, 'x');
   if (profiles) {
     write(d, 'profiles/stack/README.md', '| ID | Datei | Einsatz |\n|---|---|---|\n| `nestjs-prisma` | [nestjs-prisma.md](nestjs-prisma.md) | Backend mit relationalen Daten |\n');
@@ -109,7 +110,7 @@ test('init endet mit Zusammenfassung, .kette/README.md beschreibt den Ablauf der
   assert.equal(result, 0);
   const tail = out.slice(out.indexOf('Fertig.'));
   assert.match(tail, /^Fertig\. Im Projekt: \.kette\/profile\.json, \.kette\/README\.md, CLAUDE\.md, docs\/adr\/0000-vorlage\.md\n/);
-  assert.match(tail, /In Claude Code noch nicht aktiv \(Plugins: kette-engineering-core@kette \(Skills architecture-patterns, engineering-rules\), ui-gesetze@kette \(Skills a11y-standards, interaction-principles, ui-laws\)\)/);
+  assert.match(tail, /In Claude Code noch nicht aktiv \(Plugins: kette-engineering-core@kette \(Agent kette-check, Skills architecture-patterns, engineering-rules\), ui-gesetze@kette \(Skills a11y-standards, interaction-principles, ui-laws\)\)/);
   assert.match(tail, /ansehen mit: kette rules/);
   assert.match(tail, /1\. kette doctor\n  2\. Claude Code im Projekt öffnen .*\n  3\. kette login <key>/);
   assert.ok(tail.split('\n').length <= 10);
@@ -118,7 +119,8 @@ test('init endet mit Zusammenfassung, .kette/README.md beschreibt den Ablauf der
   assert.match(note, /^<!-- kette:begin [^\n]*-->\n# Kette\n/);
   assert.match(note, /<!-- kette:end -->\n$/);
   assert.match(note, /## Ablauf für jede Änderung\n1\. Vor dem Bau: das Architektur-Muster wählen/);
-  assert.match(note, /Selbstprüfung.*`ui-laws`, `interaction-principles` und `a11y-standards`/);
+  assert.match(note, /3\. Nach der Umsetzung prüfen: den Subagenten `kette-engineering-core:kette-check` .*Befund beheben .*`ui-laws`, `interaction-principles` und `a11y-standards`/);
+  assert.match(note, /kein Befund von `kette-check` offen/);
   assert.match(note, /Agenten .* gibt es mit Die Kette \(Edition Enterprise\): `kette login <key>`/);
   assert.doesNotMatch(note, /design-system-agents:/);
   assert.match(note, /## Wo die Regeln liegen/);
@@ -204,7 +206,7 @@ test('doctor listet je Plugin Agenten, Skills und Befehle aus dem Paket', async 
   try {
     const { out } = await run('doctor');
     assert.match(out, /OK {4}Plugin ui-gesetze@kette installiert/);
-    assert.match(out, /INFO  Inhalt der Plugins:\n {8}kette-engineering-core@kette\n {10}Skills \(2\): architecture-patterns, engineering-rules\n {8}ui-gesetze@kette\n {10}Skills \(3\): a11y-standards, interaction-principles, ui-laws\n {10}Befehle \(1\): \/check/);
+    assert.match(out, /INFO  Inhalt der Plugins:\n {8}kette-engineering-core@kette\n {10}Agenten \(1\): kette-check\n {10}Skills \(2\): architecture-patterns, engineering-rules\n {8}ui-gesetze@kette\n {10}Skills \(3\): a11y-standards, interaction-principles, ui-laws\n {10}Befehle \(1\): \/check/);
     assert.doesNotMatch((await run('doctor', '--ci')).out, /Inhalt der Plugins/);
   } finally {
     claude.restore();
