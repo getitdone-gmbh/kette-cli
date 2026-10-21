@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { COMMUNITY, ENTERPRISE, editionLabel, pluginsFor, isNewer } from './editions.mjs';
+import { COMMUNITY, ENTERPRISE, editionLabel, pluginsFor, retiredPlugins, isNewer } from './editions.mjs';
 import { DeliveryError, KEY_PATTERN, deviceId, downloadErrorText, latest, readCredentials, removeCredentials, requestToken, writeCredentials } from './delivery.mjs';
 import { DownloadError, fetchManifest, installEntry, installedBundle, readState, removeState, setActiveBundle, writeState } from './manifest.mjs';
-import { hasClaude, installPlugins, pluginId, uninstallPlugin } from './claude.mjs';
+import { hasClaude, installPlugins, manualInstall, pluginId, uninstallPlugin } from './claude.mjs';
 import { bundlesDir, credentialsFile, delivery } from './paths.mjs';
 
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
@@ -43,9 +43,9 @@ function plugins(dir, opts) {
   if (opts.noPlugins) return;
   const link = setActiveBundle(dir);
   const names = pluginsFor(ENTERPRISE);
-  const r = installPlugins(link, names);
+  const r = installPlugins(link, names, retiredPlugins(COMMUNITY, ENTERPRISE));
   if (r.ok) console.log(`Claude-Code-Plugins installiert: ${names.join(', ')}`);
-  else console.log(`Plugins nicht installiert (${r.reason}). Von Hand: claude plugin marketplace add ${link} && claude plugin install ${pluginId('kette-engineering')}`);
+  else console.log(`Plugins nicht installiert (${r.reason}). Von Hand: ${manualInstall(link, names)}`);
 }
 
 export async function login(rawKey, opts, cli) {
@@ -60,7 +60,7 @@ export async function login(rawKey, opts, cli) {
   plugins(dir, opts);
   const seats = g.seats?.max ? `, Geräte ${g.seats.used} von ${g.seats.max}` : '';
   console.log(`\nAngemeldet: ${editionLabel(ENTERPRISE)}, Version ${g.version}, Updates bis ${formatDate(g.updates_until)}${seats}.`);
-  console.log('Bestehende Projekte bekommen die Enterprise-Vorlagen mit: kette add');
+  console.log('Bestehende Projekte bekommen die Enterprise-Vorlagen und den Ablauf mit Agenten und Gates mit: kette add');
   return 0;
 }
 
@@ -72,8 +72,10 @@ export function logout(opts) {
   const community = installedBundle(COMMUNITY);
   const link = setActiveBundle(community?.dir || null);
   if (!opts.noPlugins && hasClaude()) {
-    const r = uninstallPlugin('kette-engineering');
-    if (!r.ok) console.log(`Plugin kette-engineering nicht entfernt (${r.reason}). Von Hand: claude plugin uninstall ${pluginId('kette-engineering')}`);
+    for (const name of retiredPlugins(ENTERPRISE, COMMUNITY)) {
+      const r = uninstallPlugin(name);
+      if (!r.ok) console.log(`Plugin ${name} nicht entfernt (${r.reason}). Von Hand: claude plugin uninstall ${pluginId(name)}`);
+    }
     if (link) installPlugins(link, pluginsFor(COMMUNITY));
   }
   console.log('Abgemeldet. Lizenzschlüssel und Enterprise-Paket sind von diesem Rechner entfernt.');

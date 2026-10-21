@@ -13,9 +13,13 @@ irm https://kette.itdone.de/install.ps1 | iex              # Windows
 | Kern-Regeln und Architektur-Muster mit ADR-Vorlage | ja | ja |
 | Projektprofil `.kette/profile.json` und `kette doctor` | ja | ja |
 | Plugin `kette-engineering-core@kette` | ja | ja |
+| Plugin `ui-gesetze@kette`: UI-Gesetze, Interaktion, WCAG 2.2 AA (3 Skills) | ja | im Design-Review-Pack enthalten |
+| Ablauf in `.kette/README.md` | Muster und ADR, Regeln beim Bau, Selbstprüfung, Definition of Done | Rollen als Subagenten, Pflicht-Gates, `/feature-loop` |
 | Stack- und Plattform-Profile | | ja |
 | Vorlagen für CI, Docker und Deploy, Prüfungen (tsconfig, ESLint, dependency-cruiser, gitleaks) | | ja |
 | Plugin `kette-engineering@kette` mit Code-Reviewer | | ja |
+| Plugin `design-system-agents@kette`: Agenten, Skills und Befehle für den ganzen Feature-Ablauf | | ja |
+| Plugin `design-review-pack@kette`: Design-Reviewer mit Regelwerk | | ja |
 | Bezug | frei, ohne Schlüssel | mit Lizenzschlüssel der Kette (Solo oder Team), `kette login <key>` |
 | Updates | jederzeit | 12 Monate ab Kauf, die installierte Version bleibt dauerhaft nutzbar |
 
@@ -25,10 +29,10 @@ Im Projektprofil steht die Edition im Feld `tier`: `community` oder `enterprise`
 | Befehl | Zweck |
 |---|---|
 | `kette init [ordner]` | neues Projekt: Profil, Agenten-Hinweise, ADR-Vorlage, Plugins; in Enterprise auch CI-, Docker- und Prüfvorlagen. Endet mit einer Zusammenfassung: was im Projekt entstand, was in Claude Code aktiv ist, nächste Schritte |
-| `kette add` | bestehendes Repo anbinden: erkennt Stack und Plattform, überschreibt nichts, zeigt den Plan und weist auf eine veraltete `.kette/README.md` hin |
-| `kette doctor` | Projekt und Einrichtung prüfen, zeigt Edition, Version, Updates bis und wo Regelwerk und Plugins liegen; `--ci` für Pipelines, ohne Netz |
+| `kette add` | bestehendes Repo anbinden: erkennt Stack und Plattform, überschreibt nichts außer dem Kette-Block in `.kette/README.md`, zeigt den Plan |
+| `kette doctor` | Projekt und Einrichtung prüfen, zeigt Edition, Version, Updates bis, wo Regelwerk und Plugins liegen und je Plugin die Agenten, Skills und Befehle; `--ci` für Pipelines, ohne Netz |
 | `kette rules [thema]` | installierte Regeln ohne Netz: Übersicht mit Kern-Regeln und Architektur-Mustern, in Enterprise auch Stack- und Plattform-Profile mit Status; mit Thema die Regel lesen, z. B. `kette rules fehler`, `kette rules modular-monolith`; `--path` zeigt die Dateipfade |
-| `kette update` | neues Regelwerk laden und Plugins aktualisieren (Community über das Manifest, Enterprise über den Lieferdienst) |
+| `kette update` | neues Regelwerk laden und Plugins aktualisieren (Community über das Manifest, Enterprise über den Lieferdienst); im Projekt auch den Kette-Block in `.kette/README.md` erneuern |
 | `kette profile` | Projektprofil anzeigen |
 | `kette login <key>` | Enterprise freischalten: Schlüssel prüfen, Paket laden und prüfen, Plugins installieren |
 | `kette logout` | Schlüssel und Enterprise-Paket von diesem Rechner entfernen (das Gerät gibt der Support frei) |
@@ -36,7 +40,11 @@ Im Projektprofil steht die Edition im Feld `tier`: `community` oder `enterprise`
 Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`.
 
 ## Wo die Regeln liegen
-Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`, die Verweiszeile in `CLAUDE.md` und die ADR-Vorlage. Das Regelwerk selbst liegt auf dem Rechner unter `~/.kette/bundles/active/` und ist in Claude Code als Plugin `kette-engineering-core@kette` aktiv (Skills `engineering-rules`, `architecture-patterns`), in Enterprise zusätzlich `kette-engineering@kette` (`platform-profile`, `code-reviewer`). Ansehen mit `kette rules`.
+Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`, die Verweiszeile in `CLAUDE.md` und die ADR-Vorlage. Das Regelwerk selbst liegt auf dem Rechner unter `~/.kette/bundles/active/` und ist in Claude Code als Plugins aktiv: in Community `kette-engineering-core@kette` (Skills `engineering-rules`, `architecture-patterns`) und `ui-gesetze@kette`, in Enterprise `kette-engineering-core@kette`, `kette-engineering@kette` (`platform-profile`, `code-reviewer`), `design-system-agents@kette` und `design-review-pack@kette`. Ansehen mit `kette rules`, was jedes Plugin mitbringt zeigt `kette doctor`.
+
+`.kette/README.md` beschreibt den Ablauf für Claude Code zwischen `<!-- kette:begin` und `<!-- kette:end -->`. `kette init`, `kette add` und `kette update` erneuern nur diesen Block, eigene Notizen darunter bleiben. Eine unveränderte Fassung aus 0.1.0 bis 0.3.1 ohne Block wird ganz ersetzt, eine selbst geänderte bleibt, und die CLI sagt, wie sie neu entsteht.
+
+Beim Wechsel der Edition entfernt die CLI die Plugins, die die neue Edition nicht hat: `kette login` entfernt `ui-gesetze@kette` (die Skills stecken im Design-Review-Pack), `kette logout` die drei Enterprise-Plugins.
 
 Der Marketplace der ausgelieferten Pakete heißt in Claude Code `kette`. Bis Version 0.3.0 hieß er `kette-engineering`. Zeigt ein alter `kette-engineering` in `~/.kette`, ersetzt die CLI ihn beim nächsten `kette init`, `add`, `update` oder `login`. Zeigt er auf ein Arbeitsrepo des Regelwerks, bleibt er, und die CLI nennt den Befehl zum Deaktivieren, falls Skills doppelt aktiv sind.
 
@@ -56,7 +64,10 @@ Der Marketplace der ausgelieferten Pakete heißt in Claude Code `kette`. Bis Ver
 1. Falls eingeloggt: `kette logout`. Den Geräteplatz der Lizenz gibt nur der Support frei.
 2. Plugins und Marketplace aus Claude Code entfernen:
    ```sh
+   claude plugin uninstall design-review-pack@kette
+   claude plugin uninstall design-system-agents@kette
    claude plugin uninstall kette-engineering@kette
+   claude plugin uninstall ui-gesetze@kette
    claude plugin uninstall kette-engineering-core@kette
    claude plugin marketplace remove kette
    ```
@@ -74,11 +85,12 @@ Die Dateien im Projekt (`.kette/`, Verweiszeile in `CLAUDE.md`, ADR-Vorlage) ble
 | `KETTE_NO_MODIFY_PATH` | nicht gesetzt | `1` lässt die Shell-Startdatei unverändert, der Installer zeigt dann die Zeile zum Selbsteintragen |
 
 ## Veröffentlichen
-`npm run release` baut aus `../kette-engineering` (oder `KETTE_ENGINEERING`) nach `dist/`:
+`npm run release` baut lokal, ohne etwas zu veröffentlichen, aus `../kette-engineering` (oder `KETTE_ENGINEERING`) und den Plugins `ui-gesetze`, `design-system-agents`, `design-review-pack` aus `../claude-design-agent-pack` (oder `KETTE_AGENT_PACK`) nach `dist/`. Vom Agenten-Pack nimmt es den Stand des neuesten Tags `v*` aus Git, nicht den Arbeitsordner; `KETTE_AGENT_PACK_REF` wählt einen anderen Stand zum Testen.
 - `install.sh`, `install.ps1`, `manifest.json`, `kette-cli-<version>.tgz`, `kette-community-<version>.tgz` (öffentlich unter `https://kette.itdone.de/dl/`)
-- `private/kette-enterprise-<version>.tgz` und `private/kette-enterprise.json` (`{version, sha256, published_at}`), nie öffentlich
+- Community-Paket: `kette-engineering-core`, `ui-gesetze`
+- `private/kette-enterprise-<version>.tgz` mit `kette-engineering-core`, `kette-engineering`, `design-system-agents`, `design-review-pack` und `private/kette-enterprise.json` (`{version, sha256, published_at, agent_pack}`), nie öffentlich
 
-`npm run release -- --publish-enterprise` lädt das Enterprise-Paket zusätzlich mit `gh release create` als Release `v<version>` in das private Repo `alexfriedl/kette-engineering`. Das Skript bricht ab, wenn das Repo nicht privat ist, kette-engineering offene Änderungen hat oder der Commit nicht gepusht ist. Ohne den Schalter zeigt es nur den Befehl.
+`npm run release -- --publish-enterprise` lädt das Enterprise-Paket zusätzlich mit `gh release create` als Release `v<version>` in das private Repo `alexfriedl/kette-engineering`. Das Skript bricht ab, wenn das Repo nicht privat ist, kette-engineering offene Änderungen hat, der Commit nicht gepusht ist oder der Stand des Agenten-Packs kein Release-Tag ist. Ohne den Schalter zeigt es nur den Befehl.
 
 ## Lizenz
 MIT, siehe [LICENSE](LICENSE). Die Enterprise-Inhalte der Kette stehen unter eigener Lizenz im Paket.

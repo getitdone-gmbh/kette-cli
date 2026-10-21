@@ -169,8 +169,45 @@ test('login installiert beide Plugins über den festen Pfad des aktiven Pakets',
   assert.equal(fs.realpathSync(link), fs.realpathSync(path.join(kh, 'bundles', 'enterprise', V1)));
   const calls = claude.calls();
   assert.ok(calls.includes(`plugin marketplace add ${link}`));
-  assert.ok(calls.includes('plugin install kette-engineering-core@kette'));
-  assert.ok(calls.includes('plugin install kette-engineering@kette'));
+  for (const p of ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack']) assert.ok(calls.includes(`plugin install ${p}@kette`), p);
+  assert.ok(!calls.some((c) => c.startsWith('plugin uninstall')));
+});
+
+test('login entfernt ui-gesetze aus Community, bevor der Marketplace auf Enterprise wechselt', { skip: process.platform === 'win32' }, async () => {
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-gesetze@kette\n');
+  try { await run('login', KEYS.ok); } finally { claude.restore(); }
+  const calls = claude.calls();
+  const rm = calls.indexOf('plugin uninstall ui-gesetze@kette');
+  assert.ok(rm >= 0 && rm < calls.indexOf(`plugin marketplace add ${path.join(kh, 'bundles', 'active')}`));
+  assert.ok(calls.includes('plugin install design-system-agents@kette'));
+});
+
+test('logout entfernt die Enterprise-Plugins', { skip: process.platform === 'win32' }, async () => {
+  await run('login', KEYS.ok, '--no-plugins');
+  const claude = fakeClaude([]);
+  try { await run('logout'); } finally { claude.restore(); }
+  const calls = claude.calls();
+  for (const p of ['kette-engineering', 'design-system-agents', 'design-review-pack']) assert.ok(calls.includes(`plugin uninstall ${p}@kette`), p);
+  assert.ok(!calls.includes('plugin uninstall kette-engineering-core@kette'));
+});
+
+test('update im Projekt erneuert den Kette-Block für die angemeldete Edition', async () => {
+  await run('login', KEYS.ok, '--no-plugins');
+  const project = tmp();
+  write(project, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'enterprise' }));
+  write(project, '.kette/README.md', '<!-- kette:begin alt -->\nCommunity-Ablauf\n<!-- kette:end -->\nNotiz\n');
+  const cwd = process.cwd();
+  process.chdir(project);
+  try {
+    const { out } = await run('update', '--no-plugins');
+    assert.match(out, /\.kette\/README\.md erneuert \(Ablauf für Enterprise \(Die Kette\)\)/);
+    const note = fs.readFileSync(path.join(project, '.kette', 'README.md'), 'utf8');
+    assert.match(note, /kette-engineering:code-reviewer/);
+    assert.match(note, /<!-- kette:end -->\nNotiz\n$/);
+    assert.doesNotMatch((await run('update', '--no-plugins')).out, /erneuert/);
+  } finally {
+    process.chdir(cwd);
+  }
 });
 
 test('ein Marketplace kette auf ein altes Paket unter ~/.kette wird umgestellt', { skip: process.platform === 'win32' }, async () => {

@@ -42,7 +42,7 @@ Anfrage (JSON): `{ "key": "CDP-…", "device": "<uuid>" }` (POST, damit der Schl
 `kette-cli` (`npm run release`) lädt `kette-enterprise-<version>.tgz` plus `kette-enterprise.json` (`{version, sha256, published_at}`) als Asset in ein GitHub-Release des privaten Repos `alexfriedl/kette-engineering` (Tag `v<version>`). chain-delivery liest die Releases mit `GITHUB_TOKEN`, wie heute bei `claude-design-agent-pack`. Nie öffentlich hosten.
 
 ## CLI-Verhalten
-- `kette login <key>`: Schlüssel nach `~/.kette/credentials` (Rechte 600), Token holen, Paket laden, SHA-256 prüfen, entpacken, Plugins `kette-engineering-core` und `kette-engineering` installieren.
+- `kette login <key>`: Schlüssel nach `~/.kette/credentials` (Rechte 600), Token holen, Paket laden, SHA-256 prüfen, entpacken, Plugins `kette-engineering-core`, `kette-engineering`, `design-system-agents` und `design-review-pack` installieren, `ui-gesetze` aus Community entfernen. Das Agenten-Pack steckt im Enterprise-Paket, der Lieferdienst braucht dafür keinen weiteren Zugriff.
 - `kette update`: Community über das Manifest, Enterprise über `/install/latest` und `/install/token`.
 - `kette logout`: Schlüssel und Enterprise-Paket lokal entfernen (gibt kein Gerät frei, das macht der Support).
 - Fehlertexte auf Deutsch, verständlich, mit nächstem Schritt.

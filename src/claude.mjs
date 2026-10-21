@@ -48,12 +48,21 @@ function migrateLegacy(all) {
   return { ok: true };
 }
 
+// Befehle zum Einrichten von Hand, wenn die CLI Claude Code nicht steuern kann
+export const manualInstall = (source, plugins) => [`claude plugin marketplace add ${source}`, ...plugins.map((p) => `claude plugin install ${pluginId(p)}`)].join(' && ');
+
 // Bindet das Regelwerk als Plugin-Marketplace in Claude Code ein (Scope user); source ist der feste Link auf das aktive Paket
-export function installPlugins(source, plugins) {
+// retire: Plugins der anderen Edition, die entfernt werden, solange der Marketplace sie noch kennt
+export function installPlugins(source, plugins, retire = []) {
   if (!hasClaude()) return { ok: false, reason: 'claude nicht gefunden' };
   const all = marketplaces();
   const migrated = migrateLegacy(all);
   if (!migrated.ok) return migrated;
+  const list = retire.length ? installedPlugins() : '';
+  for (const p of retire.filter((name) => listed(list, pluginId(name)))) {
+    const r = uninstall(pluginId(p));
+    if (!r.ok) return r;
+  }
   let known = all.find((m) => m.name === MARKETPLACE) || null;
   if (known?.path && path.resolve(known.path) !== path.resolve(source)) {
     // Fremde Marketplaces gleichen Namens bleiben unangetastet
