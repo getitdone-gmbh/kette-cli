@@ -12,10 +12,10 @@ irm https://kette.itdone.de/install.ps1 | iex              # Windows
 |---|---|---|
 | Kern-Regeln und Architektur-Muster mit ADR-Vorlage | ja | ja |
 | Projektprofil `.kette/profile.json` und `kette doctor` | ja | ja |
-| Plugin `kette-engineering-core` | ja | ja |
+| Plugin `kette-engineering-core@kette` | ja | ja |
 | Stack- und Plattform-Profile | | ja |
 | Vorlagen für CI, Docker und Deploy, Prüfungen (tsconfig, ESLint, dependency-cruiser, gitleaks) | | ja |
-| Plugin `kette-engineering` mit Code-Reviewer | | ja |
+| Plugin `kette-engineering@kette` mit Code-Reviewer | | ja |
 | Bezug | frei, ohne Schlüssel | mit Lizenzschlüssel der Kette (Solo oder Team), `kette login <key>` |
 | Updates | jederzeit | 12 Monate ab Kauf, die installierte Version bleibt dauerhaft nutzbar |
 
@@ -36,7 +36,9 @@ Im Projektprofil steht die Edition im Feld `tier`: `community` oder `enterprise`
 Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`.
 
 ## Wo die Regeln liegen
-Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`, die Verweiszeile in `CLAUDE.md` und die ADR-Vorlage. Das Regelwerk selbst liegt auf dem Rechner unter `~/.kette/bundles/active/` und ist in Claude Code als Plugin `kette-engineering-core` aktiv (Skills `engineering-rules`, `architecture-patterns`), in Enterprise zusätzlich `kette-engineering` (`platform-profile`, `code-reviewer`). Ansehen mit `kette rules`.
+Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`, die Verweiszeile in `CLAUDE.md` und die ADR-Vorlage. Das Regelwerk selbst liegt auf dem Rechner unter `~/.kette/bundles/active/` und ist in Claude Code als Plugin `kette-engineering-core@kette` aktiv (Skills `engineering-rules`, `architecture-patterns`), in Enterprise zusätzlich `kette-engineering@kette` (`platform-profile`, `code-reviewer`). Ansehen mit `kette rules`.
+
+Der Marketplace der ausgelieferten Pakete heißt in Claude Code `kette`. Bis Version 0.3.0 hieß er `kette-engineering`. Zeigt ein alter `kette-engineering` in `~/.kette`, ersetzt die CLI ihn beim nächsten `kette init`, `add`, `update` oder `login`. Zeigt er auf ein Arbeitsrepo des Regelwerks, bleibt er, und die CLI nennt den Befehl zum Deaktivieren, falls Skills doppelt aktiv sind.
 
 ## Was der Installer tut
 - Prüft Node.js 20 oder neuer, git und tar.
@@ -49,6 +51,19 @@ Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`,
 - Keine Cloud-Aktionen, kein Deploy, keine Konten. Infrastruktur entsteht als Code im Repo.
 - Kein Überschreiben vorhandener Dateien. `CLAUDE.md` bekommt höchstens eine Verweiszeile.
 - Keine Telemetrie. Der Lieferdienst sieht nur Schlüssel, Geräte-ID, CLI-Version und die IP-Adresse, und das nur bei `kette login` und `kette update` in Enterprise.
+
+## Entfernen
+1. Falls eingeloggt: `kette logout`. Den Geräteplatz der Lizenz gibt nur der Support frei.
+2. Plugins und Marketplace aus Claude Code entfernen:
+   ```sh
+   claude plugin uninstall kette-engineering@kette
+   claude plugin uninstall kette-engineering-core@kette
+   claude plugin marketplace remove kette
+   ```
+3. Ablage löschen: `rm -rf ~/.kette` (bzw. das Verzeichnis aus `KETTE_HOME`).
+4. In der Shell-Startdatei (`~/.zshrc`, `~/.bashrc` oder `~/.profile`) die Zeile `# kette` und die PATH-Zeile darunter löschen. Windows: `~\.kette\bin` aus dem PATH des Benutzers entfernen.
+
+Die Dateien im Projekt (`.kette/`, Verweiszeile in `CLAUDE.md`, ADR-Vorlage) bleiben, bis sie jemand löscht.
 
 ## Umgebungsvariablen
 | Variable | Standard | Zweck |
