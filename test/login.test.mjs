@@ -236,7 +236,7 @@ test('login versucht ui-gesetze auch ohne lesbare Plugin-Liste zu entfernen und 
   assert.ok(!claude.calls().some((c) => c.startsWith('plugin install')));
 });
 
-test('ohne lesbare Plugin-Liste gilt "not found in installed plugins" als schon entfernt, andere Fehler nicht', { skip: process.platform === 'win32' }, async () => {
+test('ohne lesbare Plugin-Liste gilt "not found in installed plugins" als schon entfernt', { skip: process.platform === 'win32' }, async () => {
   await run('login', KEYS.ok, '--no-plugins');
   const missing = (id) => ({ code: 1, out: `✘ Failed to uninstall plugin "${id}": Plugin "${id}" not found in installed plugins` });
   const claude = fakeClaude([], 'kette-engineering-core@kette\nkette-engineering@kette\n', {
