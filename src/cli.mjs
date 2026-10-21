@@ -8,7 +8,7 @@ import { describe, print, apply } from './plan.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
 import { hasClaude, installPlugins, installedPlugins } from './claude.mjs';
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
-import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, pluginsFor, isNewer } from './editions.mjs';
+import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, pluginsFor, pluginSummary, isNewer } from './editions.mjs';
 import { rules, tilde } from './rules.mjs';
 import { credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 
@@ -148,6 +148,11 @@ Dieses Projekt folgt dem Regelwerk der Kette. Agenten lesen zuerst \`.kette/prof
 - Schwer umkehrbare Entscheidungen als ADR unter \`docs/adr/\` festhalten (Vorlage \`docs/adr/0000-vorlage.md\`).
 - Eine Kern-Regel gilt, solange kein ADR sie ausdrücklich außer Kraft setzt.
 - Infrastruktur nur als Code erzeugen und mit plan bzw. what-if prüfen. apply, Deploy und zerstörende Migrationen führt ein Mensch aus.
+
+## Wo die Regeln liegen
+- Auf diesem Rechner unter \`~/.kette/bundles/active/\`: \`rules/core\`, \`rules/architecture\`, in Enterprise auch \`profiles/\` und \`checks/\`.
+- In Claude Code als Plugin \`kette-engineering-core\` (Skills \`engineering-rules\`, \`architecture-patterns\`), in Enterprise zusätzlich \`kette-engineering\` (\`platform-profile\`, \`code-reviewer\`).
+- Ansehen mit \`kette rules\`, prüfen mit \`kette doctor\`.
 `;
 }
 
@@ -190,6 +195,8 @@ async function setup(root, opts, isNew) {
   const described = describe(planFor(root, profile, bundleDir, tier), root);
   console.log(`\n${opts.dryRun ? 'Würde anlegen' : 'Plan'} in ${path.resolve(root)} (Edition ${editionLabel(tier)}):`);
   print(described);
+  const stale = staleNote(described, root);
+  if (stale) console.log(stale);
   if (tier === COMMUNITY) console.log('\n  Plattform-Vorlagen, Prüfungen und Code-Reviewer gibt es in der Edition Enterprise (Die Kette): kette login <key>');
   else if (!PLATFORM_FILES[profile.platform.id]) console.log(`\n  Für ${profile.platform.id} gibt es noch keine Vorlagen (Status: ${platformStatus(bundleDir, profile.platform.id) || 'unbekannt'}).`);
   if (opts.dryRun) return 0;
@@ -197,17 +204,40 @@ async function setup(root, opts, isNew) {
 
   if (isNew && !fs.existsSync(path.join(root, '.git'))) spawnSync('git', ['init', '-q', root]);
   apply(described, root);
-  console.log('Dateien geschrieben.');
 
+  let plugins = { ok: false, reason: 'mit --no-plugins übersprungen' };
+  let rulesDir = bundleDir;
   if (!opts.noPlugins) {
-    const plugins = pluginsFor(tier);
-    const link = setActiveBundle(bundleDir);
-    const r = installPlugins(link, plugins);
-    if (r.ok) console.log(`Claude-Code-Plugins installiert: ${plugins.join(', ')}`);
-    else console.log(`Plugins nicht installiert (${r.reason}). Von Hand: claude plugin marketplace add ${link} && claude plugin install kette-engineering-core@kette-engineering`);
+    rulesDir = setActiveBundle(bundleDir);
+    plugins = installPlugins(rulesDir, pluginsFor(tier));
+    if (!plugins.ok) console.log(`Plugins nicht installiert (${plugins.reason}). Von Hand: claude plugin marketplace add ${rulesDir} && claude plugin install kette-engineering-core@kette-engineering`);
   }
-  console.log('\nFertig. Prüfen mit: kette doctor');
+  console.log(summary(described, tier, plugins.ok, rulesDir));
   return 0;
+}
+
+const README_ITEM = '.kette/README.md';
+
+// Hinweis, wenn eine vorhandene .kette/README.md nicht der aktuellen Fassung entspricht; sie wird nie überschrieben
+function staleNote(described, root) {
+  const note = described.find((d) => d.path === README_ITEM);
+  if (note?.action !== 'vorhanden' || fs.readFileSync(path.join(root, README_ITEM), 'utf8') === note.content) return null;
+  return `  ${README_ITEM} weicht von der aktuellen Fassung ab (z. B. ohne „Wo die Regeln liegen“). Neu erzeugen: Datei löschen und kette add erneut ausführen.`;
+}
+
+// Kurzer Abschluss: was im Projekt entstand, was auf dem Rechner aktiv ist, wie es weitergeht
+function summary(described, tier, pluginsOk, rulesDir) {
+  const changed = described.filter((d) => d.action !== 'vorhanden').map((d) => (d.action === 'ergänzen' ? `${d.path} (ergänzt)` : d.path));
+  const steps = ['kette doctor', 'Claude Code im Projekt öffnen und fragen: "Prüfe diesen Code gegen die Kette-Regeln"'];
+  if (tier === COMMUNITY) steps.push('kette login <key> für Profile, Prüfungen und Code-Reviewer (Enterprise)');
+  return [
+    '',
+    `Fertig. Im Projekt: ${changed.length ? changed.join(', ') : 'nichts geändert, alles schon vorhanden'}`,
+    pluginsOk ? `Regeln aktiv in Claude Code: ${pluginSummary(tier)}` : `Regeln in Claude Code noch nicht aktiv (Plugins: ${pluginSummary(tier)})`,
+    `Regelwerk auf diesem Rechner: ${tilde(rulesDir)}, ansehen mit: kette rules`,
+    'Nächste Schritte:',
+    ...steps.map((s, i) => `  ${i + 1}. ${s}`),
+  ].join('\n');
 }
 
 function readProfile(root) {

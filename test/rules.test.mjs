@@ -99,6 +99,45 @@ test('rules ohne installiertes Regelwerk nennt den nächsten Schritt', async () 
   await assert.rejects(run('rules'), /Kein Regelwerk auf diesem Rechner\. Laden mit: kette init .*kette update/);
 });
 
+test('init endet mit Zusammenfassung, .kette/README.md sagt, wo die Regeln liegen', async () => {
+  rulebook('community');
+  const root = path.join(tmp(), 'neu');
+  const { result, out } = await run('init', root, '--yes', '--no-plugins');
+  assert.equal(result, 0);
+  const tail = out.slice(out.indexOf('Fertig.'));
+  assert.match(tail, /^Fertig\. Im Projekt: \.kette\/profile\.json, \.kette\/README\.md, CLAUDE\.md, docs\/adr\/0000-vorlage\.md\n/);
+  assert.match(tail, /Regeln in Claude Code noch nicht aktiv \(Plugins: kette-engineering-core \(engineering-rules, architecture-patterns\)\)/);
+  assert.match(tail, /ansehen mit: kette rules/);
+  assert.match(tail, /1\. kette doctor\n  2\. Claude Code im Projekt öffnen .*\n  3\. kette login <key>/);
+  assert.ok(tail.split('\n').length <= 10);
+  assert.doesNotMatch(out, /[–—]/);
+  const note = fs.readFileSync(path.join(root, '.kette', 'README.md'), 'utf8');
+  assert.match(note, /## Wo die Regeln liegen/);
+  assert.match(note, /~\/\.kette\/bundles\/active\//);
+  assert.match(note, /kette-engineering-core/);
+  assert.match(note, /kette rules/);
+});
+
+test('add überschreibt eine veraltete .kette/README.md nicht und zeigt, wie sie neu entsteht', async () => {
+  rulebook('community');
+  const root = tmp();
+  write(root, '.kette/README.md', '# Kette\n\nalte Fassung\n');
+  const cwd = process.cwd();
+  process.chdir(root);
+  try {
+    const { out } = await run('add', '--yes', '--no-plugins');
+    assert.match(out, /\.kette\/README\.md weicht von der aktuellen Fassung ab .* Datei löschen und kette add erneut ausführen/);
+    assert.equal(fs.readFileSync(path.join(root, '.kette', 'README.md'), 'utf8'), '# Kette\n\nalte Fassung\n');
+    const again = await run('add', '--yes', '--no-plugins');
+    assert.match(again.out, /weicht von der aktuellen Fassung ab/);
+    fs.rmSync(path.join(root, '.kette', 'README.md'));
+    await run('add', '--yes', '--no-plugins');
+    assert.doesNotMatch((await run('add', '--yes', '--no-plugins')).out, /weicht von der aktuellen Fassung ab/);
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
 test('doctor zeigt, wo Regelwerk und Plugins liegen', async () => {
   const d = rulebook('community');
   const { out } = await run('doctor', '--ci');
