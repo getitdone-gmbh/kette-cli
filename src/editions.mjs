@@ -16,6 +16,9 @@ export const isLegacyTier = (tier) => tier in LEGACY;
 export const editionLabel = (tier) => EDITIONS[normalizeTier(tier)]?.label || String(tier);
 export const pluginsFor = (tier) => EDITIONS[normalizeTier(tier)].plugins;
 
+// Plugins der Edition, die ein älteres Paket auf diesem Rechner noch nicht enthält
+export const missingPlugins = (bundleDir, tier) => pluginsFor(tier).filter((p) => !fs.existsSync(path.join(bundleDir, 'plugins', p)));
+
 // Plugins der Edition from, die in to fehlen; beim Wechsel der Edition werden sie entfernt
 export const retiredPlugins = (from, to) => pluginsFor(from).filter((p) => !pluginsFor(to).includes(p));
 

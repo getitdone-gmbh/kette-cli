@@ -123,7 +123,7 @@ test('init endet mit Zusammenfassung, .kette/README.md beschreibt den Ablauf der
   assert.doesNotMatch(note, /design-system-agents:/);
   assert.match(note, /## Wo die Regeln liegen/);
   assert.match(note, /~\/\.kette\/bundles\/active\//);
-  assert.match(note, /kette-engineering-core@kette/);
+  assert.match(note, /In Claude Code die Plugins `kette-engineering-core@kette`, `ui-gesetze@kette`\./);
   assert.doesNotMatch(note, /[\u2013\u2014]/);
 });
 
@@ -139,7 +139,9 @@ test('Enterprise: .kette/README.md schreibt Rollen, Pflicht-Gates und /feature-l
   assert.match(note, /Pflicht-Gates/);
   assert.match(note, /\/feature-loop start <Feature>/);
   assert.match(note, /apply, Deploy und zerstörende Migrationen führt ein Mensch aus/);
-  assert.doesNotMatch(note, /kette login/);
+  assert.match(note, /Die Agenten, Gates und `\/feature-loop` brauchen Die Kette auf dem Rechner \(`kette login <key>`\)/);
+  assert.match(note, /`design-system-agents@kette`, `design-review-pack@kette`\./);
+  assert.doesNotMatch(note, /\d+ (Agenten|Skills|Befehle)/);
   assert.doesNotMatch(note, /[\u2013\u2014]/);
 });
 
@@ -148,7 +150,7 @@ test('init nennt alle Plugins der Edition zum Einrichten von Hand, wenn Claude C
   const claude = fakeClaude([{ name: 'kette', source: 'directory', path: '/repos/kette' }]);
   let out;
   try { ({ out } = await run('init', path.join(tmp(), 'neu'), '--yes')); } finally { claude.restore(); }
-  assert.match(out, /Von Hand: claude plugin marketplace add \S+ && claude plugin install kette-engineering-core@kette && claude plugin install ui-gesetze@kette/);
+  assert.match(out, /Von Hand:\n  claude plugin marketplace add "[^"]+"\n  claude plugin install kette-engineering-core@kette\n  claude plugin install ui-gesetze@kette\n/);
 });
 
 test('add erneuert nur den Kette-Block, eigene Notizen bleiben', async () => {
@@ -206,6 +208,42 @@ test('doctor listet je Plugin Agenten, Skills und Befehle aus dem Paket', async 
     assert.doesNotMatch((await run('doctor', '--ci')).out, /Inhalt der Plugins/);
   } finally {
     claude.restore();
+    process.chdir(cwd);
+  }
+});
+
+test('add hebt tier im Profil auf die Edition des Rechners an und schreibt den Enterprise-Ablauf, senkt nie', async () => {
+  const d = rulebook('enterprise', { profiles: true });
+  for (const f of ['tsconfig.strict.json', 'eslint.config.mjs', 'dependency-cruiser.cjs', 'gitleaks.toml']) write(d, `checks/${f}`, 'x');
+  const root = tmp();
+  write(root, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'gitlab' }, patterns: ['layered'], tier: 'community', eigen: true }, null, 2));
+  const cwd = process.cwd();
+  process.chdir(root);
+  try {
+    const { out } = await run('add', '--yes', '--no-plugins');
+    assert.match(out, /~ erneuern  \.kette\/profile\.json/);
+    const profile = JSON.parse(fs.readFileSync(path.join(root, '.kette', 'profile.json'), 'utf8'));
+    assert.equal(profile.tier, 'enterprise');
+    assert.equal(profile.eigen, true);
+    assert.match(fs.readFileSync(path.join(root, '.kette', 'README.md'), 'utf8'), /kette-engineering:code-reviewer/);
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
+test('Community-Rechner lässt ein Enterprise-Projekt auf Enterprise, doctor nennt, was fehlt', async () => {
+  rulebook('community');
+  const root = tmp();
+  write(root, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'gitlab' }, patterns: ['layered'], tier: 'enterprise' }));
+  const cwd = process.cwd();
+  process.chdir(root);
+  try {
+    await run('add', '--yes', '--no-plugins');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.kette', 'profile.json'), 'utf8')).tier, 'enterprise');
+    assert.match(fs.readFileSync(path.join(root, '.kette', 'README.md'), 'utf8'), /design-system-agents:requirements-engineer/);
+    const { out } = await run('doctor', '--ci');
+    assert.match(out, /HINW  Profil verlangt die Edition Enterprise .* Agenten, Gates, \/feature-loop, Plattform-Profile und Prüfungen aus \.kette\/README\.md fehlen/);
+  } finally {
     process.chdir(cwd);
   }
 });

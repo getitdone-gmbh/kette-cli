@@ -5,13 +5,18 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const ENTERPRISE_REPO = 'alexfriedl/kette-engineering';
+const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? [path.join(dir, e.name), ...walk(path.join(dir, e.name))] : [path.join(dir, e.name)]));
 const publishEnterprise = process.argv.includes('--publish-enterprise');
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const eng = path.resolve(process.env.KETTE_ENGINEERING || path.join(root, '..', 'kette-engineering'));
 const dist = path.join(root, 'dist');
+// Erst in einen Nachbarordner bauen; dist wird nur ersetzt, wenn keine Version mit anderem Inhalt überschrieben würde
+const out = path.join(root, '.dist-next');
 const cliVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const commit = execFileSync('git', ['-C', eng, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const sha = commit.slice(0, 7);
@@ -23,31 +28,51 @@ const count = execFileSync('git', ['-C', eng, 'rev-list', '--count', 'HEAD'], { 
 const COMMUNITY_PACK_PLUGINS = ['ui-gesetze'];
 const ENTERPRISE_PACK_PLUGINS = ['design-system-agents', 'design-review-pack'];
 const agentPack = path.resolve(process.env.KETTE_AGENT_PACK || path.join(root, '..', 'claude-design-agent-pack'));
-const newestTag = () => execFileSync('git', ['-C', agentPack, 'tag', '--list', 'v*', '--sort=-v:refname'], { encoding: 'utf8' }).split('\n')[0].trim();
+const newestTag = () => execFileSync('git', ['-C', agentPack, 'tag', '--list', 'v*', '--sort=-v:refname'], { encoding: 'utf8' }).split('\n').find((tag) => /^v\d+\.\d+\.\d+$/.test(tag)) || '';
 const agentPackRef = process.env.KETTE_AGENT_PACK_REF || newestTag();
-if (!agentPackRef) throw new Error(`claude-design-agent-pack (${agentPack}) hat kein Tag v*, KETTE_AGENT_PACK_REF setzen`);
+if (!agentPackRef) throw new Error(`claude-design-agent-pack (${agentPack}) hat kein Tag vX.Y.Z, KETTE_AGENT_PACK_REF setzen`);
 const agentPackCommit = execFileSync('git', ['-C', agentPack, 'rev-parse', `${agentPackRef}^{commit}`], { encoding: 'utf8' }).trim();
 const agentPackTagged = execFileSync('git', ['-C', agentPack, 'tag', '--points-at', agentPackCommit], { encoding: 'utf8' }).trim() !== '';
-// Semver, damit Claude Code neue Plugin-Versionen erkennt: 0.<Datum>.<Anzahl Commits>
-const version = `0.${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${count}`;
+const packCount = execFileSync('git', ['-C', agentPack, 'rev-list', '--count', agentPackCommit], { encoding: 'utf8' }).trim();
+// Semver, damit Claude Code neue Plugin-Versionen erkennt: 0.<Datum>.<Commits kette-engineering plus Commits Agenten-Pack>; ein neuer Stand in einem der beiden Repos ergibt eine neue Version
+const version = `0.${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${Number(count) + Number(packCount)}`;
+// Feste Zeit für alle Dateien im Paket (jüngerer der beiden Commits), damit gleicher Inhalt dieselbe Prüfsumme ergibt
+const commitTime = (repo, ref) => Number(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%ct', ref], { encoding: 'utf8' }).trim());
+const sourceTime = new Date(Math.max(commitTime(eng, 'HEAD'), commitTime(agentPack, agentPackCommit)) * 1000);
 
 const strip = (s) => s.split('\n').filter((l) => !l.startsWith('// Kopie von')).join('\n');
 if (strip(fs.readFileSync(path.join(root, 'src/validate.mjs'), 'utf8')) !== fs.readFileSync(path.join(eng, 'lib/validate.mjs'), 'utf8')) {
   throw new Error('src/validate.mjs weicht von kette-engineering/lib/validate.mjs ab');
 }
 
-fs.rmSync(dist, { recursive: true, force: true });
-fs.mkdirSync(path.join(dist, 'private'), { recursive: true });
+fs.rmSync(out, { recursive: true, force: true });
+fs.mkdirSync(path.join(out, 'private'), { recursive: true });
 
 // Stand aus Git statt Arbeitsordner, damit offene Änderungen oder ein anderer Branch im Agenten-Pack nicht mitgepackt werden
 const packSrc = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-agent-pack-'));
 const archive = execFileSync('git', ['-C', agentPack, 'archive', '--format=tar', agentPackCommit, '.claude-plugin/marketplace.json', ...[...COMMUNITY_PACK_PLUGINS, ...ENTERPRISE_PACK_PLUGINS].map((p) => `plugins/${p}`)], { maxBuffer: 1 << 30 });
 execFileSync('tar', ['-x', '-C', packSrc], { input: archive });
+// In der Kette heißt der Marketplace kette; Installationshinweise in den Plugin-Texten entsprechend umschreiben
+for (const f of walk(path.join(packSrc, 'plugins')).filter((f) => f.endsWith('.md'))) {
+  const text = fs.readFileSync(f, 'utf8');
+  if (text.includes('@claude-design-agent-pack')) fs.writeFileSync(f, text.replaceAll('@claude-design-agent-pack', '@kette'));
+}
 const fromEng = (p) => path.join(eng, p);
 const fromPack = (name) => [path.join(packSrc, 'plugins', name), `plugins/${name}`];
-// macOS-tar packt sonst Metadaten ein, die GNU tar beim Entpacken als Warnung meldet
-const TAR_FLAGS = process.platform === 'darwin' ? ['--no-xattrs', '--no-mac-metadata'] : [];
+// macOS-tar packt sonst Metadaten ein, die GNU tar beim Entpacken als Warnung meldet; Besitzer immer 0, damit das Paket nicht vom Rechner abhängt
+const TAR_FLAGS = process.platform === 'darwin'
+  ? ['--no-xattrs', '--no-mac-metadata', '--uid', '0', '--gid', '0', '--uname', '', '--gname', '']
+  : ['--owner=0', '--group=0', '--numeric-owner'];
 const hash = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+
+// Packt dir reproduzierbar nach file: feste Zeit, sortierte Einträge, gzip ohne Zeitstempel
+function tarball(dir, file) {
+  fs.chmodSync(dir, 0o755);
+  const entries = ['.', ...walk(dir).map((f) => `./${path.relative(dir, f).split(path.sep).join('/')}`).sort()];
+  for (const e of entries) fs.utimesSync(path.join(dir, e), sourceTime, sourceTime);
+  const tar = execFileSync('tar', [...TAR_FLAGS, '--no-recursion', '-cf', '-', '-C', dir, '-T', '-'], { input: entries.join('\n') + '\n', maxBuffer: 1 << 30, env: { ...process.env, COPYFILE_DISABLE: '1' } });
+  fs.writeFileSync(file, zlib.gzipSync(tar, { level: 9 }));
+}
 
 function pack(name, entries, extra = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-'));
@@ -57,10 +82,10 @@ function pack(name, entries, extra = {}) {
     if (fs.existsSync(pj)) fs.writeFileSync(pj, JSON.stringify({ ...JSON.parse(fs.readFileSync(pj, 'utf8')), version }, null, 2) + '\n');
   }
   for (const [to, content] of Object.entries(extra)) { fs.mkdirSync(path.dirname(path.join(tmp, to)), { recursive: true }); fs.writeFileSync(path.join(tmp, to), content); }
-  const out = path.join(dist, name);
-  execFileSync('tar', [...TAR_FLAGS, '-czf', out, '-C', tmp, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+  const file = path.join(out, name);
+  tarball(tmp, file);
   fs.rmSync(tmp, { recursive: true, force: true });
-  return out;
+  return file;
 }
 
 // Ausgelieferte Pakete heißen in Claude Code "kette", der Entwickler-Marketplace auf das Repo behält "kette-engineering"
@@ -88,8 +113,8 @@ fs.rmSync(packSrc, { recursive: true, force: true });
 
 const cliTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-cli-'));
 for (const p of ['bin', 'src', 'package.json', 'LICENSE']) fs.cpSync(path.join(root, p), path.join(cliTmp, p), { recursive: true });
-const cli = path.join(dist, `kette-cli-${cliVersion}.tgz`);
-execFileSync('tar', [...TAR_FLAGS, '-czf', cli, '-C', cliTmp, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+const cli = path.join(out, `kette-cli-${cliVersion}.tgz`);
+tarball(cliTmp, cli);
 fs.rmSync(cliTmp, { recursive: true, force: true });
 
 const manifest = {
@@ -98,14 +123,31 @@ const manifest = {
   cli: { version: cliVersion, url: path.basename(cli), sha256: hash(cli) },
   bundles: { community: { url: path.basename(community), sha256: hash(community) } },
 };
-fs.writeFileSync(path.join(dist, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+const enterpriseMeta = { version, sha256: hash(enterprise), published_at: new Date().toISOString(), agent_pack: { ref: agentPackRef, commit: agentPackCommit.slice(0, 7) } };
+
+// Gleiche Version mit anderem Inhalt würde ein schon gebautes oder verteiltes Paket ersetzen, ohne dass Claude Code es bemerkt
+const readJson = (f) => (fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : null);
+const before = { community: readJson(path.join(dist, 'manifest.json')), enterprise: readJson(path.join(dist, 'private', 'kette-enterprise.json')) };
+const clash = [
+  before.community?.version === version && before.community.bundles?.community?.sha256 !== manifest.bundles.community.sha256 && 'Community',
+  before.enterprise?.version === version && before.enterprise.sha256 !== enterpriseMeta.sha256 && 'Enterprise',
+].filter(Boolean);
+if (clash.length) {
+  fs.rmSync(out, { recursive: true, force: true });
+  throw new Error(`dist enthält schon Version ${version} mit anderem Inhalt (${clash.join(', ')}). Erst committen, damit eine neue Version entsteht, oder dist bewusst löschen.`);
+}
+
+fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+fs.writeFileSync(path.join(out, 'private', 'kette-enterprise.json'), JSON.stringify(enterpriseMeta, null, 2) + '\n');
+for (const f of ['install.sh', 'install.ps1']) fs.copyFileSync(path.join(root, 'install', f), path.join(out, f));
+fs.rmSync(dist, { recursive: true, force: true });
+fs.renameSync(out, dist);
+const enterpriseFile = path.join(dist, 'private', path.basename(enterprise));
 const enterpriseInfo = path.join(dist, 'private', 'kette-enterprise.json');
-fs.writeFileSync(enterpriseInfo, JSON.stringify({ version, sha256: hash(enterprise), published_at: new Date().toISOString(), agent_pack: { ref: agentPackRef, commit: agentPackCommit.slice(0, 7) } }, null, 2) + '\n');
-for (const f of ['install.sh', 'install.ps1']) fs.copyFileSync(path.join(root, 'install', f), path.join(dist, f));
 console.log(`release ${version} · cli ${cliVersion} · claude-design-agent-pack ${agentPackRef} (${agentPackCommit.slice(0, 7)})\n${fs.readdirSync(dist).join('\n')}\nprivate/${fs.readdirSync(path.join(dist, 'private')).join('\nprivate/')}`);
 
 // Release-Argumente für gh; das Enterprise-Paket geht nur in ein privates Repo
-const releaseArgs = ['release', 'create', `v${version}`, enterprise, enterpriseInfo, '--repo', ENTERPRISE_REPO, '--target', commit, '--title', `v${version}`, '--notes', `Enterprise-Paket ${version} (kette-engineering ${sha}, claude-design-agent-pack ${agentPackRef})`];
+const releaseArgs = ['release', 'create', `v${version}`, enterpriseFile, enterpriseInfo, '--repo', ENTERPRISE_REPO, '--target', commit, '--title', `v${version}`, '--notes', `Enterprise-Paket ${version} (kette-engineering ${sha}, claude-design-agent-pack ${agentPackRef})`];
 if (publishEnterprise) {
   if (dirty) throw new Error('Mit offenen Änderungen in kette-engineering wird nichts veröffentlicht');
   if (!agentPackTagged) throw new Error(`claude-design-agent-pack ${agentPackRef} ist kein Release-Tag, veröffentlicht wird nur ein getaggter Stand`);

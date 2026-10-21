@@ -191,6 +191,55 @@ test('logout entfernt die Enterprise-Plugins', { skip: process.platform === 'win
   assert.ok(!calls.includes('plugin uninstall kette-engineering-core@kette'));
 });
 
+const ENTERPRISE_IDS = ['kette-engineering', 'design-system-agents', 'design-review-pack'].map((p) => `${p}@kette`);
+
+test('login: scheitert ein Schritt nach dem Entfernen von ui-gesetze, steht das im Grund, mit Befehlen je Zeile', { skip: process.platform === 'win32' }, async () => {
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-gesetze@kette\n', { 'plugin install design-system-agents@kette': { code: 1, out: 'boom' } });
+  let out;
+  try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
+  assert.match(out, /Plugins nicht installiert \(design-system-agents@kette: boom; vorher schon entfernt: ui-gesetze@kette\)\. Von Hand:\n  claude plugin marketplace add "[^"]+"\n  claude plugin install kette-engineering-core@kette\n/);
+  assert.doesNotMatch(out, /Claude-Code-Plugins installiert/);
+  assert.ok(!claude.installed().includes('design-review-pack@kette'));
+});
+
+test('logout entfernt Enterprise-Plugins vor dem Umschalten, prüft per Liste und meldet, was bleibt', { skip: process.platform === 'win32' }, async () => {
+  await run('login', KEYS.ok, '--no-plugins');
+  const claude = fakeClaude([], ['kette-engineering-core@kette', ...ENTERPRISE_IDS].join('\n'), { 'plugin uninstall design-system-agents@kette': { code: 1, out: 'Plugin not found' } });
+  let out;
+  try { ({ out } = await run('logout')); } finally { claude.restore(); }
+  assert.match(out, /Plugin design-system-agents nicht entfernt \(Plugin not found\)\. Von Hand: claude plugin uninstall design-system-agents@kette/);
+  assert.doesNotMatch(out, /Plugin kette-engineering nicht entfernt/);
+  assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'design-system-agents@kette']);
+});
+
+test('logout installiert Community aus dem lokalen Paket und nennt kette update, wenn ui-gesetze darin fehlt', { skip: process.platform === 'win32' }, async () => {
+  const old = path.join(kh, 'bundles', 'community', '0.20261020.7');
+  write(old, '.claude-plugin/marketplace.json', '{"name":"kette","plugins":[]}');
+  write(old, 'plugins/kette-engineering-core/.claude-plugin/plugin.json', '{}');
+  await run('login', KEYS.ok, '--no-plugins');
+  const state = path.join(kh, 'state.json');
+  fs.writeFileSync(state, JSON.stringify({ ...JSON.parse(fs.readFileSync(state, 'utf8')), bundle_community: { version: '0.20261020.7', dir: old } }));
+  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: path.join(kh, 'bundles', 'active') }], ['kette-engineering-core@kette', ...ENTERPRISE_IDS].join('\n'));
+  let out;
+  try { ({ out } = await run('logout')); } finally { claude.restore(); }
+  const calls = claude.calls();
+  const lastUninstall = Math.max(...ENTERPRISE_IDS.map((id) => calls.indexOf(`plugin uninstall ${id}`)));
+  assert.ok(lastUninstall >= 0 && lastUninstall < calls.indexOf('plugin marketplace update kette'));
+  assert.ok(calls.includes('plugin install kette-engineering-core@kette'));
+  assert.ok(!calls.includes('plugin install ui-gesetze@kette'));
+  assert.match(out, /HINW  Das Paket auf diesem Rechner enthält ui-gesetze noch nicht\. Neu laden mit: kette update/);
+  assert.equal(fs.realpathSync(path.join(kh, 'bundles', 'active')), fs.realpathSync(old));
+  assert.deepEqual(claude.installed(), ['kette-engineering-core@kette']);
+});
+
+test('ein einzeln installiertes Agenten-Pack wird nicht angefasst, doppelte Plugins werden genannt', { skip: process.platform === 'win32' }, async () => {
+  const claude = fakeClaude([{ name: 'claude-design-agent-pack', source: 'directory', path: '/zip/agent-pack' }], 'design-system-agents@claude-design-agent-pack\nui-gesetze@claude-design-agent-pack\n');
+  let out;
+  try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
+  assert.match(out, /HINW  Marketplace claude-design-agent-pack \(\/zip\/agent-pack\) bleibt unangetastet\. .*Deaktivieren mit: claude plugin disable design-system-agents@claude-design-agent-pack$/m);
+  assert.ok(!claude.calls().some((c) => /claude-design-agent-pack/.test(c) && /uninstall|remove/.test(c)));
+});
+
 test('update im Projekt erneuert den Kette-Block für die angemeldete Edition', async () => {
   await run('login', KEYS.ok, '--no-plugins');
   const project = tmp();

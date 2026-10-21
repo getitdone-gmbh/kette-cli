@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
-import { ENTERPRISE, pluginSummary } from './editions.mjs';
-import { MARKETPLACE } from './claude.mjs';
+import { ENTERPRISE, pluginsFor } from './editions.mjs';
+import { MARKETPLACE, pluginId } from './claude.mjs';
 
 export const NOTE_PATH = '.kette/README.md';
 const BEGIN = '<!-- kette:begin · Von kette erzeugt. kette update und kette add schreiben diesen Block neu, eigene Notizen gehören darunter. -->';
 const END = '<!-- kette:end -->';
-const BLOCK = /<!-- kette:begin[^\n]*-->[\s\S]*?<!-- kette:end -->\n?/;
+const BEGIN_MARK = '<!-- kette:begin';
+const BEGIN_LINE = /<!-- kette:begin[^\n]*-->/;
 
 // sha256 der unveränderten .kette/README.md aus den Versionen 0.1.0 bis 0.3.1 (ohne Block); nur diese Fassungen werden ganz ersetzt
 const LEGACY_NOTES = new Set([
@@ -31,6 +32,8 @@ Kleine Korrekturen (Tippfehler, eine Zeile) direkt umsetzen und mit Schritt 4 pr
 
 Ein ganzes Feature mit allen Rollen, Fix-Schleife und Laufprotokoll: \`/feature-loop start <Feature>\` (in Claude Code \`/design-system-agents:feature-loop\`).
 
+Die Agenten, Gates und \`/feature-loop\` brauchen Die Kette auf dem Rechner (\`kette login <key>\`). Fehlen sie, gelten Muster und ADR, \`engineering-rules\` beim Bau und eine Selbstprüfung gegen die Regeln, und \`kette doctor\` zeigt, was fehlt.
+
 Infrastruktur nur als Code erzeugen und mit plan bzw. what-if prüfen. apply, Deploy und zerstörende Migrationen führt ein Mensch aus.`;
 
 const COMMUNITY_FLOW = `## Ablauf für jede Änderung
@@ -41,8 +44,9 @@ const COMMUNITY_FLOW = `## Ablauf für jede Änderung
 
 Agenten für Anforderung, Architektur und Umsetzung sowie unabhängige Gates (Code-Reviewer, QA, Design-Review) gibt es mit Die Kette (Edition Enterprise): \`kette login <key>\`.`;
 
-// Text für .kette/README.md je Edition, zwischen den Markierungen, damit nur dieser Block erneuert wird
-export function agentNote(tier, bundleDir) {
+// Text für .kette/README.md je Edition des Projekts (profile.tier), zwischen den Markierungen, damit nur dieser Block erneuert wird
+// Ohne Zahlen und Rechnerzustand, weil die Datei im Repo liegt und für alle im Team gleich bleiben soll
+export function agentNote(tier) {
   const enterprise = tier === ENTERPRISE;
   const where = enterprise ? '`rules/`, `profiles/`, `checks/`' : '`rules/core`, `rules/architecture`';
   return `${BEGIN}
@@ -54,15 +58,32 @@ ${enterprise ? ENTERPRISE_FLOW : COMMUNITY_FLOW}
 
 ## Wo die Regeln liegen
 - Auf diesem Rechner unter \`~/.kette/bundles/active/\`: ${where}.
-- In Claude Code: ${pluginSummary(tier, MARKETPLACE, bundleDir)}.
+- In Claude Code die Plugins ${pluginsFor(tier).map((p) => `\`${pluginId(p, MARKETPLACE)}\``).join(', ')}.
 - Ansehen mit \`kette rules\`, Inhalt der Plugins und Prüfung mit \`kette doctor\`.
 ${END}
 `;
 }
 
-// Neuer Dateiinhalt mit erneuertem Block; null, wenn die Datei keinen Block hat und keine unveränderte alte Fassung ist
+const count = (text, mark) => text.split(mark).length - 1;
+
+// Neuer Dateiinhalt mit erneuertem Block; null, wenn die Markierungen nicht genau einmal und in richtiger Reihenfolge stehen
+// und die Datei keine unveränderte alte Fassung ist. Zeilenenden der Datei (CRLF oder LF) bleiben erhalten
 export function renewNote(current, note) {
-  if (BLOCK.test(current)) return current.replace(BLOCK, () => note);
-  if (LEGACY_NOTES.has(crypto.createHash('sha256').update(current).digest('hex'))) return note;
-  return null;
+  const crlf = current.includes('\r\n');
+  const text = crlf ? current.replace(/\r\n/g, '\n') : current;
+  const next = renewText(text, note);
+  if (next === null || !crlf) return next;
+  return next.replace(/\n/g, '\r\n');
+}
+
+function renewText(text, note) {
+  if (count(text, BEGIN_MARK) === 1 && count(text, END) === 1) {
+    const begin = text.search(BEGIN_LINE);
+    const end = text.indexOf(END);
+    if (begin < 0 || begin > end) return null;
+    const after = end + END.length + (text[end + END.length] === '\n' ? 1 : 0);
+    return text.slice(0, begin) + note + text.slice(after);
+  }
+  if (count(text, BEGIN_MARK) || count(text, END)) return null;
+  return LEGACY_NOTES.has(crypto.createHash('sha256').update(text).digest('hex')) ? note : null;
 }
