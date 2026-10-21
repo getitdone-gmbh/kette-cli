@@ -9,6 +9,7 @@ import { ask, choose, confirm, close } from './prompt.mjs';
 import { hasClaude, installPlugins, installedPlugins } from './claude.mjs';
 import { credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, pluginsFor, isNewer } from './editions.mjs';
+import { rules } from './rules.mjs';
 import { credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -64,6 +65,7 @@ Befehle:
   kette add             Bestehendes Repo an die Kette anbinden (erkennt Stack und Plattform)
   kette doctor          Projekt und Einrichtung prüfen (--ci für Pipelines)
   kette update          Neueste Version des Regelwerks laden
+  kette rules [thema]   Installierte Regeln zeigen, mit Thema die Regel lesen (--path für Dateipfade)
   kette profile         Projektprofil anzeigen
   kette login <key>     Enterprise (Die Kette) freischalten: Plattform-Profile, Prüfungen, Code-Reviewer
   kette logout          Lizenzschlüssel und Enterprise-Paket von diesem Rechner entfernen
@@ -76,6 +78,7 @@ Optionen:
   --platform id         Plattform festlegen
   --patterns a,b        Muster festlegen
   --no-plugins          Claude-Code-Plugins nicht installieren
+  --path                Bei kette rules die Dateipfade statt des Inhalts zeigen
 
 Der Installer legt nie Cloud-Ressourcen an und deployt nichts. Infrastruktur entsteht als Code im Repo.`;
 
@@ -87,6 +90,7 @@ function parse(argv) {
     else if (a === '--yes' || a === '-y') opts.yes = true;
     else if (a === '--no-plugins') opts.noPlugins = true;
     else if (a === '--ci') opts.ci = true;
+    else if (a === '--path') opts.path = true;
     else if (['--stack', '--platform', '--patterns', '--name'].includes(a)) opts[a.slice(2)] = argv[++i];
     else if (a === '--help' || a === '-h') opts.help = true;
     else opts._.push(a);
@@ -303,6 +307,10 @@ export async function main(argv) {
     if (cmd === 'add') return await setup('.', opts, false);
     if (cmd === 'doctor') return await doctor('.', opts);
     if (cmd === 'update') return await update(opts);
+    if (cmd === 'rules') {
+      const tier = tierOf();
+      return rules(arg, opts, { bundle: installedBundle(tier), tier, stackIds: STACKS.map((x) => x.value) });
+    }
     if (cmd === 'profile') { const p = readProfile('.'); console.log(p ? JSON.stringify(p, null, 2) : 'Kein .kette/profile.json in diesem Ordner.'); return p ? 0 : 1; }
     if (cmd === 'login') return await login(arg, opts, VERSION);
     if (cmd === 'logout') return logout(opts);

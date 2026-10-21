@@ -1,0 +1,174 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ENTERPRISE, editionLabel } from './editions.mjs';
+
+const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
+const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+const plain = (s) => s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+const cells = (row) => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+const short = (s, max) => (s.length > max ? `${s.slice(0, max - 3).trimEnd()}...` : s);
+
+// Pfad mit ~ statt Home-Ordner, kürzer in der Ausgabe und so in der Shell nutzbar
+export const tilde = (p) => {
+  const rel = path.relative(os.homedir(), p);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? path.join('~', rel) : p;
+};
+
+// Erster Satz nach der Überschrift, sonst die erste Regel; eine Zeile für die Übersicht
+function summary(md) {
+  const lines = md.split('\n').slice(1).map((l) => l.trim());
+  const text = lines.find((l) => l && !l.startsWith('#')) || '';
+  return plain(text.replace(/^- /, '')).split(/(?<=\.)\s/)[0];
+}
+
+// Zeilen einer Markdown-Tabelle ohne Kopf und Trennzeile
+function tableRows(md) {
+  return md.split('\n').filter((l) => l.trim().startsWith('|')).slice(2).map(cells);
+}
+
+function coreTopics(dir) {
+  const core = path.join(dir, 'rules', 'core');
+  if (!fs.existsSync(core)) return [];
+  return fs.readdirSync(core).filter((f) => /^\d+-.+\.md$/.test(f)).sort().map((f) => {
+    const md = read(path.join(core, f));
+    return { id: f.replace(/^\d+-|\.md$/g, ''), aliases: [f.replace(/\.md$/, '')], title: plain(md.split('\n')[0].replace(/^#+\s*/, '')), summary: summary(md), file: path.join(core, f) };
+  });
+}
+
+function patternTopics(dir) {
+  const arch = path.join(dir, 'rules', 'architecture');
+  return tableRows(read(path.join(arch, 'README.md'))).map(([id, link, kurz]) => {
+    const file = (link.match(/\(([^)]+)\)/) || [])[1] || '';
+    return { id: plain(id), aliases: [file.replace(/\.md$/, '')], title: plain(link), summary: plain(kurz || ''), file: path.join(arch, file) };
+  }).filter((t) => t.id);
+}
+
+function stackTopics(dir) {
+  const stack = path.join(dir, 'profiles', 'stack');
+  return tableRows(read(path.join(stack, 'README.md'))).map(([id, link, einsatz]) => {
+    const file = (link.match(/\(([^)]+)\)/) || [])[1] || '';
+    return { id: plain(id), aliases: [], title: plain(id), summary: plain(einsatz || ''), file: path.join(stack, file) };
+  }).filter((t) => t.id && fs.existsSync(t.file));
+}
+
+function platformTopics(dir) {
+  const index = readJson(path.join(dir, 'profiles', 'platform', 'index.json')) || [];
+  return index.map((p) => ({ id: p.id, aliases: [], title: p.name, summary: `${p.name}, ${p.status}`, status: p.status, file: path.join(dir, 'profiles', 'platform', p.id, 'profile.md') }));
+}
+
+// Alle Themen des Pakets; Profile ohne Datei im Paket (Community) bleiben als bekannt, aber nicht lesbar
+export function catalog(dir) {
+  return {
+    core: coreTopics(dir),
+    patterns: patternTopics(dir),
+    stacks: stackTopics(dir),
+    platforms: platformTopics(dir),
+  };
+}
+
+function distance(a, b) {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cur = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+  }
+  return row[b.length];
+}
+
+export function suggest(input, ids) {
+  const q = input.toLowerCase();
+  return ids.filter((id) => id.includes(q) || q.includes(id) || distance(q, id) <= Math.max(2, Math.floor(id.length / 3))).slice(0, 3);
+}
+
+const pad = (s, n) => s + ' '.repeat(Math.max(1, n - s.length));
+
+function overview(bundle, tier, cat) {
+  const out = [`Regelwerk der Kette · Edition ${editionLabel(tier)}, Version ${bundle.version}`, `Ort: ${tilde(bundle.dir)}`, ''];
+  const width = Math.max(...[...cat.core, ...cat.patterns, ...cat.stacks, ...cat.platforms].map((t) => t.id.length)) + 2;
+  // Eine Zeile je Thema, gekürzt auf die Breite des Terminals
+  const row = (id, text) => `  ${pad(id, width)}${short(text, Math.max(40, (process.stdout.columns || 100) - width - 3))}`;
+  out.push('Kern-Regeln (gelten immer)');
+  for (const t of cat.core) out.push(row(t.id, t.summary || t.title));
+  out.push('', 'Architektur-Muster (Auswahl in .kette/profile.json)');
+  for (const t of cat.patterns) out.push(row(t.id, `${t.title}: ${t.summary}`));
+  if (tier === ENTERPRISE) {
+    out.push('', 'Stack-Profile');
+    for (const t of cat.stacks) out.push(row(t.id, t.summary));
+    out.push('', 'Plattform-Profile');
+    for (const t of cat.platforms) out.push(row(t.id, t.summary));
+  } else {
+    out.push('', 'Stack- und Plattform-Profile gibt es in Enterprise (Die Kette): kette login <key>');
+  }
+  out.push('', 'Thema lesen: kette rules <thema>, z. B. kette rules fehler · Dateipfade: --path');
+  return out.join('\n');
+}
+
+const bold = (s) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[1m${s}\x1b[22m` : s);
+
+// Markdown leicht entschlacken: Überschriften ohne #, Hervorhebungen und Links als Text, Code eingerückt, Tabellen als Spalten
+export function render(md) {
+  const out = [];
+  let code = false;
+  let table = [];
+  const flush = () => {
+    if (!table.length) return;
+    const rows = table.filter((r) => !r.every((c) => /^:?-+:?$/.test(c))).map((r) => r.map(plain));
+    const widths = rows[0].map((_, i) => Math.max(...rows.map((r) => (r[i] || '').length)));
+    for (const r of rows) out.push(`  ${r.map((c, i) => (i < r.length - 1 ? c.padEnd(widths[i] + 2) : c)).join('')}`);
+    table = [];
+  };
+  for (const line of md.replace(/\n+$/, '').split('\n')) {
+    if (line.trim().startsWith('```')) { flush(); code = !code; continue; }
+    if (code) { out.push(`    ${line}`); continue; }
+    if (line.trim().startsWith('|')) { table.push(cells(line)); continue; }
+    flush();
+    const h = line.match(/^(#+)\s+(.*)$/);
+    if (h) {
+      if (out.length && out[out.length - 1] !== '') out.push('');
+      out.push(bold(h[1].length === 1 ? plain(h[2]).toUpperCase() : plain(h[2])));
+      continue;
+    }
+    const item = line.match(/^(\s*)[-*]\s+(.*)$/);
+    if (item) { out.push(`${item[1]}  - ${plain(item[2])}`); continue; }
+    out.push(plain(line.replace(/^>\s?/, '')));
+  }
+  flush();
+  return out.join('\n');
+}
+
+function find(cat, topic) {
+  const q = topic.toLowerCase();
+  const all = [...cat.core, ...cat.patterns, ...cat.stacks, ...cat.platforms];
+  return { hit: all.find((t) => t.id === q || t.aliases.includes(q)), ids: all.map((t) => t.id) };
+}
+
+// kette rules [thema] [--path]; liest nur das installierte Paket, ohne Netz
+export function rules(topic, opts, { bundle, tier, stackIds = [] }) {
+  if (!bundle) throw new Error('Kein Regelwerk auf diesem Rechner. Laden mit: kette init (neues Projekt), kette add (bestehendes Repo) oder kette update.');
+  const cat = catalog(bundle.dir);
+  if (!topic) {
+    if (opts.path) {
+      const files = [...cat.core, ...cat.patterns, ...cat.stacks, ...cat.platforms].map((t) => t.file).filter((f) => fs.existsSync(f));
+      console.log([bundle.dir, ...files].join('\n'));
+    } else console.log(overview(bundle, tier, cat));
+    return 0;
+  }
+  const { hit, ids } = find(cat, topic);
+  const missing = !hit || !fs.existsSync(hit.file);
+  if (missing && tier !== ENTERPRISE && (cat.platforms.includes(hit) || stackIds.includes(topic.toLowerCase()))) {
+    throw new Error(`${topic} ist ein Profil aus Enterprise (Die Kette), freischalten mit: kette login <key>`);
+  }
+  if (hit && missing) throw new Error(`${tilde(hit.file)} fehlt im Paket. Neu laden mit: kette update`);
+  if (!hit) {
+    const close = suggest(topic, [...ids, ...stackIds.filter((s) => !ids.includes(s))]);
+    throw new Error(`Unbekanntes Thema "${topic}".${close.length ? ` Meinten Sie: ${close.join(', ')}?` : ''} Alle Themen: kette rules`);
+  }
+  console.log(opts.path ? hit.file : render(read(hit.file)));
+  return 0;
+}
