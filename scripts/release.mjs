@@ -66,10 +66,10 @@ const TAR_FLAGS = process.platform === 'darwin'
 const hash = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 
 // Packt dir reproduzierbar nach file: feste Zeit, sortierte Einträge, gzip ohne Zeitstempel
-function tarball(dir, file) {
+function tarball(dir, file, time = sourceTime) {
   fs.chmodSync(dir, 0o755);
   const entries = ['.', ...walk(dir).map((f) => `./${path.relative(dir, f).split(path.sep).join('/')}`).sort()];
-  for (const e of entries) fs.utimesSync(path.join(dir, e), sourceTime, sourceTime);
+  for (const e of entries) fs.utimesSync(path.join(dir, e), time, time);
   const tar = execFileSync('tar', [...TAR_FLAGS, '--no-recursion', '-cf', '-', '-C', dir, '-T', '-'], { input: entries.join('\n') + '\n', maxBuffer: 1 << 30, env: { ...process.env, COPYFILE_DISABLE: '1' } });
   const gz = zlib.gzipSync(tar, { level: 9 });
   // Byte 9 im gzip-Kopf nennt das Betriebssystem; fest auf 255 (unbekannt), damit macOS und Linux dieselben Bytes liefern
@@ -117,7 +117,8 @@ fs.rmSync(packSrc, { recursive: true, force: true });
 const cliTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-cli-'));
 for (const p of ['bin', 'src', 'package.json', 'LICENSE']) fs.cpSync(path.join(root, p), path.join(cliTmp, p), { recursive: true });
 const cli = path.join(out, `kette-cli-${cliVersion}.tgz`);
-tarball(cliTmp, cli);
+// Das CLI-Paket trägt die Zeit seines eigenen Commits, damit ein neues Regelwerk die CLI-Prüfsumme nicht ändert
+tarball(cliTmp, cli, new Date(commitTime(root, 'HEAD') * 1000));
 fs.rmSync(cliTmp, { recursive: true, force: true });
 
 const manifest = {
