@@ -45,7 +45,8 @@ function pack(name, entries, extra = {}) {
   return out;
 }
 
-const market = JSON.parse(fs.readFileSync(path.join(eng, '.claude-plugin/marketplace.json'), 'utf8'));
+// Ausgelieferte Pakete heißen in Claude Code "kette", der Entwickler-Marketplace auf das Repo behält "kette-engineering"
+const market = { ...JSON.parse(fs.readFileSync(path.join(eng, '.claude-plugin/marketplace.json'), 'utf8')), name: 'kette' };
 const communityMarket = { ...market, version, plugins: market.plugins.filter((p) => p.name === 'kette-engineering-core').map((p) => ({ ...p, version })) };
 const enterpriseMarket = { ...market, version, plugins: market.plugins.map((p) => ({ ...p, version })) };
 
