@@ -6,9 +6,10 @@ import { detectPlatform, detectStack } from './detect.mjs';
 import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
-import { MARKETPLACE, hasClaude, installPlugins, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
+import { MARKETPLACE, editionHints, hasClaude, installEdition, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
-import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, pluginsFor, pluginSummary, isNewer } from './editions.mjs';
+import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins, isNewer } from './editions.mjs';
+import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
 import { credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 
@@ -67,7 +68,7 @@ Befehle:
   kette update          Neueste Version des Regelwerks laden
   kette rules [thema]   Installierte Regeln zeigen, mit Thema die Regel lesen (--path für Dateipfade)
   kette profile         Projektprofil anzeigen
-  kette login <key>     Enterprise (Die Kette) freischalten: Plattform-Profile, Prüfungen, Code-Reviewer
+  kette login <key>     Enterprise (Die Kette) freischalten: Agenten, Gates, Plattform-Profile, Prüfungen
   kette logout          Lizenzschlüssel und Enterprise-Paket von diesem Rechner entfernen
   kette version
 
@@ -138,28 +139,37 @@ async function buildProfile(root, opts, detected) {
   };
 }
 
-function agentNote() {
-  return `# Kette
-
-Dieses Projekt folgt dem Regelwerk der Kette. Agenten lesen zuerst \`.kette/profile.json\`.
-
-- Regeln in dieser Reihenfolge anwenden: Overlays der Firma, Plattform, Stack, Architektur-Muster, Kern.
-- Skills: \`engineering-rules\`, \`architecture-patterns\`, in der Edition Enterprise (Die Kette) zusätzlich \`platform-profile\` und der Agent \`code-reviewer\`.
-- Schwer umkehrbare Entscheidungen als ADR unter \`docs/adr/\` festhalten (Vorlage \`docs/adr/0000-vorlage.md\`).
-- Eine Kern-Regel gilt, solange kein ADR sie ausdrücklich außer Kraft setzt.
-- Infrastruktur nur als Code erzeugen und mit plan bzw. what-if prüfen. apply, Deploy und zerstörende Migrationen führt ein Mensch aus.
-
-## Wo die Regeln liegen
-- Auf diesem Rechner unter \`~/.kette/bundles/active/\`: \`rules/core\`, \`rules/architecture\`, in Enterprise auch \`profiles/\` und \`checks/\`.
-- In Claude Code als Plugin \`kette-engineering-core@kette\` (Skills \`engineering-rules\`, \`architecture-patterns\`), in Enterprise zusätzlich \`kette-engineering@kette\` (\`platform-profile\`, \`code-reviewer\`).
-- Ansehen mit \`kette rules\`, prüfen mit \`kette doctor\`.
-`;
+// .kette/README.md als markierter Block, damit init, add und update nur diesen Teil erneuern; tier ist die Edition des Projekts
+function noteItem(tier) {
+  const note = agentNote(tier);
+  return { path: NOTE_PATH, mode: 'renew', content: note, renew: (current) => renewNote(current, note) };
 }
 
-function planFor(root, profile, bundleDir, tier) {
+const RANK = { [COMMUNITY]: 0, [ENTERPRISE]: 1 };
+
+// Profil im Projekt, null wenn es fehlt oder nicht lesbar ist (dann bleibt die Datei, wie sie ist)
+function existingProfile(root) {
+  try { return normalizeProfile(readProfile(root)); } catch { return null; }
+}
+
+// Edition des Projekts nach init oder add: aus dem Profil, angehoben auf die Edition dieses Rechners, nie gesenkt (docs/adr/0001)
+function projectTier(root, machineTier) {
+  const tier = existingProfile(root)?.tier;
+  return tier in RANK && RANK[tier] >= RANK[machineTier] ? tier : machineTier;
+}
+
+// Vorhandenes Profil: nur tier anheben, sonst bleibt die Datei unverändert
+function raiseTier(current, tier) {
+  let profile;
+  try { profile = JSON.parse(current); } catch { return current; }
+  if (RANK[normalizeTier(profile.tier)] >= RANK[tier]) return current;
+  return JSON.stringify({ ...profile, tier }, null, 2) + '\n';
+}
+
+function planFor(root, profile, bundleDir, tier, noteTier) {
   const plan = [
-    { path: '.kette/profile.json', content: JSON.stringify(profile, null, 2) + '\n' },
-    { path: '.kette/README.md', content: agentNote() },
+    { path: '.kette/profile.json', mode: 'renew', content: JSON.stringify(profile, null, 2) + '\n', renew: (current) => raiseTier(current, noteTier) },
+    noteItem(noteTier),
     { path: 'CLAUDE.md', mode: 'append', marker: '@.kette/README.md', content: '@.kette/README.md\n', note: 'Verweis auf die Kette-Regeln' },
     { path: 'docs/adr/0000-vorlage.md', content: fs.readFileSync(path.join(bundleDir, 'rules', 'architecture', 'adr-vorlage.md'), 'utf8') },
   ];
@@ -192,12 +202,12 @@ async function setup(root, opts, isNew) {
   const errors = validate(loadSchema(bundleDir), profile);
   if (errors.length) throw new Error(`Profil ungültig: ${errors.join('; ')}`);
 
-  const described = describe(planFor(root, profile, bundleDir, tier), root);
+  const described = describe(planFor(root, profile, bundleDir, tier, projectTier(root, tier)), root);
   console.log(`\n${opts.dryRun ? 'Würde anlegen' : 'Plan'} in ${path.resolve(root)} (Edition ${editionLabel(tier)}):`);
   print(described);
-  const stale = staleNote(described, root);
+  const stale = staleNote(described);
   if (stale) console.log(stale);
-  if (tier === COMMUNITY) console.log('\n  Plattform-Vorlagen, Prüfungen und Code-Reviewer gibt es in der Edition Enterprise (Die Kette): kette login <key>');
+  if (tier === COMMUNITY) console.log('\n  Agenten, Gates mit Code-Reviewer, Plattform-Vorlagen und Prüfungen gibt es in der Edition Enterprise (Die Kette): kette login <key>');
   else if (!PLATFORM_FILES[profile.platform.id]) console.log(`\n  Für ${profile.platform.id} gibt es noch keine Vorlagen (Status: ${platformStatus(bundleDir, profile.platform.id) || 'unbekannt'}).`);
   if (opts.dryRun) return 0;
   if (!(await confirm('\nSo anlegen?', opts.yes))) { console.log('Abgebrochen, nichts geschrieben.'); return 1; }
@@ -209,31 +219,32 @@ async function setup(root, opts, isNew) {
   let rulesDir = bundleDir;
   if (!opts.noPlugins) {
     rulesDir = setActiveBundle(bundleDir);
-    plugins = installPlugins(rulesDir, pluginsFor(tier));
-    if (!plugins.ok) console.log(`Plugins nicht installiert (${plugins.reason}). Von Hand: claude plugin marketplace add ${rulesDir} && claude plugin install ${pluginId('kette-engineering-core')}`);
+    plugins = installEdition(rulesDir, tier, otherEditionPlugins(tier));
+    for (const l of editionHints(plugins, rulesDir)) console.log(l);
   }
   console.log(summary(described, tier, plugins.ok, rulesDir));
   return 0;
 }
 
-const README_ITEM = '.kette/README.md';
+const otherEditionPlugins = (tier) => retiredPlugins(tier === ENTERPRISE ? COMMUNITY : ENTERPRISE, tier);
 
-// Hinweis, wenn eine vorhandene .kette/README.md nicht der aktuellen Fassung entspricht; sie wird nie überschrieben
-function staleNote(described, root) {
-  const note = described.find((d) => d.path === README_ITEM);
-  if (note?.action !== 'vorhanden' || fs.readFileSync(path.join(root, README_ITEM), 'utf8') === note.content) return null;
-  return `  ${README_ITEM} weicht von der aktuellen Fassung ab (z. B. ohne „Wo die Regeln liegen“). Neu erzeugen: Datei löschen und kette add erneut ausführen.`;
+// Hinweis, wenn eine vorhandene .kette/README.md keinen Kette-Block hat; sie wird dann nicht angefasst
+function staleNote(described) {
+  if (!described.find((d) => d.path === NOTE_PATH)?.unmarked) return null;
+  return `  ${NOTE_PATH} hat keinen Kette-Block und bleibt unverändert. Neu erzeugen: eigene Notizen sichern, Datei löschen und kette add erneut ausführen.`;
 }
 
 // Kurzer Abschluss: was im Projekt entstand, was auf dem Rechner aktiv ist, wie es weitergeht
 function summary(described, tier, pluginsOk, rulesDir) {
-  const changed = described.filter((d) => d.action !== 'vorhanden').map((d) => (d.action === 'ergänzen' ? `${d.path} (ergänzt)` : d.path));
+  const label = { ergänzen: ' (ergänzt)', erneuern: ' (erneuert)' };
+  const changed = described.filter((d) => d.action !== 'vorhanden').map((d) => `${d.path}${label[d.action] || ''}`);
   const steps = ['kette doctor', 'Claude Code im Projekt öffnen und fragen: "Prüfe diesen Code gegen die Kette-Regeln"'];
-  if (tier === COMMUNITY) steps.push('kette login <key> für Profile, Prüfungen und Code-Reviewer (Enterprise)');
+  if (tier === COMMUNITY) steps.push('kette login <key> für Agenten, Gates, Profile und Prüfungen (Enterprise)');
+  else steps.push('Ein ganzes Feature mit allen Rollen und Gates: /feature-loop start <Feature>');
   return [
     '',
     `Fertig. Im Projekt: ${changed.length ? changed.join(', ') : 'nichts geändert, alles schon vorhanden'}`,
-    pluginsOk ? `Regeln aktiv in Claude Code: ${pluginSummary(tier, MARKETPLACE)}` : `Regeln in Claude Code noch nicht aktiv (Plugins: ${pluginSummary(tier, MARKETPLACE)})`,
+    pluginsOk ? `Aktiv in Claude Code: ${pluginSummary(tier, MARKETPLACE, rulesDir)}` : `In Claude Code noch nicht aktiv (Plugins: ${pluginSummary(tier, MARKETPLACE, rulesDir)})`,
     `Regelwerk auf diesem Rechner: ${tilde(rulesDir)}, ansehen mit: kette rules`,
     'Nächste Schritte:',
     ...steps.map((s, i) => `  ${i + 1}. ${s}`),
@@ -276,20 +287,50 @@ async function doctor(root, opts) {
     line(errs.length === 0, `Profil gültig${errs.length ? `: ${errs.join('; ')}` : ''}`);
     const status = platformStatus(bundle.dir, profile.platform?.id);
     if (status === 'vorschau') warn(`Plattform ${profile.platform.id} ist noch Vorschau (ohne belegtes Referenzprojekt)`);
-    if (profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn('Profil verlangt die Edition Enterprise (Die Kette), hier ist nur Community installiert. Freischalten mit: kette login <key>');
+    if (profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn('Profil verlangt die Edition Enterprise (Die Kette), hier ist nur Community installiert. Agenten, Gates, /feature-loop, Plattform-Profile und Prüfungen aus .kette/README.md fehlen. Freischalten mit: kette login <key>');
+    if (profile.tier !== ENTERPRISE && tier === ENTERPRISE) warn('Hier ist Enterprise (Die Kette) installiert, das Projekt steht auf Community. Ablauf mit Agenten und Gates übernehmen: kette add');
     for (const o of profile.overlays || []) warn(`Overlay ${o.source} wird von Agenten geladen, hier nicht geprüft`);
   }
   if (!opts.ci && bundle && hasClaude()) {
     const list = installedPlugins();
-    for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installiert`);
+    if (list === null) line(false, 'Plugin-Liste von Claude Code nicht lesbar (claude plugin list scheitert)');
+    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installiert`);
   }
+  if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir);
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md verweist auf die Kette-Regeln');
   console.log(problems ? `\n${problems} Punkt(e) offen` : '\nalles in Ordnung');
   return problems ? 1 : 0;
 }
 
+// Was jedes Plugin der Edition mitbringt, aus dem installierten Paket gezählt
+function printPluginDetails(tier, bundleDir) {
+  console.log('INFO  Inhalt der Plugins:');
+  for (const { id, lines } of pluginDetails(tier, MARKETPLACE, bundleDir)) {
+    console.log(`        ${id}`);
+    for (const l of lines) console.log(`          ${l}`);
+  }
+}
+
+// Erneuert den Kette-Block in .kette/README.md, wenn kette update in einem Projekt läuft
+function renewProjectNote(root) {
+  const profile = existingProfile(root);
+  if (!profile) return;
+  const tier = profile.tier in RANK ? profile.tier : COMMUNITY;
+  const [d] = describe([noteItem(tier)], root);
+  if (d.unmarked) { console.log(staleNote([d])); return; }
+  if (d.action === 'vorhanden') return;
+  apply([d], root);
+  console.log(`${NOTE_PATH} ${d.action === 'neu' ? 'angelegt' : 'erneuert'} (Ablauf für ${editionLabel(tier)}).`);
+}
+
 async function update(opts) {
+  const code = await updateBundle(opts);
+  if (code === 0 && !opts.dryRun) renewProjectNote('.');
+  return code;
+}
+
+async function updateBundle(opts) {
   if (credentialsStatus() === 'valid') return updateEnterprise(opts, VERSION);
   const manifest = await fetchManifest();
   const tier = COMMUNITY;
@@ -300,8 +341,8 @@ async function update(opts) {
   if (opts.dryRun) return 0;
   const dir = await installBundle(manifest, tier);
   if (!opts.noPlugins) {
-    const r = installPlugins(setActiveBundle(dir), pluginsFor(tier));
-    if (!r.ok) console.log(`Plugins nicht aktualisiert (${r.reason}).`);
+    const link = setActiveBundle(dir);
+    for (const l of editionHints(installEdition(link, tier, otherEditionPlugins(tier)), link)) console.log(l);
   }
   if (manifest.cli && isNewer(manifest.cli.version, VERSION)) console.log(`Neue CLI ${manifest.cli.version} verfügbar: curl -fsSL https://kette.itdone.de/install | sh`);
   console.log(`Regelwerk ${manifest.version} installiert.`);
