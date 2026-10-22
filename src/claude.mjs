@@ -14,7 +14,19 @@ const PACK_MARKETPLACE = 'claude-design-agent-pack';
 const PACK_PLUGINS = ['ui-gesetze', 'design-system-agents', 'design-review-pack'];
 export const pluginId = (name, market = MARKETPLACE) => `${name}@${market}`;
 
-const run = (args) => spawnSync('claude', args, { encoding: 'utf8' });
+// npm installs Claude Code on Windows as claude.cmd, which only starts through cmd.exe; arguments are fixed values, quoted for cmd
+export function cmdArgs(args) {
+  if (args.some((a) => /["%\r\n]/.test(a))) return null;
+  return args.map((a) => (/[\s&|<>^()]/.test(a) ? `"${a}"` : a));
+}
+function run(args) {
+  if (process.platform !== 'win32') return spawnSync('claude', args, { encoding: 'utf8' });
+  const exe = spawnSync('claude.exe', args, { encoding: 'utf8' });
+  if (exe.error?.code !== 'ENOENT') return exe;
+  const quoted = cmdArgs(args);
+  if (!quoted) return { status: 1, stdout: '', stderr: `Argument not safe for claude.cmd: ${args.join(' ')}` };
+  return spawnSync('claude.cmd', quoted, { encoding: 'utf8', shell: true });
+}
 const output = (r) => ((r.stdout || '') + (r.stderr || '')).trim();
 export const hasClaude = () => run(['--version']).status === 0;
 

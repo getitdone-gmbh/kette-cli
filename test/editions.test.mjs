@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { cmdArgs } from '../src/claude.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginContents, pluginDetails, pluginsFor, pluginSummary, retiredPlugins } from '../src/editions.mjs';
 import { tmp, write } from './helpers.mjs';
 
@@ -65,4 +66,11 @@ test('isNewer vergleicht Versionen numerisch', async () => {
   assert.equal(isNewer('0.1.0', '0.2.0'), false);
   assert.equal(isNewer('0.10.0', '0.9.9'), true);
   assert.equal(isNewer('0.2.0', '0.2.0'), false);
+});
+
+test('Windows claude.cmd: arguments quoted for cmd.exe, unsafe ones refused', () => {
+  assert.deepEqual(cmdArgs(['plugin', 'install', 'kette-engineering@kette']), ['plugin', 'install', 'kette-engineering@kette']);
+  assert.deepEqual(cmdArgs(['plugin', 'marketplace', 'add', 'C:\\Users\\Jo Do\\.kette\\bundles\\active']), ['plugin', 'marketplace', 'add', '"C:\\Users\\Jo Do\\.kette\\bundles\\active"']);
+  assert.equal(cmdArgs(['plugin', 'marketplace', 'add', 'C:\\%PATH%']), null);
+  assert.equal(cmdArgs(['a"b']), null);
 });

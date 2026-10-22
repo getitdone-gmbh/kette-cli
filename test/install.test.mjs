@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { execFile, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { serve, tarball, tmp, write } from './helpers.mjs';
 
 const exec = promisify(execFile);
-const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const repo = fileURLToPath(new URL('..', import.meta.url));
 const script = path.join(repo, 'install', 'install.sh');
 const LINE = 'export PATH="$HOME/.kette/bin:$PATH"';
 const shells = ['/bin/sh', '/bin/dash'].filter((s) => fs.existsSync(s));

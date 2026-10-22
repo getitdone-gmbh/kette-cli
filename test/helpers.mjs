@@ -84,6 +84,8 @@ else if (a === 'plugin' && b === 'uninstall') {
 }
 `);
   fs.chmodSync(path.join(bin, 'claude'), 0o755);
+  // Windows starts neither shebang nor extensionless files; the CLI then falls back to claude.cmd
+  write(bin, 'claude.cmd', `@node "${path.join(bin, 'claude')}" %*\r\n`);
   const orig = process.env.PATH;
   process.env.PATH = `${bin}${path.delimiter}${orig}`;
   return {
