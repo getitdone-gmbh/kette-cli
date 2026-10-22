@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Ein Plan ist eine Liste von Dateien; vorhandene Dateien werden nie überschrieben, nur ergänzt (append) oder in ihrem markierten Block erneuert (renew)
+// A plan is a list of files; existing files are never overwritten, only appended to or renewed in their marked block
 export function describe(plan, root) {
   return plan.map((item) => {
     const abs = path.join(root, item.path);

@@ -4,12 +4,12 @@ import { bundlesDir } from './paths.mjs';
 import { missingPlugins, pluginsFor } from './editions.mjs';
 import { cmd, status } from './out.mjs';
 
-// Eigener Name, damit der Entwickler-Marketplace kette-engineering (Repo) nicht getroffen wird
+// Own name, so the developer marketplace kette-engineering (repo) is never hit
 export const MARKETPLACE = 'kette';
-// Name bis 0.3.0; zeigt er in ~/.kette, hat ihn die CLI selbst angelegt
+// Name up to 0.3.0; if it points into ~/.kette, the CLI created it itself
 const LEGACY_MARKETPLACE = 'kette-engineering';
 const ALL_PLUGINS = ['kette-engineering-core', 'kette-engineering'];
-// Marketplace des einzeln verkauften Agenten-Packs, dessen Plugins auch im Paket der Kette stecken
+// Marketplace of the separately sold agent pack, whose plugins are also in the Die Kette bundle
 const PACK_MARKETPLACE = 'claude-design-agent-pack';
 const PACK_PLUGINS = ['ui-gesetze', 'design-system-agents', 'design-review-pack'];
 export const pluginId = (name, market = MARKETPLACE) => `${name}@${market}`;
@@ -25,27 +25,27 @@ function marketplaces() {
 }
 
 const insideKette = (p) => !path.relative(bundlesDir(), path.resolve(p)).startsWith('..');
-// Plugin-ID als ganzes Wort, damit kette-engineering@kette nicht kette-engineering@kette-engineering trifft; list null (Liste nicht lesbar) trifft nie
+// Plugin ID as a whole word, so kette-engineering@kette does not match kette-engineering@kette-engineering; list null (not readable) never matches
 const listed = (list, id) => list !== null && new RegExp(`(^|\\s)${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`, 'm').test(list);
 
-// Erfolg zeigt die Plugin-Liste danach, nicht der Text der Antwort; ist die Liste nicht lesbar, entscheidet der Exit-Status
+// Success is decided by the plugin list afterwards, not the reply text; if the list is not readable, the exit status decides
 function uninstall(id) {
   const r = run(['plugin', 'uninstall', id]);
   const list = installedPlugins();
-  // Antwort von Claude Code, wenn das Plugin schon fehlt: gilt als entfernt
+  // Reply of Claude Code when the plugin is already gone: counts as removed
   const absent = /not found in installed plugins/i.test(output(r));
   const gone = list === null ? r.status === 0 || absent : !listed(list, id);
   return gone ? { ok: true } : { ok: false, reason: output(r) || `${id} is still installed after removal` };
 }
 
-// Hinweis auf Plugins eines fremden Marketplaces, die zusätzlich zu kette aktiv sind und Skills doppelt zeigen
+// Hint about plugins of a foreign marketplace that are active next to kette and show skills twice
 function duplicateHint(market, ids, list) {
   const active = ids.filter((id) => listed(list, id));
   if (!active.length) return;
   console.log(`${status('warn', 'WARN')} Marketplace ${market.name} (${market.path || market.source}) stays untouched. Its plugins are active in addition to ${MARKETPLACE}, skills show up twice. Disable with: ${cmd(active.map((id) => `claude plugin disable ${id}`).join(' && '))}`);
 }
 
-// Alten, selbst angelegten Marketplace entfernen; einer auf ein Repo bleibt, dann Hinweis auf doppelte Skills
+// Remove the old marketplace the CLI created; one pointing to a repo stays, with a hint about duplicate skills
 function migrateLegacy(all) {
   const legacy = all.find((m) => m.name === LEGACY_MARKETPLACE);
   if (!legacy?.path) return { ok: true };
@@ -61,17 +61,17 @@ function migrateLegacy(all) {
   return { ok: true };
 }
 
-// Das Agenten-Pack einzeln installiert (ZIP aus dem Kauf): seine Plugins, die kette jetzt auch installiert, erscheinen doppelt
+// Agent pack installed on its own (ZIP from the purchase): its plugins that kette now installs too show up twice
 function packDuplicates(all, plugins) {
   const pack = all.find((m) => m.name === PACK_MARKETPLACE);
   if (pack) duplicateHint(pack, plugins.filter((p) => PACK_PLUGINS.includes(p)).map((p) => pluginId(p, PACK_MARKETPLACE)), installedPlugins());
 }
 
-// Befehle zum Einrichten von Hand, wenn die CLI Claude Code nicht steuern kann
+// Commands for a manual setup when the CLI cannot drive Claude Code
 export const manualInstall = (source, plugins) => ['', `claude plugin marketplace add "${source}"`, ...plugins.map((p) => `claude plugin install ${pluginId(p)}`)].join('\n  ');
 
-// Bindet das Regelwerk als Plugin-Marketplace in Claude Code ein (Scope user); source ist der feste Link auf das aktive Paket
-// retire: Plugins der anderen Edition, die entfernt werden, solange der Marketplace sie noch kennt
+// Adds the rulebook as a plugin marketplace to Claude Code (scope user); source is the fixed link to the active bundle
+// retire: plugins of the other edition, removed while the marketplace still knows them
 export function installPlugins(source, plugins, retire = []) {
   if (!hasClaude()) return { ok: false, reason: 'claude not found' };
   const all = marketplaces();
@@ -79,17 +79,17 @@ export function installPlugins(source, plugins, retire = []) {
   if (!migrated.ok) return migrated;
   let known = all.find((m) => m.name === MARKETPLACE) || null;
   const moved = known?.path && path.resolve(known.path) !== path.resolve(source);
-  // Fremde Marketplaces gleichen Namens bleiben unangetastet, geprüft bevor etwas entfernt wird
+  // Foreign marketplaces with the same name stay untouched, checked before anything is removed
   if (moved && !insideKette(known.path)) return { ok: false, reason: `Marketplace ${MARKETPLACE} points to ${known.path}. Switch with: claude plugin marketplace remove ${MARKETPLACE} && claude plugin marketplace add "${source}"` };
   const list = retire.length ? installedPlugins() : '';
   const retired = [];
-  // Ohne lesbare Liste jedes Plugin der anderen Edition zu entfernen versuchen, statt es stillschweigend zu überspringen
+  // Without a readable list, try to remove every plugin of the other edition instead of silently skipping it
   for (const p of retire.filter((name) => list === null || listed(list, pluginId(name)))) {
     const r = uninstall(pluginId(p));
     if (!r.ok) return r;
     retired.push(pluginId(p));
   }
-  // Scheitert ein späterer Schritt, steht im Grund, was schon entfernt wurde
+  // If a later step fails, the reason says what was already removed
   const fail = (reason) => ({ ok: false, reason: retired.length ? `${reason}; already removed before: ${retired.join(', ')}` : reason });
   packDuplicates(all, plugins);
   if (moved) {
@@ -108,7 +108,7 @@ export function installPlugins(source, plugins, retire = []) {
   return { ok: true };
 }
 
-// Installiert die Plugins der Edition, die das Paket enthält; fehlende meldet editionHints, statt daran zu scheitern
+// Installs the edition plugins the bundle contains; editionHints reports missing ones instead of failing
 export function installEdition(link, tier, retire = []) {
   const missing = missingPlugins(link, tier);
   const present = pluginsFor(tier).filter((p) => !missing.includes(p));
@@ -127,7 +127,7 @@ export function uninstallPlugin(name) {
   return uninstall(pluginId(name));
 }
 
-// Ausgabe von claude plugin list, null wenn der Aufruf scheitert
+// Output of claude plugin list, null when the call fails
 export function installedPlugins() {
   const r = run(['plugin', 'list']);
   return r.status === 0 ? r.stdout : null;

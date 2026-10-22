@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Markierter Block in der Benutzer-npmrc: kette login schreibt ihn, kette logout entfernt nur ihn
+// Marked block in the user npmrc: kette login writes it, kette logout removes only it
 export const SCOPE = '@getitdone-gmbh';
 export const BLOCK_START = '# >>> kette: managed by kette login, removed by kette logout';
 export const BLOCK_END = '# <<< kette';
@@ -14,14 +14,14 @@ export const TOKEN_PATTERN = /kt_[A-Za-z0-9_-]{43}/;
 const eolOf = (content) => (content.includes('\r\n') ? '\r\n' : '\n');
 const linesOf = (content) => (content ? content.split(/\r?\n/) : []);
 
-// //host/pfad/ ohne Protokoll, so wie npm den Token einer Registry zuordnet
+// //host/path/ without protocol, the way npm maps a token to a registry
 export const authKey = (registry) => registry.replace(/^https?:/, '').replace(/\/?$/, '/');
 
 export function blockLines(registry, token) {
   return [BLOCK_START, `${SCOPE}:registry=${registry}`, `${authKey(registry)}:_authToken=${token}`, BLOCK_END];
 }
 
-// Zeilen außerhalb des Blocks und der Block selbst (null, wenn er fehlt)
+// Lines outside the block and the block itself (null when missing)
 function split(content) {
   const lines = linesOf(content);
   const start = lines.indexOf(BLOCK_START);
@@ -36,7 +36,7 @@ const join = (lines, eol) => {
   return trimmed.length ? trimmed.join(eol) + eol : '';
 };
 
-// Scope-Zeilen außerhalb des Blocks, z. B. ein Entwickler mit npm.pkg.github.com
+// Scope lines outside the block, e.g. a developer using npm.pkg.github.com
 export function foreignScopeLines(content) {
   return split(content).outside.filter((l) => SCOPE_LINE.test(l));
 }
@@ -50,7 +50,7 @@ export function hasBlock(content) {
   return split(content).block !== null;
 }
 
-// Neuer Inhalt mit erneuertem Block am Ende; replace kommentiert fremde Scope-Zeilen aus
+// New content with the renewed block at the end; replace comments out foreign scope lines
 export function withBlock(content, registry, token, { replace = false } = {}) {
   const eol = eolOf(content);
   const outside = split(content).outside.map((l) => (replace && SCOPE_LINE.test(l) ? DISABLED + l : l));
@@ -58,7 +58,7 @@ export function withBlock(content, registry, token, { replace = false } = {}) {
   return `${head}${head ? eol : ''}${blockLines(registry, token).join(eol)}${eol}`;
 }
 
-// Inhalt ohne Block, auskommentierte Zeilen wieder aktiv
+// Content without the block, commented-out lines active again
 export function withoutBlock(content) {
   const eol = eolOf(content);
   return join(split(content).outside.map((l) => {
@@ -71,14 +71,14 @@ export function readFile(file) {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
 }
 
-// Rechte 600, auch für eine schon vorhandene Datei
+// Mode 600, also for an existing file
 export function writePrivate(file, content) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content, { mode: 0o600 });
   fs.chmodSync(file, 0o600);
 }
 
-// Registry, auf die der Scope in einer Projekt-.npmrc zeigt, null ohne Scope-Zeile
+// Registry the scope points to in a project .npmrc, null without a scope line
 export function projectScope(content) {
   return linesOf(content).map((l) => l.match(SCOPE_LINE)?.[1]).find(Boolean) || null;
 }

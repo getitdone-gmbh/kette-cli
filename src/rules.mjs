@@ -10,20 +10,20 @@ const plain = (s) => s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/\*\*([^*
 const cells = (row) => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
 const short = (s, max) => (s.length > max ? `${s.slice(0, max - 3).trimEnd()}...` : s);
 
-// Pfad mit ~ statt Home-Ordner, kürzer in der Ausgabe und so in der Shell nutzbar
+// Path with ~ instead of the home folder, shorter in output and usable in the shell
 export const tilde = (p) => {
   const rel = path.relative(os.homedir(), p);
   return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? path.join('~', rel) : p;
 };
 
-// Erster Satz nach der Überschrift, sonst die erste Regel; eine Zeile für die Übersicht
+// First sentence after the heading, otherwise the first rule; one line for the overview
 function summary(md) {
   const lines = md.split('\n').slice(1).map((l) => l.trim());
   const text = lines.find((l) => l && !l.startsWith('#')) || '';
   return plain(text.replace(/^- /, '')).split(/(?<=\.)\s/)[0];
 }
 
-// Zeilen einer Markdown-Tabelle ohne Kopf und Trennzeile
+// Rows of a Markdown table without header and separator
 function tableRows(md) {
   return md.split('\n').filter((l) => l.trim().startsWith('|')).slice(2).map(cells);
 }
@@ -39,17 +39,17 @@ function coreTopics(dir) {
 
 function patternTopics(dir) {
   const arch = path.join(dir, 'rules', 'architecture');
-  return tableRows(read(path.join(arch, 'README.md'))).map(([id, link, kurz]) => {
+  return tableRows(read(path.join(arch, 'README.md'))).map(([id, link, brief]) => {
     const file = (link.match(/\(([^)]+)\)/) || [])[1] || '';
-    return { id: plain(id), aliases: [file.replace(/\.md$/, '')], title: plain(link), summary: plain(kurz || ''), file: path.join(arch, file) };
+    return { id: plain(id), aliases: [file.replace(/\.md$/, '')], title: plain(link), summary: plain(brief || ''), file: path.join(arch, file) };
   }).filter((t) => t.id);
 }
 
 function stackTopics(dir) {
   const stack = path.join(dir, 'profiles', 'stack');
-  return tableRows(read(path.join(stack, 'README.md'))).map(([id, link, einsatz]) => {
+  return tableRows(read(path.join(stack, 'README.md'))).map(([id, link, usage]) => {
     const file = (link.match(/\(([^)]+)\)/) || [])[1] || '';
-    return { id: plain(id), aliases: [], title: plain(id), summary: plain(einsatz || ''), file: path.join(stack, file) };
+    return { id: plain(id), aliases: [], title: plain(id), summary: plain(usage || ''), file: path.join(stack, file) };
   }).filter((t) => t.id && fs.existsSync(t.file));
 }
 
@@ -58,7 +58,7 @@ function platformTopics(dir) {
   return index.map((p) => ({ id: p.id, aliases: [], title: p.name, summary: `${p.name}, ${p.status}`, status: p.status, file: path.join(dir, 'profiles', 'platform', p.id, 'profile.md') }));
 }
 
-// Alle Themen des Pakets; Profile ohne Datei im Paket (Community) bleiben als bekannt, aber nicht lesbar
+// All topics of the bundle; profiles without a file in the bundle (Community) stay known but not readable
 export function catalog(dir) {
   return {
     core: coreTopics(dir),
@@ -92,7 +92,7 @@ const pad = (s, n) => s + ' '.repeat(Math.max(1, n - s.length));
 function overview(bundle, tier, cat) {
   const out = [`Die Kette rulebook · edition ${editionLabel(tier)}, version ${bundle.version}`, `Location: ${file(tilde(bundle.dir))}`, ''];
   const width = Math.max(...[...cat.core, ...cat.patterns, ...cat.stacks, ...cat.platforms].map((t) => t.id.length)) + 2;
-  // Eine Zeile je Thema, gekürzt auf die Breite des Terminals
+  // One line per topic, cut to the terminal width
   const row = (id, text) => `  ${pad(id, width)}${short(text, Math.max(40, (process.stdout.columns || 100) - width - 3))}`;
   out.push('Core rules (always apply)');
   for (const t of cat.core) out.push(row(t.id, t.summary || t.title));
@@ -110,7 +110,7 @@ function overview(bundle, tier, cat) {
   return out.join('\n');
 }
 
-// Markdown leicht entschlacken: Überschriften ohne #, Hervorhebungen und Links als Text, Code eingerückt, Tabellen als Spalten
+// Light Markdown cleanup: headings without #, emphasis and links as text, code indented, tables as columns
 export function render(md) {
   const out = [];
   let code = false;
@@ -147,7 +147,7 @@ function find(cat, topic) {
   return { hit: all.find((t) => t.id === q || t.aliases.includes(q)), ids: all.map((t) => t.id) };
 }
 
-// kette rules [thema] [--path]; liest nur das installierte Paket, ohne Netz
+// kette rules [topic] [--path]; reads only the installed bundle, no network
 export function rules(topic, opts, { bundle, tier, stackIds = [] }) {
   if (!bundle) throw new Error('No rulebook on this machine. Load it with kette init (new project), kette add (existing repo) or kette update.');
   const cat = catalog(bundle.dir);

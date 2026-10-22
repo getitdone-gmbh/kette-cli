@@ -13,7 +13,7 @@ const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
 export const formatDate = (iso) => isoDate(iso, 'unknown');
 export const newCliHint = (version) => `New CLI ${version} available: ${cmd('curl -fsSL https://kette.itdone.de/install | sh')}`;
 
-// none, valid oder broken; eine beschädigte Datei schaltet nichts frei, doctor meldet sie
+// none, valid or broken; a damaged file unlocks nothing, doctor reports it
 export function credentialsStatus() {
   if (!fs.existsSync(credentialsFile())) return 'none';
   try { readCredentials(); return 'valid'; } catch { return 'broken'; }
@@ -55,12 +55,12 @@ export async function login(rawKey, opts, cli) {
   if (!KEY_PATTERN.test(key)) throw new Error('Enter the license key in the format CDP-XXXXX-XXXXX-XXXXX-XXXXX, e.g. kette login CDP-AB12C-...');
   console.log(`Checking license with ${delivery()} ...`);
   const g = await grant(key, cli);
-  // Erst nach erfolgreicher Prüfung speichern; scheitert der Download, holt kette update das Paket nach
+  // Save only after a successful check; if the download fails, kette update fetches the bundle later
   writeCredentials(key);
   console.log(`Loading ${editionLabel(ENTERPRISE)} ${g.version} ...`);
   const dir = await install(g);
   plugins(dir, opts);
-  // nach /install/token, denn erst dort wird das Gerät registriert
+  // After /install/token, because that is where the device gets registered
   await setupNpm(key, opts);
   const seats = g.seats?.max ? `, devices ${g.seats.used} of ${g.seats.max}` : '';
   console.log(`\nSigned in: ${editionLabel(ENTERPRISE)}, version ${g.version}, updates until ${formatDate(g.updates_until)}${seats}.`);
@@ -73,10 +73,10 @@ export async function logout(opts) {
     if (!(await teardownNpm(null))) console.log('Not signed in, nothing to do.');
     return 0;
   }
-  // solange der Schlüssel noch da ist: npm-Token widerrufen, dann nur den Kette-Block entfernen
+  // While the key is still there: revoke the npm token, then remove only the kette block
   await teardownNpm(credentialsStatus() === 'valid' ? readCredentials() : null);
   const claude = !opts.noPlugins && hasClaude();
-  // Erst die Enterprise-Plugins entfernen, solange der Marketplace noch auf das Enterprise-Paket zeigt
+  // Remove the Enterprise plugins first, while the marketplace still points to the Enterprise bundle
   if (claude) {
     for (const name of retiredPlugins(ENTERPRISE, COMMUNITY)) {
       const r = uninstallPlugin(name);

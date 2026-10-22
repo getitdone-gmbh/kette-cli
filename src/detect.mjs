@@ -12,7 +12,7 @@ const listFiles = (dir, depth = 2) => {
   });
 };
 
-// Erkennt Stacks aus den Paketdateien im Repo und in apps/*, packages/*
+// Detects stacks from the package files in the repo and in apps/*, packages/*
 export function detectStack(dir) {
   const stacks = new Set();
   const manifests = listFiles(dir, 3).filter((f) => path.basename(f) === 'package.json');
@@ -30,7 +30,7 @@ export function detectStack(dir) {
   return [...stacks];
 }
 
-// Erkennt die Plattform an CI- und Infrastruktur-Dateien
+// Detects the platform from CI and infrastructure files
 export function detectPlatform(dir) {
   const files = listFiles(dir, 3).map((f) => path.relative(dir, f));
   const tf = files.filter((f) => f.endsWith('.tf')).map((f) => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');

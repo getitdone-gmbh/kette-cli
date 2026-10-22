@@ -42,7 +42,7 @@ const PATTERNS = [
   { value: 'multi-tenant', label: 'Multi-tenancy' },
 ];
 
-// github-docker: Vorlage im Paket -> Ziel im Projekt
+// github-docker: template in the bundle -> target in the project
 const PLATFORM_FILES = {
   'github-docker': [
     ['ci.yml', '.github/workflows/ci.yml'],
@@ -150,7 +150,7 @@ async function buildProfile(root, opts, detected) {
   };
 }
 
-// .kette/README.md als markierter Block, damit init, add und update nur diesen Teil erneuern; tier ist die Edition des Projekts
+// .kette/README.md as a marked block, so init, add and update renew only that part; tier is the project edition
 function noteItem(tier) {
   const note = agentNote(tier);
   return { path: NOTE_PATH, mode: 'renew', content: note, renew: (current) => renewNote(current, note) };
@@ -158,18 +158,18 @@ function noteItem(tier) {
 
 const RANK = { [COMMUNITY]: 0, [ENTERPRISE]: 1 };
 
-// Profil im Projekt, null wenn es fehlt oder nicht lesbar ist (dann bleibt die Datei, wie sie ist)
+// Profile in the project, null when missing or unreadable (the file then stays as it is)
 function existingProfile(root) {
   try { return normalizeProfile(readProfile(root)); } catch { return null; }
 }
 
-// Edition des Projekts nach init oder add: aus dem Profil, angehoben auf die Edition dieses Rechners, nie gesenkt (docs/adr/0001)
+// Project edition after init or add: from the profile, raised to the edition of this machine, never lowered (docs/adr/0001)
 function projectTier(root, machineTier) {
   const tier = existingProfile(root)?.tier;
   return tier in RANK && RANK[tier] >= RANK[machineTier] ? tier : machineTier;
 }
 
-// Vorhandenes Profil: nur tier anheben, sonst bleibt die Datei unverändert
+// Existing profile: only raise tier, otherwise the file stays unchanged
 function raiseTier(current, tier) {
   let profile;
   try { profile = JSON.parse(current); } catch { return current; }
@@ -185,8 +185,8 @@ function planFor(root, profile, bundleDir, tier, noteTier) {
     { path: 'docs/adr/0000-vorlage.md', content: fs.readFileSync(path.join(bundleDir, 'rules', 'architecture', 'adr-vorlage.md'), 'utf8') },
   ];
   if (tier === ENTERPRISE) {
-    // nur die Scope-Zeile, nie ein Token: die Datei darf ins Repo, der Token kommt aus ~/.npmrc oder dem CI-Secret;
-    // ohne npm-Zugang keine Zeile, sonst zeigt das Projekt auf eine Registry, die noch nicht antwortet
+    // Only the scope line, never a token: the file may be committed, the token comes from ~/.npmrc or the CI secret
+    // No line without npm access, otherwise the project points to a registry that does not answer yet
     if (npmGranted()) plan.push({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'design system packages via Die Kette, no token' });
     const tpl = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'templates');
     for (const [from, to] of PLATFORM_FILES[profile.platform.id] || []) {
@@ -242,7 +242,7 @@ async function setup(root, opts, isNew) {
 
 const otherEditionPlugins = (tier) => retiredPlugins(tier === ENTERPRISE ? COMMUNITY : ENTERPRISE, tier);
 
-// Hinweis, wenn eine vorhandene .kette/README.md keinen Kette-Block hat; sie wird dann nicht angefasst
+// Hint when an existing .kette/README.md has no kette block; the file is then left alone
 function staleNote(described) {
   if (!described.find((d) => d.path === NOTE_PATH)?.unmarked) return null;
   return `  ${file(NOTE_PATH)} has no kette block and stays unchanged. To regenerate it, save your own notes, delete the file and run ${cmd('kette add')} again.`;
@@ -254,7 +254,7 @@ function cdStep(root) {
   return [cmd(`cd ${/^[\w./~-]+$/.test(root) ? root : `"${root}"`}`)];
 }
 
-// Kurzer Abschluss: was im Projekt entstand, was auf dem Rechner aktiv ist, wie es weitergeht
+// Short wrap-up: what was created in the project, what is active on this machine, what comes next
 function summary(described, tier, pluginsOk, rulesDir, root) {
   const label = { append: ' (appended)', update: ' (updated)' };
   const changed = described.filter((d) => d.action !== 'keep').map((d) => `${file(d.path)}${label[d.action] || ''}`);

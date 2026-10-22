@@ -11,10 +11,10 @@ import { SCOPE, TOKEN_PATTERN, authKey, blockToken, foreignScopeLines, hasBlock,
 const GITHUB_PACKAGES = 'npm.pkg.github.com';
 const WARN = status('warn', 'WARN');
 
-// Registry aus dem letzten Login, sonst der Standard
+// Registry from the last login, otherwise the default
 export const registryUrl = () => readState().npm?.registry || registryDefault();
 export const scopeLine = (registry = registryUrl()) => `${SCOPE}:registry=${registry}\n`;
-// erst nach einem erfolgreichen Login mit npm-Zugang zeigt die Projekt-.npmrc auf die Registry der Kette
+// Only after a login with npm access does the project .npmrc point to the Die Kette registry
 export const npmGranted = () => Boolean(readState().npm?.registry);
 
 function requireLogin() {
@@ -23,7 +23,7 @@ function requireLogin() {
   return { key: creds.key, device: deviceId() };
 }
 
-// Gerätetoken holen und als markierten Block in die Benutzer-npmrc schreiben; Fehler brechen den Login nicht ab
+// Fetch the device token and write it as a marked block into the user npmrc; errors never abort the login
 export async function setupNpm(key, opts) {
   if (opts.noNpm) { console.log('npm access skipped (--no-npm).'); return false; }
   const file = npmUserConfig();
@@ -39,7 +39,7 @@ export async function setupNpm(key, opts) {
     grant = await registryToken({ key, device: deviceId() });
   } catch (err) {
     if (!(err instanceof DeliveryError)) throw err;
-    // Registry noch nicht eingerichtet: eine Zeile, kein npmrc-Block, kette update holt es später nach
+    // Registry not set up yet: one line, no npmrc block, kette update catches up later
     if (err.code === 'registry_not_configured') {
       console.log(NPM_PENDING);
       writeState({ npm: { pending: true } });
@@ -59,7 +59,7 @@ export async function setupNpm(key, opts) {
   return true;
 }
 
-// Token widerrufen (offline egal) und nur den Kette-Block entfernen
+// Revoke the token (offline is fine) and remove only the kette block
 export async function teardownNpm(creds) {
   const file = readState().npm?.file || npmUserConfig();
   if (creds) {
@@ -76,7 +76,7 @@ export async function teardownNpm(creds) {
   return true;
 }
 
-// 200 ok, 401 ungültig, null wenn die Registry nicht erreichbar ist
+// 200 ok, 401 invalid, null when the registry is not reachable
 export async function whoami(registry, token) {
   try {
     const res = await fetch(`${registry}-/whoami`, { headers: { authorization: `Bearer ${token}` } });
@@ -86,7 +86,7 @@ export async function whoami(registry, token) {
   }
 }
 
-// kette update: fehlt der Block oder lehnt die Registry das Token ab, wird neu ausgestellt
+// kette update: issue a new token when the block is missing or the registry rejects the token
 export async function ensureNpm(key, opts) {
   if (opts.noNpm) return;
   const token = blockToken(readFile(readState().npm?.file || npmUserConfig()));
@@ -96,7 +96,7 @@ export async function ensureNpm(key, opts) {
   await setupNpm(key, opts);
 }
 
-// Zeilen für kette doctor: Block, Token gültig (nicht mit --ci), Projekt-.npmrc, Token in Git-Dateien
+// Lines for kette doctor: block, token valid (not with --ci), project .npmrc, tokens in tracked files
 export async function npmChecks(root, { line, warn }, opts) {
   const file = readState().npm?.file || npmUserConfig();
   const token = blockToken(readFile(file));
@@ -169,7 +169,7 @@ async function downloadChecked(file, target) {
   fs.writeFileSync(target, buf);
 }
 
-// kette figma [--out ordner]: aktuelles Figma-Release laden, Prüfsummen prüfen, Import-Reihenfolge zeigen
+// kette figma [--out folder]: download the current Figma release, verify checksums, show the import order
 export async function figma(opts) {
   const { key } = requireLogin();
   let release;

@@ -69,7 +69,7 @@ export function requestToken({ key, device, cli }) {
   });
 }
 
-// POST statt Query-String, damit der Schlüssel nicht in Zugriffslogs landet
+// POST instead of a query string, so the key never lands in access logs
 export function latest({ key, device }) {
   return call(`${delivery()}/install/latest`, {
     method: 'POST',
@@ -84,7 +84,7 @@ const postJson = (path, body) => call(`${delivery()}${path}`, {
   body: JSON.stringify(body),
 });
 
-// npm-Zugang (docs/install-api.md, Abschnitt npm-Registry): Gerätetoken, CI-Tokens, Figma-Links
+// npm access (docs/install-api.md, section npm registry): device token, CI tokens, Figma links
 export const registryToken = ({ key, device }) => postJson('/registry/token', { key, device });
 export const revokeRegistryToken = ({ key, device }) => postJson('/registry/token/revoke', { key, device });
 export const createCiToken = ({ key, device, label }) => postJson('/registry/ci-tokens/create', { key, device, label });
@@ -92,7 +92,7 @@ export const listCiTokens = ({ key, device }) => postJson('/registry/ci-tokens/l
 export const revokeCiToken = ({ key, device, id }) => postJson('/registry/ci-tokens/revoke', { key, device, id });
 export const figmaLinks = ({ key }) => postJson('/figma/links', { key });
 
-// Geräte-ID wird einmal erzeugt und bleibt, damit ein erneuter Login kein neues Gerät belegt
+// The device ID is created once and kept, so signing in again does not take a new device seat
 export function deviceId() {
   const file = deviceIdFile();
   if (fs.existsSync(file)) {
@@ -119,7 +119,7 @@ export function writeCredentials(key) {
   const file = credentialsFile();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ key }) + '\n', { mode: 0o600 });
-  // mode gilt nur beim Anlegen, eine vorhandene Datei wird nachgezogen
+  // mode only applies on create, an existing file is fixed up here
   fs.chmodSync(file, 0o600);
 }
 

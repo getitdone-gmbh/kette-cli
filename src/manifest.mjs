@@ -13,7 +13,7 @@ export async function fetchManifest() {
 
 const resolveUrl = (u) => (/^https?:\/\//.test(u) ? u : `${mirror()}/${u}`);
 
-// Fehler beim Laden mit Grund, damit Aufrufer eigene Texte mit nächstem Schritt zeigen können
+// Download error with a reason, so callers can show their own message with the next step
 export class DownloadError extends Error {
   constructor(message, { status = null, checksum = false } = {}) {
     super(message);
@@ -49,7 +49,7 @@ export function removeState(keys) {
   fs.writeFileSync(stateFile(), JSON.stringify(state, null, 2) + '\n');
 }
 
-// Lädt ein Paket, prüft es und entpackt es nach ~/.kette/bundles/<tier>/<version>
+// Downloads a bundle, verifies it and unpacks it to ~/.kette/bundles/<tier>/<version>
 export async function installEntry(tier, version, entry) {
   const dir = path.join(bundlesDir(), tier, version);
   if (!fs.existsSync(path.join(dir, '.claude-plugin', 'marketplace.json'))) {
@@ -74,7 +74,7 @@ export function installedBundle(tier) {
   return s && fs.existsSync(s.dir) ? s : null;
 }
 
-// Fester Pfad für den Claude-Code-Marketplace, zeigt auf das zuletzt aktive Paket (Windows: Junction, ohne Adminrechte)
+// Fixed path for the Claude Code marketplace, points to the last active bundle (Windows: junction, no admin rights)
 export function setActiveBundle(dir) {
   const link = activeBundleLink();
   fs.rmSync(link, { force: true });
