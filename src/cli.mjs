@@ -171,7 +171,7 @@ function insertAfter(obj, after, key, value) {
 function withApps(profile, schema, detected) {
   const known = schema.properties?.apps?.properties;
   if (!known) return profile;
-  const apps = Object.fromEntries(profile.stack.filter((s) => known[s]).map((s) => [s, detected[s] || known[s].default]).filter(([, dir]) => dir));
+  const apps = Object.fromEntries((profile.stack || []).filter((s) => known[s]).map((s) => [s, detected[s] || known[s].default]).filter(([, dir]) => dir));
   return { ...profile, apps: { ...apps, ...profile.apps } };
 }
 
@@ -215,13 +215,15 @@ async function setup(root, opts, isNew) {
   if (!isNew) console.log(`Detected: stack ${detected.stack.join(', ') || 'none'}, platform ${detected.platform || 'none'}`);
   if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
   const schema = loadSchema(bundleDir);
-  const profile = withApps(await buildProfile(root, opts, detected), schema, detected.apps);
+  // apps says where the templates go, so only Enterprise writes it; a Community project gets it from detection when it is upgraded
+  const appsSchema = tier === ENTERPRISE ? schema : {};
+  const profile = withApps(await buildProfile(root, opts, detected), appsSchema, detected.apps);
   const errors = validate(schema, profile);
   if (errors.length) throw new Error(`Invalid profile: ${errors.join('; ')}`);
 
   // Templates follow the profile in the project if there is one, it is never replaced
   const current = existingProfile(root);
-  const target = current ? withApps(current, schema, detected.apps) : profile;
+  const target = current ? withApps(current, appsSchema, detected.apps) : profile;
   const rendered = tier === ENTERPRISE ? templatesFor(bundleDir, target, isNew || detectWorkspace(root)) : {};
   const templates = rendered.templates || null;
   const described = describe(planFor(root, profile, bundleDir, tier, projectTier(root, tier), templates, target.apps), root);

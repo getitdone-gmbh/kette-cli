@@ -236,3 +236,19 @@ test('a bundle template with a placeholder this CLI does not know: same reinstal
   assert.match(out.match(REINSTALL)?.[1] || '', /unknown placeholder \[\[queue\]\]/);
   assert.deepEqual(files(root), []);
 });
+
+test('Community init writes no apps; after the upgrade add detects the folders and puts the templates there', async () => {
+  const d = bundle();
+  fs.rmSync(path.join(kh, 'credentials'));
+  fs.writeFileSync(path.join(kh, 'state.json'), JSON.stringify({ bundle_community: { version: '0.1.0', dir: d } }));
+  const { root } = await init('nestjs-prisma');
+  assert.equal('apps' in profileOf(root), false);
+  assert.deepEqual(files(root), []);
+  write(root, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  write(kh, 'credentials', JSON.stringify({ key: 'CDP-AAAAA-BBBBB-CCCCC-00001' }));
+  install(d);
+  await addIn(root);
+  assert.equal(profileOf(root).tier, 'enterprise');
+  assert.deepEqual(profileOf(root).apps, { 'nestjs-prisma': 'backend' });
+  assert.ok(files(root).includes('backend/Dockerfile') && !files(root).some((f) => f.startsWith('apps/')));
+});

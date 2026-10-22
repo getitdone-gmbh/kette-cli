@@ -42,7 +42,7 @@ Im Projektprofil steht die Edition im Feld `tier`: `community` oder `enterprise`
 Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out ordner`.
 
 ## Vorlagen nach Profil (Enterprise)
-CI-, Docker- und Prüfvorlagen folgen dem Projektprofil: nur die gewählten Stacks, jeweils in ihrem App-Ordner (`apps` im Profil, sonst `apps/web`, `apps/api`, `apps/mobile`). `kette add` erkennt App-Ordner wie `backend/`, `frontend/` oder `apps/*`. Ein vorhandenes Profil wird nie neu geschrieben: `kette add` hebt höchstens `tier` an und ergänzt `apps`, wenn das Feld fehlt und das installierte Schema es kennt; alle anderen Felder bleiben. Vorhandene Dateien bleiben unverändert (`= keep`).
+CI-, Docker- und Prüfvorlagen folgen dem Projektprofil: nur die gewählten Stacks, jeweils in ihrem App-Ordner (`apps` im Profil, sonst `apps/web`, `apps/api`, `apps/mobile`). `kette add` erkennt App-Ordner wie `backend/`, `frontend/` oder `apps/*`. `apps` schreibt nur Enterprise; ein Community-Projekt bekommt die Ordner beim Wechsel auf Enterprise aus der Erkennung. Ein vorhandenes Profil wird nie neu geschrieben: `kette add` hebt höchstens `tier` an und ergänzt `apps`, wenn das Feld fehlt und das installierte Schema es kennt; alle anderen Felder bleiben. Vorhandene Dateien bleiben unverändert (`= keep`).
 
 Kennt die CLI das Vorlagenformat des installierten Regelwerks nicht (neueres Format, unbekannte Platzhalter oder Anweisungen), legt sie Regeln und Profil an, lässt Vorlagen und Prüfungen aus und nennt den Befehl zur Neuinstallation der CLI. Ein älteres Regelwerk ohne Vorlagen nach Profil ergibt den Hinweis `kette update`.
 
