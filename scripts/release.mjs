@@ -41,8 +41,10 @@ const commitTime = (repo, ref) => Number(execFileSync('git', ['-C', repo, 'log',
 const sourceTime = new Date(Math.max(commitTime(eng, 'HEAD'), commitTime(agentPack, agentPackCommit)) * 1000);
 
 const strip = (s) => s.split('\n').filter((l) => !l.startsWith('// Kopie von')).join('\n');
-if (strip(fs.readFileSync(path.join(root, 'src/validate.mjs'), 'utf8')) !== fs.readFileSync(path.join(eng, 'lib/validate.mjs'), 'utf8')) {
-  throw new Error('src/validate.mjs weicht von kette-engineering/lib/validate.mjs ab');
+for (const lib of ['validate.mjs', 'templates.mjs']) {
+  if (strip(fs.readFileSync(path.join(root, 'src', lib), 'utf8')) !== fs.readFileSync(path.join(eng, 'lib', lib), 'utf8')) {
+    throw new Error(`src/${lib} differs from kette-engineering/lib/${lib}`);
+  }
 }
 
 fs.rmSync(out, { recursive: true, force: true });
