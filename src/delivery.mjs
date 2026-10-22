@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import path from 'node:path';
 import { credentialsFile, delivery, deviceIdFile } from './paths.mjs';
+import { writePrivate } from './files.mjs';
 
 export const KEY_PATTERN = /^CDP(-[A-Z0-9]{5}){4}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -101,8 +101,7 @@ export function deviceId() {
     return id;
   }
   const id = crypto.randomUUID();
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, id + '\n', { mode: 0o600 });
+  writePrivate(file, id + '\n');
   return id;
 }
 
@@ -116,11 +115,7 @@ export function readCredentials() {
 }
 
 export function writeCredentials(key) {
-  const file = credentialsFile();
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ key }) + '\n', { mode: 0o600 });
-  // mode only applies on create, an existing file is fixed up here
-  fs.chmodSync(file, 0o600);
+  writePrivate(credentialsFile(), JSON.stringify({ key }) + '\n');
 }
 
 export function removeCredentials() {

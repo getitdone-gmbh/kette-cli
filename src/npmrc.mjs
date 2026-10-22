@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 
 // Marked block in the user npmrc: kette login writes it, kette logout removes only it
 export const SCOPE = '@getitdone-gmbh';
@@ -69,13 +68,6 @@ export function withoutBlock(content) {
 
 export function readFile(file) {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-}
-
-// Mode 600, also for an existing file
-export function writePrivate(file, content) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, content, { mode: 0o600 });
-  fs.chmodSync(file, 0o600);
 }
 
 // Registry the scope points to in a project .npmrc, null without a scope line

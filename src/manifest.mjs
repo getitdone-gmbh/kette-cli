@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { activeBundleLink, bundlesDir, isSecureUrl, mirror, stateFile } from './paths.mjs';
+import { writePrivate } from './files.mjs';
+import { cmd, status } from './out.mjs';
 
 export async function fetchManifest() {
   const url = `${mirror()}/manifest.json`;
@@ -46,20 +48,30 @@ export async function download(entry, target, { anyHost = false } = {}) {
   return target;
 }
 
+// Missing file is an empty state; a damaged one is moved to state.json.bak with a warning, so nothing is lost silently
 export function readState() {
-  try { return JSON.parse(fs.readFileSync(stateFile(), 'utf8')); } catch { return {}; }
+  const file = stateFile();
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return {};
+    let moved = true;
+    try { fs.renameSync(file, `${file}.bak`); } catch { moved = false; }
+    console.error(`${status('warn', 'WARN')} ${file} is not readable (${err.message}). ${moved ? `Moved to ${file}.bak, ` : ''}kette starts with an empty state; ${cmd('kette update')} loads the rulebook again.`);
+    return {};
+  }
 }
 
+const saveState = (state) => writePrivate(stateFile(), JSON.stringify(state, null, 2) + '\n');
+
 export function writeState(next) {
-  fs.mkdirSync(path.dirname(stateFile()), { recursive: true });
-  fs.writeFileSync(stateFile(), JSON.stringify({ ...readState(), ...next }, null, 2) + '\n');
+  saveState({ ...readState(), ...next });
 }
 
 export function removeState(keys) {
   const state = readState();
   for (const k of keys) delete state[k];
-  fs.mkdirSync(path.dirname(stateFile()), { recursive: true });
-  fs.writeFileSync(stateFile(), JSON.stringify(state, null, 2) + '\n');
+  saveState(state);
 }
 
 // Downloads a bundle, verifies it and unpacks it to ~/.kette/bundles/<tier>/<version>

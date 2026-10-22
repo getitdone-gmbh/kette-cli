@@ -6,7 +6,8 @@ import { DeliveryError, FIGMA_PENDING, NPM_PENDING, createCiToken, deviceId, fig
 import { readState, writeState } from './manifest.mjs';
 import { isSecureUrl, npmUserConfig, registryDefault } from './paths.mjs';
 import { cmd, file as fileName, isoDate, status } from './out.mjs';
-import { SCOPE, TOKEN_PATTERN, authKey, blockToken, foreignScopeLines, hasBlock, projectScope, readFile, withBlock, withoutBlock, writePrivate } from './npmrc.mjs';
+import { SCOPE, TOKEN_PATTERN, authKey, blockToken, foreignScopeLines, hasBlock, projectScope, readFile, withBlock, withoutBlock } from './npmrc.mjs';
+import { writePrivate } from './files.mjs';
 
 const GITHUB_PACKAGES = 'npm.pkg.github.com';
 const WARN = status('warn', 'WARN');
