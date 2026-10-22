@@ -7,7 +7,7 @@ import { readState, writeState } from './manifest.mjs';
 import { isSecureUrl, npmUserConfig, registryDefault } from './paths.mjs';
 import { cmd, file as fileName, isoDate, status } from './out.mjs';
 import { SCOPE, TOKEN_PATTERN, authKey, blockToken, foreignScopeLines, hasBlock, projectScope, readFile, withBlock, withoutBlock } from './npmrc.mjs';
-import { writePrivate } from './files.mjs';
+import { othersCanRead, privateHint, writePrivate } from './files.mjs';
 
 const GITHUB_PACKAGES = 'npm.pkg.github.com';
 const WARN = status('warn', 'WARN');
@@ -102,6 +102,7 @@ export async function npmChecks(root, { line, warn }, opts) {
   const file = readState().npm?.file || npmUserConfig();
   const token = blockToken(readFile(file));
   if (token) line(true, `npm access in ${fileName(file)}`);
+  if (token && othersCanRead(file)) warn(privateHint(file, cmd));
   else if (readState().npm?.pending) warn(NPM_PENDING);
   else warn(`No npm access in ${fileName(file)}. For the design system packages: ${cmd('kette update')} (or ${cmd('kette login <key> --npm-replace')} with your own ${SCOPE} line)`);
   if (token && !opts.ci) {

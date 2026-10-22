@@ -16,6 +16,7 @@ import { credentialsStatus, formatDate, installCommand, loginState, login, logou
 import { SCOPE } from './npmrc.mjs';
 import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
 import { cmd, file, status } from './out.mjs';
+import { othersCanRead, privateHint } from './files.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -403,7 +404,7 @@ function edition(tier, { line, warn }) {
   const state = loginState() || {};
   line(true, `Edition ${editionLabel(ENTERPRISE)}, version ${installedBundle(ENTERPRISE).version}, updates until ${formatDate(state.updates_until)}`);
   if (state.updates_until && new Date(state.updates_until) < new Date()) warn(`Update period ended on ${formatDate(state.updates_until)}. The installed version keeps working, new versions come with a renewal.`);
-  if (process.platform !== 'win32' && (fs.statSync(credentialsFile()).mode & 0o077)) warn(`${file(credentialsFile())} is readable by others. Fix with: ${cmd(`chmod 600 ${credentialsFile()}`)}`);
+  if (othersCanRead(credentialsFile())) warn(privateHint(credentialsFile(), cmd));
 }
 
 export async function main(argv) {

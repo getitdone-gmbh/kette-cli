@@ -221,6 +221,13 @@ test('add schreibt nur die Scope-Zeile ohne Token in die Projekt-.npmrc und läs
   assert.match(out, /WARN \.npmrc in the project points @getitdone-gmbh to npm\.pkg\.github\.com/);
 });
 
+test('doctor warns when the npm token file is readable by others', { skip: process.platform === 'win32' }, async () => {
+  await run('login', KEY, '--no-plugins');
+  fs.chmodSync(userrc, 0o644);
+  const { out } = await inDir(tmp(), () => run('doctor', '--ci'));
+  assert.ok(out.includes(`WARN ${userrc} is readable by others. Fix with: chmod 600 ${userrc}`));
+});
+
 test('doctor prüft Block und Token und findet einen Token in einer Datei im Git', async () => {
   await run('login', KEY, '--no-plugins');
   const project = tmp();

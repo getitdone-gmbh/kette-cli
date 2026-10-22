@@ -7,6 +7,10 @@ function realTarget(file) {
   try { return fs.realpathSync(file); } catch { return file; }
 }
 
+// Group or others may read the file (POSIX only, Windows has no mode bits)
+export const othersCanRead = (file) => process.platform !== 'win32' && fs.existsSync(file) && (fs.statSync(file).mode & 0o077) !== 0;
+export const privateHint = (file, cmd) => `${file} is readable by others. Fix with: ${cmd(`chmod 600 ${file}`)}`;
+
 // Temp file with mode 600 in the same folder, then rename: readers never see half a file and the secret is never readable by others
 export function writePrivate(file, content) {
   const dest = realTarget(file);
