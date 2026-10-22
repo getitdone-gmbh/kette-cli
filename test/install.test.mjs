@@ -123,3 +123,26 @@ test('install.ps1 installs from the local mirror and kette.cmd runs', { skip: (!
   const version = spawnSync(path.join(home, 'bin', 'kette.cmd'), ['version'], { shell: true, encoding: 'utf8' });
   assert.equal(version.stdout.trim(), JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).version);
 });
+
+// PATH with the tools the installer needs, wget instead of curl; the fake wget logs its arguments and fails
+function wgetOnly() {
+  const bin = tmp();
+  const log = path.join(bin, 'wget.log');
+  for (const tool of ['node', 'git', 'tar', 'sha256sum', 'shasum', 'mktemp', 'rm', 'sed', 'grep', 'basename', 'uname', 'cut', 'mkdir', 'chmod', 'ln', 'cat', 'dirname']) {
+    const found = spawnSync('/bin/sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim();
+    if (found) fs.symlinkSync(found, path.join(bin, tool));
+  }
+  write(bin, 'wget', `#!/bin/sh\necho "$@" >> "${log}"\nexit 1\n`);
+  fs.chmodSync(path.join(bin, 'wget'), 0o755);
+  return { PATH: bin, log: () => fs.readFileSync(log, 'utf8') };
+}
+
+test('install.sh with wget only: https mirror uses --https-only and TLS 1.2, a local http mirror plain wget', { skip: process.platform === 'win32' }, async () => {
+  const https = wgetOnly();
+  const err = await exec('/bin/sh', [script], { env: { PATH: https.PATH, HOME: tmp(), KETTE_MIRROR: 'https://kette.example/dl' } }).catch((e) => e);
+  assert.match(err.stderr, /Manifest not reachable/);
+  assert.match(https.log(), /^-q --https-only --secure-protocol=TLSv1_2 -O \S+manifest\.json https:\/\/kette\.example\/dl\/manifest\.json$/m);
+  const local = wgetOnly();
+  await exec('/bin/sh', [script], { env: { PATH: local.PATH, HOME: tmp(), KETTE_MIRROR: mirror.url } }).catch((e) => e);
+  assert.doesNotMatch(local.log(), /--https-only/);
+});

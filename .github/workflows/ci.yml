@@ -6,18 +6,24 @@ on:
 permissions:
   contents: read
 jobs:
-  # Whole suite on Linux and Windows; on Windows it also runs install.ps1 against a local mirror (pwsh is preinstalled on both)
+  # Whole suite on Linux, macOS and Windows with the oldest and the current supported Node; on Windows it also runs install.ps1 against a local mirror
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - run: npm test
-      - if: runner.os == 'Linux'
-        run: sh -n install/install.sh
+
+  installer-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sh -n install/install.sh
+      - run: shellcheck install/install.sh

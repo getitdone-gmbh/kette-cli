@@ -20,6 +20,8 @@ rc_file() {
 # Adds the bin folder to the startup file only when missing; KETTE_NO_MODIFY_PATH=1 leaves everything unchanged
 add_to_path() {
   BIN="$KETTE_HOME/bin"
+  # The line goes into the startup file literally, $HOME and $PATH expand when the shell starts
+  # shellcheck disable=SC2016
   if [ "$BIN" = "$HOME/.kette/bin" ]; then LINE='export PATH="$HOME/.kette/bin:$PATH"'
   else LINE="export PATH=\"$BIN:\$PATH\""; fi
   RC=$(rc_file)
@@ -59,7 +61,10 @@ command -v git >/dev/null 2>&1 || fail "git is missing."
 command -v tar >/dev/null 2>&1 || fail "tar is missing."
 
 if command -v curl >/dev/null 2>&1; then get() { curl -fsSL --proto "$PROTO" --proto-redir "$PROTO" --tlsv1.2 "$1" -o "$2"; }
-elif command -v wget >/dev/null 2>&1; then get() { wget -qO "$2" "$1"; }
+elif command -v wget >/dev/null 2>&1; then
+  # GNU wget: https only with TLS 1.2 or newer, like curl; a wget without these options (busybox) stops here instead of downgrading
+  if [ "$PROTO" = '=https' ]; then get() { wget -q --https-only --secure-protocol=TLSv1_2 -O "$2" "$1"; }
+  else get() { wget -qO "$2" "$1"; }; fi
 else fail "curl or wget is missing."; fi
 
 if command -v sha256sum >/dev/null 2>&1; then sum() { sha256sum "$1" | cut -d' ' -f1; }

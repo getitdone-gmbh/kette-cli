@@ -48,16 +48,29 @@
     if (-not (Test-Path (Join-Path $dest 'bin\kette.mjs'))) { Fail 'The CLI package is incomplete, installation cancelled.' }
     $bin = Join-Path $KetteHome 'bin'
     New-Item -ItemType Directory -Path $bin -Force | Out-Null
-    Set-Content -Path (Join-Path $bin 'kette.cmd') -Value "@node `"$dest\bin\kette.mjs`" %*" -Encoding ASCII
+    # cmd.exe expands %...% even inside quotes, so a percent sign in the path is doubled
+    $script = "$dest\bin\kette.mjs".Replace('%', '%%')
+    Set-Content -Path (Join-Path $bin 'kette.cmd') -Value "@node `"$script`" %*" -Encoding ASCII
     Write-Host "Installed: $bin\kette.cmd ($version)"
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (-not ($userPath -split ';' | Where-Object { $_ -eq $bin })) {
-      if ($env:KETTE_NO_MODIFY_PATH -eq '1') {
-        Write-Host "PATH not changed (KETTE_NO_MODIFY_PATH=1). Add $bin to the user PATH by hand."
-      } else {
-        [Environment]::SetEnvironmentVariable('Path', "$bin;$userPath", 'User')
-        Write-Host "PATH updated with $bin (open a new terminal)."
+    # User PATH straight from the registry without expanding %USERPROFILE% and friends, written back as ExpandString,
+    # so entries like %USERPROFILE%\bin stay variables instead of being frozen to today's values
+    $envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    try {
+      $userPath = [string]$envKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      if (-not ($userPath -split ';' | Where-Object { $_ -eq $bin })) {
+        if ($env:KETTE_NO_MODIFY_PATH -eq '1') {
+          Write-Host "PATH not changed (KETTE_NO_MODIFY_PATH=1). Add $bin to the user PATH by hand."
+        } else {
+          $newPath = if ($userPath) { "$bin;$userPath" } else { $bin }
+          $envKey.SetValue('Path', $newPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+          # Setting and clearing a dummy variable broadcasts the change, so new terminals see the new PATH
+          [Environment]::SetEnvironmentVariable('KETTE_PATH_REFRESH', '1', 'User')
+          [Environment]::SetEnvironmentVariable('KETTE_PATH_REFRESH', $null, 'User')
+          Write-Host "PATH updated with $bin (open a new terminal)."
+        }
       }
+    } finally {
+      $envKey.Close()
     }
     Write-Host ''
     Write-Host 'Next:'
