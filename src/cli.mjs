@@ -7,7 +7,7 @@ import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { renderTemplates, TemplateError } from './templates.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
-import { MARKETPLACE, editionHints, hasClaude, installEdition, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
+import { MARKETPLACE, REPAIR_NOTE, editionHints, hasClaude, installEdition, installedPlugins, pluginId, pluginInstalled, pluginsOutdated } from './claude.mjs';
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins } from './editions.mjs';
 import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
@@ -419,7 +419,7 @@ async function doctor(root, opts) {
   if (!opts.ci && bundle && hasClaude()) {
     const list = installedPlugins();
     if (list === null) line(false, 'Claude Code plugin list not readable (claude plugin list fails)');
-    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installed`, `Plugin ${pluginId(p)} not installed`);
+    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installed`, `Plugin ${pluginId(p)} not installed. Install with: ${cmd('kette update')}`);
   }
   if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir, info);
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
@@ -464,20 +464,29 @@ async function update(opts) {
   return code;
 }
 
+function refreshPlugins(dir, tier) {
+  const link = setActiveBundle(dir);
+  for (const l of editionHints(installEdition(link, tier, otherEditionPlugins(tier)), link)) console.log(l);
+}
+
 async function updateBundle(opts) {
   if (credentialsStatus() === 'valid') return updateEnterprise(opts, VERSION);
   const manifest = await fetchManifest();
   const tier = COMMUNITY;
   const have = installedBundle(tier);
-  if (have?.version === manifest.version) { console.log(`Up to date (version ${manifest.version}).`); return 0; }
+  if (have?.version === manifest.version) {
+    console.log(`Up to date (version ${manifest.version}).`);
+    if (!opts.dryRun && !opts.noPlugins && hasClaude() && pluginsOutdated(tier)) {
+      console.log(REPAIR_NOTE);
+      refreshPlugins(have.dir, tier);
+    }
+    return 0;
+  }
   console.log(`New version ${manifest.version}${have ? ` (installed: ${have.version})` : ''}.`);
   if (manifest.changelog) console.log(manifest.changelog);
   if (opts.dryRun) return 0;
   const dir = await installBundle(manifest, tier);
-  if (!opts.noPlugins) {
-    const link = setActiveBundle(dir);
-    for (const l of editionHints(installEdition(link, tier, otherEditionPlugins(tier)), link)) console.log(l);
-  }
+  if (!opts.noPlugins) refreshPlugins(dir, tier);
   await cliHint(VERSION, manifest);
   console.log(`Rulebook ${manifest.version} installed.`);
   return 0;

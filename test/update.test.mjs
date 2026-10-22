@@ -55,3 +55,23 @@ test('Community update leaves plugins alone when ui-gesetze is not installed', {
   assert.ok(!claude.calls().some((c) => c.startsWith('plugin uninstall')));
   assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'ui-laws@kette']);
 });
+
+test('Community update repairs the plugins when CLI 0.6.1 already loaded the bundle with ui-laws', { skip: process.platform === 'win32' }, async () => {
+  current = NEW;
+  await run('update', '--no-plugins');
+  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: path.join(kh, 'bundles', 'active') }], 'kette-engineering-core@kette\nui-gesetze@kette\n');
+  let out;
+  try { ({ out } = await run('update')); } finally { claude.restore(); }
+  assert.match(out, /^Up to date \(version 0\.20261022\.40\)\.\nClaude Code plugins do not match the installed bundle, installing them again\.$/m);
+  assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'ui-laws@kette']);
+});
+
+test('Community update that is up to date with matching plugins leaves Claude Code alone', { skip: process.platform === 'win32' }, async () => {
+  current = NEW;
+  await run('update', '--no-plugins');
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-laws@kette\n');
+  let out;
+  try { ({ out } = await run('update')); } finally { claude.restore(); }
+  assert.equal(out, 'Up to date (version 0.20261022.40).');
+  assert.deepEqual(claude.calls().filter((c) => c !== '--version' && c !== 'plugin list'), []);
+});

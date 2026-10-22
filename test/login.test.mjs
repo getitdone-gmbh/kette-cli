@@ -291,6 +291,15 @@ test('ein einzeln installiertes Agenten-Pack wird nicht angefasst, doppelte Plug
   assert.ok(!claude.calls().some((c) => /claude-design-agent-pack/.test(c) && /uninstall|remove/.test(c)));
 });
 
+test('Enterprise update that is up to date installs missing plugins and removes ui-gesetze', { skip: process.platform === 'win32' }, async () => {
+  await run('login', KEYS.ok, '--no-plugins');
+  const claude = fakeClaude([], ['kette-engineering-core@kette', 'ui-gesetze@kette', ...ENTERPRISE_IDS].join('\n'));
+  let out;
+  try { ({ out } = await run('update', '--no-npm')); } finally { claude.restore(); }
+  assert.match(out, /Up to date \(Enterprise \(Die Kette\) 0\.20261020\.9\)\.\nClaude Code plugins do not match the installed bundle, installing them again\./);
+  assert.deepEqual(claude.installed().sort(), ['kette-engineering-core@kette', ...ENTERPRISE_IDS, 'ui-laws@kette'].sort());
+});
+
 test('update im Projekt erneuert den Kette-Block für die angemeldete Edition', async () => {
   await run('login', KEYS.ok, '--no-plugins');
   const project = tmp();

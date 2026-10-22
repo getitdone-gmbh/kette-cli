@@ -152,3 +152,12 @@ export function installedPlugins() {
 }
 
 export const pluginInstalled = (name, list = installedPlugins()) => listed(list, pluginId(name));
+
+// An edition plugin is missing in Claude Code or an old name is still installed, e.g. after CLI 0.6.1 loaded a bundle with ui-laws; false when the list is not readable
+export function pluginsOutdated(tier) {
+  const list = installedPlugins();
+  if (list === null) return false;
+  return pluginsFor(tier).some((p) => !listed(list, pluginId(p))) || Object.keys(RENAMED_PLUGINS).some((old) => listed(list, pluginId(old)));
+}
+
+export const REPAIR_NOTE = 'Claude Code plugins do not match the installed bundle, installing them again.';

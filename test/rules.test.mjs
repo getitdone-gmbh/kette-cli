@@ -371,7 +371,7 @@ test('doctor names a missing plugin as not installed', async () => {
   try {
     const { out } = await run('doctor');
     assert.match(out, /^OK {3}Plugin kette-engineering-core@kette installed$/m);
-    assert.match(out, /^FAIL Plugin ui-laws@kette not installed$/m);
+    assert.match(out, /^FAIL Plugin ui-laws@kette not installed\. Install with: kette update$/m);
   } finally {
     claude.restore();
     process.chdir(cwd);
