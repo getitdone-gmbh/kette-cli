@@ -10,8 +10,8 @@ import { askSecret } from './prompt.mjs';
 import { cmd, isoDate, status } from './out.mjs';
 
 export const formatDate = (iso) => isoDate(iso, 'unknown');
-export const installCommand = () => `${cmd('curl -fsSL https://kette.itdone.de/install | sh')} (Windows: ${cmd('irm https://kette.itdone.de/install.ps1 | iex')})`;
-export const newCliHint = (version) => `New CLI ${version} available: ${installCommand()}`;
+// The one hint for a new or reinstalled CLI, with the command for macOS and Linux and for Windows
+export const cliUpgradeHint = (version) => `${version ? `New CLI ${version} available` : 'Reinstall the CLI'}: ${cmd('curl -fsSL https://kette.itdone.de/install | sh')} (Windows: ${cmd('irm https://kette.itdone.de/install.ps1 | iex')})`;
 
 // none, valid or broken; a damaged file unlocks nothing, doctor reports it
 export function credentialsStatus() {
@@ -97,10 +97,11 @@ export async function logout(opts) {
   return 0;
 }
 
-async function cliHint(cli) {
+// Hint when the mirror has a newer CLI; manifest when the caller already has it
+export async function cliHint(cli, manifest = null) {
   try {
-    const m = await fetchManifest();
-    if (m.cli && isNewer(m.cli.version, cli)) console.log(newCliHint(m.cli.version));
+    const m = manifest || (await fetchManifest());
+    if (m.cli && isNewer(m.cli.version, cli)) console.log(cliUpgradeHint(m.cli.version));
   } catch (err) {
     console.log(`${status('warn', 'WARN')} CLI version not checked (${err.message})`);
   }

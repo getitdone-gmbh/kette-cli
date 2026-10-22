@@ -9,10 +9,10 @@ import { renderTemplates, TemplateError } from './templates.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
 import { MARKETPLACE, editionHints, hasClaude, installEdition, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
-import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins, isNewer } from './editions.mjs';
+import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins } from './editions.mjs';
 import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
-import { credentialsStatus, formatDate, installCommand, loginState, login, logout, newCliHint, tierOf, updateEnterprise } from './enterprise.mjs';
+import { cliHint, cliUpgradeHint, credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 import { SCOPE } from './npmrc.mjs';
 import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
 import { cmd, file, status } from './out.mjs';
@@ -241,7 +241,7 @@ async function setup(root, opts, isNew) {
   const stale = staleNote(described);
   if (stale) console.log(stale);
   if (tier === COMMUNITY) console.log(`\n  Agents, gates with code reviewer, platform templates and checks come with the Enterprise edition (Die Kette): ${cmd('kette login <key>')}`);
-  else if (rendered.newer) console.log(`\n  The installed rulebook is newer than this CLI understands (${rendered.newer}), platform templates and checks are skipped. Reinstall the CLI: ${installCommand()}`);
+  else if (rendered.newer) console.log(`\n  The installed rulebook is newer than this CLI understands (${rendered.newer}), platform templates and checks are skipped. ${cliUpgradeHint()}`);
   else if (!templates) console.log(`\n  The installed rulebook has no profile-aware templates yet, load the current one with: ${cmd('kette update')}`);
   else if (!templates.platform) console.log(`\n  No templates for ${target.platform.id} yet (status: ${platformStatus(bundleDir, target.platform.id) || 'unknown'}).`);
   for (const s of templates?.skipped || []) console.log(`  No templates for ${s.stack}: ${s.reason}`);
@@ -393,7 +393,7 @@ async function updateBundle(opts) {
     const link = setActiveBundle(dir);
     for (const l of editionHints(installEdition(link, tier, otherEditionPlugins(tier)), link)) console.log(l);
   }
-  if (manifest.cli && isNewer(manifest.cli.version, VERSION)) console.log(newCliHint(manifest.cli.version));
+  await cliHint(VERSION, manifest);
   console.log(`Rulebook ${manifest.version} installed.`);
   return 0;
 }
