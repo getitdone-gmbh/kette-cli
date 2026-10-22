@@ -17,6 +17,7 @@ import { SCOPE } from './npmrc.mjs';
 import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
 import { cmd, file, status } from './out.mjs';
 import { othersCanRead, privateHint } from './files.mjs';
+import { ExitError } from './errors.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -75,19 +76,24 @@ Options:
 
 The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.`;
 
-function parse(argv) {
+const FLAGS = {
+  '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
+  '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--help': 'help', '-h': 'help', '--version': 'version',
+};
+const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out'];
+
+// Unknown options and options without their value stop with exit code 2, so a typo never runs with defaults
+export function parse(argv) {
   const opts = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--dry-run') opts.dryRun = true;
-    else if (a === '--yes' || a === '-y') opts.yes = true;
-    else if (a === '--no-plugins') opts.noPlugins = true;
-    else if (a === '--ci') opts.ci = true;
-    else if (a === '--path') opts.path = true;
-    else if (a === '--no-npm') opts.noNpm = true;
-    else if (a === '--npm-replace') opts.npmReplace = true;
-    else if (['--stack', '--platform', '--patterns', '--name', '--out'].includes(a)) opts[a.slice(2)] = argv[++i];
-    else if (a === '--help' || a === '-h') opts.help = true;
+    if (a in FLAGS) opts[FLAGS[a]] = true;
+    else if (a === '--color' || a === '--no-color') opts.color = a === '--color';
+    else if (VALUES.includes(a)) {
+      const value = argv[++i];
+      if (value === undefined || value.startsWith('-')) throw new ExitError(`${a} needs a value`);
+      opts[a.slice(2)] = value;
+    } else if (a.startsWith('-') && a !== '-') throw new ExitError(`Unknown option ${a}`);
     else opts._.push(a);
   }
   return opts;
@@ -408,11 +414,19 @@ function edition(tier, { line, warn }) {
 }
 
 export async function main(argv) {
-  const opts = parse(argv);
+  let opts;
+  try {
+    opts = parse(argv);
+  } catch (err) {
+    if (!(err instanceof ExitError)) throw err;
+    console.error(`kette: ${err.message}\n`);
+    console.log(HELP);
+    return err.exitCode;
+  }
   const [command, arg] = opts._;
   try {
+    if (opts.version || command === 'version') { console.log(VERSION); return 0; }
     if (!command || opts.help || command === 'help') { console.log(HELP); return 0; }
-    if (command === 'version' || command === '--version') { console.log(VERSION); return 0; }
     if (command === 'init') {
       const root = arg || (opts.yes ? '.' : await ask('Folder for the new project', '.'));
       if (fs.existsSync(path.join(root, '.kette', 'profile.json'))) throw new Error(`${root} already has a kette profile, use kette add or kette doctor`);

@@ -59,3 +59,19 @@ test('without a terminal a question stops with exit code 2 and a hint instead of
   assert.equal(r.status, 2);
   assert.equal(r.stderr.trim(), 'kette: No terminal. Use --yes with --stack/--platform/--patterns.');
 });
+
+test('unknown options and options without a value stop with exit code 2 and the help', async () => {
+  const { main, parse } = await import('../src/cli.mjs');
+  assert.throws(() => parse(['init', '--stak', 'x']), /Unknown option --stak/);
+  assert.throws(() => parse(['init', '--stack']), /--stack needs a value/);
+  assert.throws(() => parse(['init', '--stack', '--yes']), /--stack needs a value/);
+  assert.deepEqual(parse(['init', 'proj', '-y', '--stack', 'a,b', '--no-color']), { _: ['init', 'proj'], yes: true, stack: 'a,b', color: false });
+  const errors = [];
+  const logs = [];
+  const [err, log] = [console.error, console.log];
+  console.error = (m) => errors.push(m);
+  console.log = (m) => logs.push(m);
+  try { assert.equal(await main(['doctor', '--frobnicate']), 2); } finally { [console.error, console.log] = [err, log]; }
+  assert.match(errors.join('\n'), /^kette: Unknown option --frobnicate/);
+  assert.match(logs.join('\n'), /^kette \d+\.\d+\.\d+ · set up the rules/);
+});
