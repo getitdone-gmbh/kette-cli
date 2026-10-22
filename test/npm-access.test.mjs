@@ -267,6 +267,9 @@ test('doctor prüft Block und Token und findet einen Token in einer Datei im Git
   execFileSync('git', ['-C', project, 'add', '.']);
   let { out } = await inDir(project, () => run('doctor'));
   assert.match(out, /OK {3}npm access in /);
+  assert.doesNotMatch(out, /No npm access/, 'a valid token never also reports missing access');
+  const warnings = (out.match(/^WARN /gm) || []).length;
+  assert.match(out, new RegExp(`\\n(all good|\\d+ open issue\\(s\\))${warnings ? `, ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}$`), 'the closing line counts every WARN');
   assert.match(out, /OK {3}npm token valid/);
   assert.match(out, /OK {3}no npm token in files tracked by git/);
 

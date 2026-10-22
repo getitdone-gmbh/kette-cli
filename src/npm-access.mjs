@@ -113,9 +113,10 @@ export async function ensureNpm(key, opts) {
 export async function npmChecks(root, { line, warn }, opts) {
   const file = readState().npm?.file || npmUserConfig();
   const token = blockToken(readFile(file));
-  if (token) line(true, `npm access in ${fileName(file)}`);
-  if (token && othersCanRead(file)) warn(privateHint(file, cmd));
-  else if (readState().npm?.pending) warn(NPM_PENDING);
+  if (token) {
+    line(true, `npm access in ${fileName(file)}`);
+    if (othersCanRead(file)) warn(privateHint(file, cmd));
+  } else if (readState().npm?.pending) warn(NPM_PENDING);
   else warn(`No npm access in ${fileName(file)}. For the design system packages: ${cmd('kette update')} (or ${cmd('kette login <key> --npm-replace')} with your own ${SCOPE} line)`);
   if (token && !opts.ci) {
     const code = await whoami(registryUrl(), token);

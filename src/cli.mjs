@@ -35,6 +35,8 @@ const PLATFORMS = [
   { value: 'gitlab', label: 'GitLab' },
   { value: 'oss-selfhosted', label: 'Open source on your own servers' },
 ];
+// Also the preselected answer of the platform question
+const DEFAULT_PLATFORM = PLATFORMS[0].value;
 const PATTERNS = [
   { value: 'modular-monolith', label: 'Modular monolith (default)' },
   { value: 'layered', label: 'Layered' },
@@ -139,7 +141,7 @@ async function buildProfile(root, opts, detected) {
     version: 1,
     project: { name },
     stack: stack.length ? stack : ['nextjs-ts-tailwind', 'nestjs-prisma'],
-    platform: { id: platform || 'github-docker' },
+    platform: { id: platform || DEFAULT_PLATFORM },
     patterns: patterns?.length ? patterns : ['modular-monolith'],
     tier: tierOf(),
   };
@@ -260,13 +262,21 @@ function templateHint(rendered, templates, target, bundleDir) {
 
 const unusableFolder = (dir, stack) => `Folder "${dir}" (${stack}) can't be used as an app folder. Rename it (letters, digits, . _ - only) or point apps to another folder in .kette/profile.json.`;
 
+// Without a detected platform the profile gets --platform or the default; only an interactive run still asks
+function platformNote(detected, opts) {
+  if (detected) return `platform ${detected}`;
+  if (opts.platform) return `platform none detected, using ${opts.platform}`;
+  if (opts.yes) return `platform none detected, using ${DEFAULT_PLATFORM} (change with --platform)`;
+  return 'platform none detected';
+}
+
 async function setup(root, opts, isNew) {
   const tier = tierOf();
   const bundleDir = await ensureBundle(tier);
   if (isNew) fs.mkdirSync(root, { recursive: true });
   const folders = isNew ? { apps: {}, unusable: {} } : detectAppFolders(root);
   const detected = isNew ? { stack: [], platform: null, apps: {} } : { stack: detectStack(root), platform: detectPlatform(root), apps: folders.apps };
-  if (!isNew) console.log(`Detected: stack ${detected.stack.join(', ') || 'none'}, platform ${detected.platform || 'none'}`);
+  if (!isNew) console.log(`Detected: stack ${detected.stack.join(', ') || 'none'}, ${platformNote(detected.platform, opts)}`);
   if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
   // apps only matters where templates are rendered, so Community stays quiet
   if (tier === ENTERPRISE) for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} ${unusableFolder(dir, stack)}`);
@@ -364,7 +374,8 @@ async function doctor(root, opts) {
   let problems = 0;
   // failMsg states the actual condition when the check fails, msg when it holds
   const line = (ok, msg, failMsg = msg) => { console.log(`${ok ? status('ok', 'OK  ') : status('fail', 'FAIL')} ${ok ? msg : failMsg}`); if (!ok) problems++; };
-  const warn = (msg) => console.log(`${status('warn', 'WARN')} ${msg}`);
+  let warnings = 0;
+  const warn = (msg) => { console.log(`${status('warn', 'WARN')} ${msg}`); warnings++; };
   const info = (msg) => console.log(`${status('info', 'INFO')} ${msg}`);
   line(Number(process.versions.node.split('.')[0]) >= 20, `Node ${process.versions.node} ${dim('(20 or newer)')}`, `Node ${process.versions.node} is too old, 20 or newer is required`);
   line(Boolean(tool('git')), 'git found', 'git not found');
@@ -404,7 +415,9 @@ async function doctor(root, opts) {
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules', `CLAUDE.md does not point to the Die Kette rules (line @.kette/README.md missing), add it with: ${cmd('kette add')}`);
-  console.log(`\n${problems ? bold(error(`${problems} open issue(s)`)) : bold(accent('all good'))}`);
+  // Warnings never fail doctor, but the closing line counts them so "all good" does not hide them
+  const warned = warnings ? `, ${warnings} warning${warnings === 1 ? '' : 's'}` : '';
+  console.log(`\n${problems ? bold(error(`${problems} open issue(s)${warned}`)) : bold(accent(`all good${warned}`))}`);
   return problems ? 1 : 0;
 }
 
