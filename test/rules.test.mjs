@@ -113,7 +113,7 @@ test('init endet mit Zusammenfassung, .kette/README.md beschreibt den Ablauf der
   assert.match(tail, /^Done\. In the project: \.kette\/profile\.json, \.kette\/README\.md, CLAUDE\.md, docs\/adr\/0000-vorlage\.md\n/);
   assert.match(tail, /Not active in Claude Code yet \(plugins: kette-engineering-core@kette \(Agent kette-check, Skills architecture-patterns, engineering-rules\), ui-gesetze@kette \(Skills a11y-standards, interaction-principles, ui-laws\)\)/);
   assert.match(tail, /browse with: kette rules/);
-  assert.match(tail, /Next steps:\n  1\. cd \S+neu\n  2\. kette doctor\n  3\. Open Claude Code in the project .*\n  4\. kette login <key>/);
+  assert.match(tail, /Next steps:\n  1\. cd "?\S+neu"?\n  2\. kette doctor\n  3\. Open Claude Code in the project .*\n  4\. kette login <key>/);
   assert.ok(tail.split('\n').length <= 10);
   assert.doesNotMatch(out, /[\u2013\u2014]/);
   const note = fs.readFileSync(path.join(root, '.kette', 'README.md'), 'utf8');
