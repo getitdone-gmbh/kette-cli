@@ -75,3 +75,17 @@ test('unknown options and options without a value stop with exit code 2 and the 
   assert.match(errors.join('\n'), /^kette: Unknown option --frobnicate/);
   assert.match(logs.join('\n'), /^kette \d+\.\d+\.\d+ · set up the rules/);
 });
+
+test('plan never writes through a dangling symlink', { skip: process.platform === 'win32' }, () => {
+  const d = tmp();
+  const outside = path.join(tmp(), 'outside.md');
+  fs.mkdirSync(path.join(d, 'docs'));
+  fs.symlinkSync(outside, path.join(d, 'docs', 'note.md'));
+  const described = describePlan([{ path: 'docs/note.md', content: 'x' }], d);
+  assert.equal(described[0].action, 'keep');
+  assert.match(described[0].note, /dangling symlink/);
+  apply(described, d);
+  assert.equal(fs.existsSync(outside), false);
+  assert.throws(() => apply([{ path: 'docs/note.md', content: 'x', action: 'create' }], d), /EEXIST/);
+  assert.equal(fs.existsSync(outside), false);
+});
