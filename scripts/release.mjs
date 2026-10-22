@@ -57,6 +57,12 @@ const RENDER_SET = ['checks/render/index.json', 'profiles/platform/github-docker
 const missingSet = [...LEGACY_SET, ...RENDER_SET].filter((f) => !fs.existsSync(path.join(eng, f)));
 if (missingSet.length) throw new Error(`kette-engineering is missing template files for CLI 0.5.x or 0.6: ${missingSet.join(', ')}`);
 
+// detect.mjs filters app folders with its own copy of the schema pattern; both must stay the same rule
+const { APP_FOLDER_PATTERN } = await import('../src/detect.mjs');
+const schemaApps = JSON.parse(fs.readFileSync(path.join(eng, 'schema', 'profile.schema.json'), 'utf8')).properties.apps.properties;
+const drifted = Object.entries(schemaApps).filter(([, entry]) => entry.pattern !== APP_FOLDER_PATTERN).map(([stack]) => stack);
+if (drifted.length) throw new Error(`APP_FOLDER in src/detect.mjs differs from the apps pattern in the schema (${drifted.join(', ')})`);
+
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(path.join(out, 'private'), { recursive: true });
 

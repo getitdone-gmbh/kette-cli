@@ -37,7 +37,8 @@ export function detectStack(dir) {
 }
 
 // Same rule as apps in the profile schema: plain folder names joined by /, so a detected folder always makes a valid profile
-const APP_FOLDER = /^(\.|(?!(.*\/)?\.\.?(\/|$))[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*\/?)$/;
+export const APP_FOLDER_PATTERN = '^(\\.|(?!(.*/)?\\.\\.?(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?)$';
+const APP_FOLDER = new RegExp(APP_FOLDER_PATTERN);
 
 // App folder per stack, relative with / (e.g. backend, frontend, apps/web); the least nested manifest wins, the root of an npm workspace never counts
 // unusable: stacks found only in folders whose name the profile cannot hold (spaces, umlauts), they get no apps entry

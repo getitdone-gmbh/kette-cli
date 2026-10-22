@@ -289,7 +289,9 @@ test('a bundle template with a placeholder this CLI does not know: same reinstal
 
 test('Community init writes no apps; after the upgrade add detects the folders and puts the templates there', async () => {
   const d = bundle();
+  // Community: no credentials, the same bundle as the installed Community rulebook
   fs.rmSync(path.join(kh, 'credentials'));
+  fs.writeFileSync(path.join(kh, 'state.json'), JSON.stringify({ bundle_community: { version: '0.1.0', dir: bundle() } }));
   fs.writeFileSync(path.join(kh, 'state.json'), JSON.stringify({ bundle_community: { version: '0.1.0', dir: d } }));
   const { root } = await init('nestjs-prisma');
   assert.equal('apps' in profileOf(root), false);
@@ -391,7 +393,7 @@ test('a detected folder the profile cannot hold ("Web App", umlauts) gets no app
   write(root, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
   const { out, result } = await addIn(root, ['--platform', 'github-docker', '--patterns', 'layered']);
   assert.equal(result, 0);
-  assert.match(out, /WARN Folder "Web App" \(nextjs-ts-tailwind\) can't be used as an app folder, set apps by hand in \.kette\/profile\.json/);
+  assert.ok(out.includes('WARN Folder "Web App" (nextjs-ts-tailwind) can\'t be used as an app folder. Rename it (letters, digits, . _ - only) or point apps to another folder in .kette/profile.json.'), out);
   assert.deepEqual(profileOf(root).apps, { 'nestjs-prisma': 'backend' });
   assert.ok(files(root).includes('backend/Dockerfile'));
   assert.ok(!files(root).some((f) => f.startsWith('apps/')), 'no default folder for the skipped app');
@@ -403,5 +405,12 @@ test('a detected folder the profile cannot hold ("Web App", umlauts) gets no app
   write(existing, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
   await addIn(existing);
   assert.deepEqual(profileOf(existing).apps, { 'nestjs-prisma': 'backend' });
+
+  // Community: no credentials, the same bundle as the installed Community rulebook
+  fs.rmSync(path.join(kh, 'credentials'));
+  fs.writeFileSync(path.join(kh, 'state.json'), JSON.stringify({ bundle_community: { version: '0.1.0', dir: bundle() } }));
+  const community = tmp();
+  write(community, 'Web App/package.json', JSON.stringify({ dependencies: { next: '16' } }));
+  assert.doesNotMatch((await addIn(community, ['--platform', 'github-docker', '--patterns', 'layered'])).out, /can't be used as an app folder/);
   assert.equal(profileOf(existing).tier, 'enterprise');
 });

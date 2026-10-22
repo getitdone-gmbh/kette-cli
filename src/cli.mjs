@@ -258,6 +258,8 @@ function templateHint(rendered, templates, target, bundleDir) {
   return null;
 }
 
+const unusableFolder = (dir, stack) => `Folder "${dir}" (${stack}) can't be used as an app folder. Rename it (letters, digits, . _ - only) or point apps to another folder in .kette/profile.json.`;
+
 async function setup(root, opts, isNew) {
   const tier = tierOf();
   const bundleDir = await ensureBundle(tier);
@@ -266,7 +268,8 @@ async function setup(root, opts, isNew) {
   const detected = isNew ? { stack: [], platform: null, apps: {} } : { stack: detectStack(root), platform: detectPlatform(root), apps: folders.apps };
   if (!isNew) console.log(`Detected: stack ${detected.stack.join(', ') || 'none'}, platform ${detected.platform || 'none'}`);
   if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
-  for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} Folder "${dir}" (${stack}) can't be used as an app folder, set apps by hand in .kette/profile.json`);
+  // apps only matters where templates are rendered, so Community stays quiet
+  if (tier === ENTERPRISE) for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} ${unusableFolder(dir, stack)}`);
   const schema = loadSchema(bundleDir);
   // apps says where the templates go, so only Enterprise writes it; a Community project gets it from detection when it is upgraded
   const appsSchema = tier === ENTERPRISE ? schema : {};
@@ -283,7 +286,7 @@ async function setup(root, opts, isNew) {
   const skippedStacks = (target.stack || []).filter((s) => s in folders.unusable && !target.apps?.[s]);
   const renderable = { ...target, stack: (target.stack || []).filter((s) => !skippedStacks.includes(s)) };
   const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : templatesFor(bundleDir, renderable, isNew || detectWorkspace(root));
-  if (rendered.templates) rendered.templates.skipped.push(...skippedStacks.map((stack) => ({ stack, reason: `folder "${folders.unusable[stack]}" can't be used as an app folder, set apps by hand in .kette/profile.json` })));
+  if (rendered.templates) rendered.templates.skipped.push(...skippedStacks.map((stack) => ({ stack, reason: `folder "${folders.unusable[stack]}" can't be used as an app folder, see the warning above` })));
   const workspace = isNew && rendered.templates ? workspaceManifest(bundleDir, target, rendered.templates) : null;
   const templates = workspace?.templates || rendered.templates || null;
   const plan = planFor(root, profile, bundleDir, tier, projectTier(root, tier), templates, target.apps);
