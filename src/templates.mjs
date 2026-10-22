@@ -1,5 +1,5 @@
 // Kopie von kette-engineering/lib/templates.mjs, scripts/release.mjs prüft Gleichheit
-// Renders platform templates and checks for a project profile; what gets rendered lives as data in the bundle, this file only resolves apps, conditions and placeholders
+// Renders platform templates and checks for a project profile (checks/render, profiles/platform/<id>/render; the flat files beside them are the set of CLI 0.5.x); what gets rendered lives as data in the bundle, this file only resolves apps, conditions and placeholders
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -11,9 +11,9 @@ export const TEMPLATE_FORMAT = 1;
 // Template the renderer cannot read: a newer format, directive or placeholder; checks keep shipped bundles free of it, so in the CLI it means the bundle is newer than the CLI
 export class TemplateError extends Error {}
 
-function readIndex(file) {
-  const index = readJson(file);
-  if (index && (index.format ?? 1) > TEMPLATE_FORMAT) throw new TemplateError(`${path.basename(path.dirname(file))}/index.json has format ${index.format}, this renderer understands up to ${TEMPLATE_FORMAT}`);
+function readIndex(bundleDir, rel) {
+  const index = readJson(path.join(bundleDir, rel));
+  if (index && (index.format ?? 1) > TEMPLATE_FORMAT) throw new TemplateError(`${rel} has format ${index.format}, this renderer understands up to ${TEMPLATE_FORMAT}`);
   return index;
 }
 const DIRECTIVE = /^\s*(?:#|\/\/|<!--)\s*kette:(\w+)(?:\s+(\S+))?.*$/;
@@ -55,7 +55,11 @@ function fill(text, vars, file) {
 // [[x]] is the folder, [[x/]] the prefix for paths inside it ("" for the repository root)
 const folderVars = (name, dir) => ({ [name]: dir, [`${name}/`]: dir === '.' ? '' : `${dir}/` });
 const applies = (flags) => (entry) => !entry.when || holds(entry.when, flags);
-const insideRepo = (dir) => !path.posix.isAbsolute(dir) && !/^[A-Za-z]:/.test(dir) && !dir.split('/').includes('..');
+// A folder inside the repository: plain segments joined by /, no backslash, drive or UNC path, no . or .. segment (the root itself is .)
+const SEGMENT = /^[A-Za-z0-9._-]+$/;
+const insideRepo = (dir) => dir === '.' || (!/[\\:]/.test(dir) && dir.split('/').every((s) => SEGMENT.test(s) && s !== '.' && s !== '..'));
+// Platform ids are folder names in the bundle
+const PLATFORM_ID = /^[a-z0-9][a-z0-9-]*$/;
 
 function render(baseDir, entry, flags, vars) {
   const file = path.join(baseDir, entry.from);
@@ -88,17 +92,17 @@ function resolveApps(bundleDir, profile) {
 // Files for the profile; null when the bundle predates profile-aware templates. workspace: npm workspaces at the repository root
 export function renderTemplates(bundleDir, profile, { workspace = false } = {}) {
   const resolved = resolveApps(bundleDir, profile);
-  const checks = readIndex(path.join(bundleDir, 'checks', 'index.json'));
+  const checks = readIndex(bundleDir, 'checks/render/index.json');
   if (!resolved || !checks) return null;
   const { apps, skipped } = resolved;
   const flags = new Set([...apps.flatMap((app) => [app.role, ...app.flags]), ...(workspace ? ['workspace'] : [])]);
   const vars = Object.assign({}, ...apps.map((app) => folderVars(app.role, app.dir)));
-  const files = checks.files.filter(applies(flags)).map((entry) => render(path.join(bundleDir, 'checks'), entry, flags, vars));
+  const files = checks.files.filter(applies(flags)).map((entry) => render(path.join(bundleDir, 'checks', 'render'), entry, flags, vars));
 
   // A profile without platform (hand written or older) gets the checks, platform templates need the platform id
-  if (!profile.platform?.id) return { files, skipped, platform: false };
-  const tplDir = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'templates');
-  const platform = readIndex(path.join(tplDir, 'index.json'));
+  if (!PLATFORM_ID.test(profile.platform?.id || '')) return { files, skipped, platform: false };
+  const tplDir = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'render');
+  const platform = readIndex(bundleDir, `profiles/platform/${profile.platform.id}/render/index.json`);
   if (!platform) return { files, skipped, platform: false };
   const templated = apps.filter((app) => {
     const entry = platform.apps[app.stack];

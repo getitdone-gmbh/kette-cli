@@ -190,13 +190,22 @@ function withApps(profile, schema, detected) {
   return 'apps' in profile ? { ...profile, apps: merged } : insertAfter(profile, 'stack', 'apps', merged);
 }
 
+// New projects get the English ADR template; a project with the German one from CLI 0.5 gets no second one; older bundles only ship the German file
+function adrItem(root, bundleDir) {
+  const dir = path.join(bundleDir, 'rules', 'architecture');
+  const english = path.join(dir, 'adr-template.md');
+  if (!fs.existsSync(english)) return { path: 'docs/adr/0000-vorlage.md', content: fs.readFileSync(path.join(dir, 'adr-vorlage.md'), 'utf8') };
+  if (fs.existsSync(path.join(root, 'docs', 'adr', '0000-vorlage.md'))) return null;
+  return { path: 'docs/adr/0000-template.md', content: fs.readFileSync(english, 'utf8') };
+}
+
 function planFor(root, profile, bundleDir, tier, noteTier, templates, apps) {
   const plan = [
     { path: '.kette/profile.json', mode: 'renew', content: JSON.stringify(profile, null, 2) + '\n', renew: (current) => renewProfile(current, noteTier, apps) },
     noteItem(noteTier),
     { path: 'CLAUDE.md', mode: 'append', marker: '@.kette/README.md', content: '@.kette/README.md\n', note: 'points to the Die Kette rules' },
-    { path: 'docs/adr/0000-vorlage.md', content: fs.readFileSync(path.join(bundleDir, 'rules', 'architecture', 'adr-vorlage.md'), 'utf8') },
-  ];
+    adrItem(root, bundleDir),
+  ].filter(Boolean);
   if (tier === ENTERPRISE) {
     // Only the scope line, never a token: the file may be committed, the token comes from ~/.npmrc or the CI secret
     // No line without npm access, otherwise the project points to a registry that does not answer yet
@@ -239,9 +248,9 @@ function platformStatus(bundleDir, id) {
 
 // Why platform templates are missing (Enterprise only); Community gets its Enterprise hint once, as the last next step
 function templateHint(rendered, templates, target, bundleDir) {
+  if (rendered.invalid) return `.kette/profile.json is not valid (${rendered.invalid}), platform templates and checks are skipped. Fix the profile, then run ${cmd('kette add')} again.`;
   if (rendered.newer) return `The installed rulebook is newer than this CLI understands (${rendered.newer}), platform templates and checks are skipped. ${cliUpgradeHint()}`;
   if (!templates) return `The installed rulebook has no profile-aware templates yet, load the current one with: ${cmd('kette update')}`;
-  if (!target.platform?.id) return `The profile has no platform, platform templates are skipped. Add one to .kette/profile.json, e.g. "platform": { "id": "github-docker" }, and run ${cmd('kette add')} again.`;
   if (!templates.platform) return `No templates for ${target.platform.id} yet (status: ${platformStatus(bundleDir, target.platform.id) || 'unknown'}).`;
   return null;
 }
@@ -263,7 +272,9 @@ async function setup(root, opts, isNew) {
   // Templates follow the profile in the project if there is one, it is never replaced
   const current = existingProfile(root);
   const target = current ? withApps(current, appsSchema, detected.apps) : profile;
-  const rendered = tier === ENTERPRISE ? templatesFor(bundleDir, target, isNew || detectWorkspace(root)) : {};
+  // The profile in the project steers paths, so it is checked against the schema before anything is rendered from it
+  const invalid = current ? validate(schema, target) : [];
+  const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : templatesFor(bundleDir, target, isNew || detectWorkspace(root));
   const workspace = isNew && rendered.templates ? workspaceManifest(bundleDir, target, rendered.templates) : null;
   const templates = workspace?.templates || rendered.templates || null;
   const plan = planFor(root, profile, bundleDir, tier, projectTier(root, tier), templates, target.apps);

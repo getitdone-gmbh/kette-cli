@@ -47,6 +47,16 @@ for (const lib of ['validate.mjs', 'templates.mjs']) {
   }
 }
 
+// CLI 0.5.x copies the flat files, CLI 0.6 renders from render/; both sets must be in the Enterprise bundle until 2027-01-31
+const LEGACY_SET = [
+  ...['DEPLOY.md', 'Dockerfile.api', 'Dockerfile.web', 'ci.yml', 'compose.yaml', 'deploy.yml', 'playwright.config.ts', 'prune-runtime.mjs'].map((f) => `profiles/platform/github-docker/templates/${f}`),
+  ...['tsconfig.strict.json', 'eslint.config.mjs', 'dependency-cruiser.cjs', 'gitleaks.toml'].map((f) => `checks/${f}`),
+  'rules/architecture/adr-vorlage.md',
+];
+const RENDER_SET = ['checks/render/index.json', 'profiles/platform/github-docker/render/index.json', 'rules/architecture/adr-template.md'];
+const missingSet = [...LEGACY_SET, ...RENDER_SET].filter((f) => !fs.existsSync(path.join(eng, f)));
+if (missingSet.length) throw new Error(`kette-engineering is missing template files for CLI 0.5.x or 0.6: ${missingSet.join(', ')}`);
+
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(path.join(out, 'private'), { recursive: true });
 

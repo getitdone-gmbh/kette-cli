@@ -8,6 +8,7 @@ export function validate(schema, value, path = '$') {
   if (schema.type === 'string') {
     if (typeof value !== 'string') at(path, 'must be a string');
     else if (schema.minLength && value.length < schema.minLength) at(path, 'must not be empty');
+    else if (schema.pattern && !new RegExp(schema.pattern).test(value)) at(path, `${JSON.stringify(value)} has an invalid format`);
   }
   if (schema.type === 'array') {
     if (!Array.isArray(value)) at(path, 'must be a list');

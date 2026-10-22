@@ -8,12 +8,15 @@ import { detectApps, detectWorkspace } from '../src/detect.mjs';
 
 const STACKS = ['nextjs-ts-tailwind', 'nestjs-prisma', 'nestjs-mongoose', 'python-fastapi', 'react-native-expo'];
 const DEFAULTS = { 'nextjs-ts-tailwind': 'apps/web', 'nestjs-prisma': 'apps/api', 'nestjs-mongoose': 'apps/api', 'python-fastapi': 'apps/api', 'react-native-expo': 'apps/mobile' };
+// Same pattern as apps in the schema of kette-engineering
+const APP_FOLDER = '^(\\.|(?!(.*/)?\\.\\.?(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?)$';
 let kh;
 
 // Enterprise bundle with the layout of kette-engineering: schema with apps, stack index, checks and github-docker templates as data
 function bundle({ apps = true } = {}) {
   const d = path.join(kh, 'bundles', 'enterprise', '0.1.0');
-  write(d, 'rules/architecture/adr-vorlage.md', '# ADR\n');
+  write(d, 'rules/architecture/adr-vorlage.md', '# ADR-Vorlage\n');
+  if (apps) write(d, 'rules/architecture/adr-template.md', '# ADR template\n');
   write(d, 'schema/profile.schema.json', JSON.stringify({
     type: 'object',
     additionalProperties: false,
@@ -21,8 +24,8 @@ function bundle({ apps = true } = {}) {
     properties: {
       $schema: { type: 'string' }, version: { const: 1 }, project: { type: 'object' },
       stack: { type: 'array', items: { enum: STACKS } },
-      ...(apps ? { apps: { type: 'object', additionalProperties: false, properties: Object.fromEntries(STACKS.map((s) => [s, { type: 'string', minLength: 1, default: DEFAULTS[s] }])) } } : {}),
-      platform: { type: 'object' }, patterns: { type: 'array' }, tier: { enum: ['community', 'enterprise'] },
+      ...(apps ? { apps: { type: 'object', additionalProperties: false, properties: Object.fromEntries(STACKS.map((s) => [s, { type: 'string', minLength: 1, default: DEFAULTS[s], pattern: APP_FOLDER }])) } } : {}),
+      platform: { type: 'object', required: ['id'], properties: { id: { enum: ['github-docker', 'gitlab'] } } }, patterns: { type: 'array' }, tier: { enum: ['community', 'enterprise'] },
     },
   }));
   if (!apps) return d;
@@ -33,15 +36,15 @@ function bundle({ apps = true } = {}) {
     'python-fastapi': { role: 'api', flags: ['python', 'fastapi', 'postgres'] },
     'react-native-expo': { role: 'mobile', flags: ['node', 'ts', 'expo'] },
   }));
-  write(d, 'checks/index.json', JSON.stringify({ files: [
+  write(d, 'checks/render/index.json', JSON.stringify({ files: [
     { from: 'tsconfig.strict.json', to: 'tsconfig.base.json', when: 'ts' },
     { from: 'eslint.config.mjs', to: 'eslint.config.mjs', when: 'ts', replace: { 'apps/web/': '[[web/]]' } },
     { from: 'gitleaks.toml', to: '.gitleaks.toml' },
   ] }));
-  write(d, 'checks/tsconfig.strict.json', '{}\n');
-  write(d, 'checks/eslint.config.mjs', "// kette:if web\nconst WEB = 'apps/web/**';\n// kette:end\n");
-  write(d, 'checks/gitleaks.toml', '# gitleaks\n');
-  const tpl = 'profiles/platform/github-docker/templates';
+  write(d, 'checks/render/tsconfig.strict.json', '{}\n');
+  write(d, 'checks/render/eslint.config.mjs', "// kette:if web\nconst WEB = 'apps/web/**';\n// kette:end\n");
+  write(d, 'checks/render/gitleaks.toml', '# gitleaks\n');
+  const tpl = 'profiles/platform/github-docker/render';
   write(d, `${tpl}/index.json`, JSON.stringify({
     apps: {
       'nextjs-ts-tailwind': { manifests: ['[[dir/]]package.json'], files: [{ from: 'next/Dockerfile', to: '[[dir/]]Dockerfile' }] },
@@ -73,7 +76,7 @@ function install(dir) {
 // Files in the project without .git and the files kette always writes
 function files(root) {
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.name === '.git' ? [] : e.isDirectory() ? walk(path.join(dir, e.name)) : [path.relative(root, path.join(dir, e.name)).split(path.sep).join('/')]));
-  const always = ['.kette/profile.json', '.kette/README.md', 'CLAUDE.md', 'docs/adr/0000-vorlage.md'];
+  const always = ['.kette/profile.json', '.kette/README.md', 'CLAUDE.md', 'docs/adr/0000-template.md', 'docs/adr/0000-vorlage.md'];
   return walk(root).filter((f) => !always.includes(f)).sort();
 }
 const read = (root, f) => fs.readFileSync(path.join(root, f), 'utf8');
@@ -148,7 +151,7 @@ test('add never writes a root package.json; with npm workspaces the migrate hint
   assert.match(out, /tools\/migrate\/package\.json +\(template, add tools\/migrate to the workspaces\)/);
 });
 
-test('an existing profile without platform: checks are written, platform templates skipped with a hint, no crash', async () => {
+test('an existing profile without platform: templates and checks skipped with the schema error, no crash', async () => {
   install(bundle());
   const root = tmp();
   write(root, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], apps: { 'nestjs-prisma': 'api' }, patterns: ['layered'], tier: 'enterprise' }, null, 2) + '\n');
@@ -160,8 +163,8 @@ test('an existing profile without platform: checks are written, platform templat
   } finally {
     process.chdir(cwd);
   }
-  assert.match(out, /The profile has no platform, platform templates are skipped\. Add one to \.kette\/profile\.json, e\.g\. "platform": \{ "id": "github-docker" \}, and run kette add again\./);
-  assert.deepEqual(files(root), ['.gitleaks.toml', 'eslint.config.mjs', 'tsconfig.base.json']);
+  assert.match(out, /\.kette\/profile\.json is not valid \(\$: required field platform is missing\), platform templates and checks are skipped\. Fix the profile, then run kette add again\./);
+  assert.deepEqual(files(root), []);
 });
 
 test('init nextjs + nestjs: new monorepo with apps/web and apps/api as npm workspaces', async () => {
@@ -266,18 +269,18 @@ const REINSTALL = /newer than this CLI understands \((.+)\), platform templates 
 
 test('a bundle with a newer template format: reinstall hint for macOS, Linux and Windows, rules still set up, no templates', async () => {
   const d = bundle();
-  write(d, 'checks/index.json', JSON.stringify({ format: 2, files: [] }));
+  write(d, 'checks/render/index.json', JSON.stringify({ format: 2, files: [] }));
   install(d);
   const { root, out } = await init('nestjs-prisma');
   assert.match(out, REINSTALL);
-  assert.match(out.match(REINSTALL)[1], /checks\/index\.json has format 2/);
+  assert.match(out.match(REINSTALL)[1], /checks\/render\/index\.json has format 2/);
   assert.deepEqual(files(root), []);
   assert.ok(fs.existsSync(path.join(root, '.kette/profile.json')));
 });
 
 test('a bundle template with a placeholder this CLI does not know: same reinstall hint instead of a crash', async () => {
   const d = bundle();
-  write(d, 'profiles/platform/github-docker/templates/root/ci.yml', 'jobs: [[queue]]\n');
+  write(d, 'profiles/platform/github-docker/render/root/ci.yml', 'jobs: [[queue]]\n');
   install(d);
   const { root, out } = await init('nestjs-prisma');
   assert.match(out.match(REINSTALL)?.[1] || '', /unknown placeholder \[\[queue\]\]/);
@@ -298,4 +301,79 @@ test('Community init writes no apps; after the upgrade add detects the folders a
   assert.equal(profileOf(root).tier, 'enterprise');
   assert.deepEqual(profileOf(root).apps, { 'nestjs-prisma': 'backend' });
   assert.ok(files(root).includes('backend/Dockerfile') && !files(root).some((f) => f.startsWith('apps/')));
+});
+
+const profileWith = (fields) => JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'enterprise', ...fields }, null, 2) + '\n';
+
+for (const [label, fields] of [
+  ['a Windows-style app folder', { apps: { 'nestjs-prisma': '..\\..\\evil' } }],
+  ['a UNC app folder', { apps: { 'nestjs-prisma': '\\\\server\\share' } }],
+  ['an app folder with ..', { apps: { 'nestjs-prisma': 'a/../../evil' } }],
+  ['a platform id with a path', { platform: { id: '../../checks' } }],
+]) {
+  test(`add with ${label} in the profile: nothing rendered, nothing written outside, the schema error is shown`, async () => {
+    install(bundle());
+    const parent = tmp();
+    const root = path.join(parent, 'repo');
+    write(root, '.kette/profile.json', profileWith(fields));
+    const { out } = await addIn(root);
+    assert.match(out, /\.kette\/profile\.json is not valid \(.*\), platform templates and checks are skipped/);
+    assert.deepEqual(files(root), []);
+    assert.deepEqual(fs.readdirSync(parent), ['repo']);
+  });
+}
+
+test('apply refuses a plan with a path outside the project and writes nothing', async () => {
+  const { apply } = await import('../src/plan.mjs');
+  const parent = tmp();
+  const root = path.join(parent, 'repo');
+  fs.mkdirSync(root);
+  const plan = [{ path: 'ok.txt', content: 'x', action: 'create' }, { path: '../evil.txt', content: 'x', action: 'create' }];
+  assert.throws(() => apply(plan, root), /Refusing to write outside the project: \.\.\/evil\.txt/);
+  assert.deepEqual(fs.readdirSync(parent), ['repo']);
+  assert.deepEqual(fs.readdirSync(root), []);
+});
+
+test('a symlinked CLAUDE.md and a symlinked app folder pointing outside are left alone', { skip: process.platform === 'win32' }, async () => {
+  install(bundle());
+  const outside = tmp();
+  write(outside, 'bashrc', 'export A=1\n');
+  fs.mkdirSync(path.join(outside, 'api'));
+  const root = tmp();
+  write(root, '.kette/profile.json', profileWith({ apps: { 'nestjs-prisma': 'backend' } }));
+  fs.symlinkSync(path.join(outside, 'bashrc'), path.join(root, 'CLAUDE.md'));
+  fs.symlinkSync(path.join(outside, 'api'), path.join(root, 'backend'));
+  const { out } = await addIn(root);
+  assert.match(out, /= keep +CLAUDE\.md +\(symlink, left alone\)/);
+  assert.match(out, /= keep +backend\/Dockerfile +\(folder links outside the project, left alone\)/);
+  assert.equal(fs.readFileSync(path.join(outside, 'bashrc'), 'utf8'), 'export A=1\n');
+  assert.deepEqual(fs.readdirSync(path.join(outside, 'api')), []);
+});
+
+test('a folder where a template file goes is kept with a note instead of crashing', async () => {
+  install(bundle());
+  const root = tmp();
+  write(root, '.kette/profile.json', profileWith({}));
+  fs.mkdirSync(path.join(root, 'compose.yaml'));
+  const { out } = await addIn(root);
+  assert.match(out, /= keep +compose\.yaml +\(a folder with this name exists, left alone\)/);
+});
+
+test('ADR template: English 0000-template.md for a new project, nothing new beside an existing 0000-vorlage.md, German file from an older bundle', async () => {
+  install(bundle());
+  const fresh = await init('nestjs-prisma');
+  assert.equal(read(fresh.root, 'docs/adr/0000-template.md'), '# ADR template\n');
+  assert.equal(fs.existsSync(path.join(fresh.root, 'docs/adr/0000-vorlage.md')), false);
+
+  const old = tmp();
+  write(old, 'docs/adr/0000-vorlage.md', '# Meine Vorlage\n');
+  write(old, 'package.json', '{}');
+  const { out } = await addIn(old, ['--stack', 'nestjs-prisma', '--platform', 'github-docker', '--patterns', 'layered']);
+  assert.doesNotMatch(out, /0000-template/);
+  assert.equal(fs.existsSync(path.join(old, 'docs/adr/0000-template.md')), false);
+  assert.equal(read(old, 'docs/adr/0000-vorlage.md'), '# Meine Vorlage\n');
+
+  fs.rmSync(path.join(bundle(), 'rules', 'architecture', 'adr-template.md'));
+  const legacy = await init('nestjs-prisma');
+  assert.equal(read(legacy.root, 'docs/adr/0000-vorlage.md'), '# ADR-Vorlage\n');
 });
