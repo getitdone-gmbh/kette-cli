@@ -1,0 +1,69 @@
+# Die Kette · Enterprise
+
+Quick start in five steps. Requirements: [Claude Code](https://claude.com/claude-code) is installed and you have a licence key (`CDP-XXXXX-XXXXX-XXXXX-XXXXX`).
+
+## 1. Install the CLI
+
+macOS / Linux:
+
+```sh
+curl -fsSL https://kette.itdone.de/install | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://kette.itdone.de/install.ps1 | iex
+```
+
+Then open a new terminal.
+
+## 2. Activate
+
+```sh
+kette login CDP-XXXXX-XXXXX-XXXXX-XXXXX
+```
+
+Downloads the Enterprise bundle and installs the Claude Code plugins `kette-engineering-core`, `kette-engineering`, `design-system-agents` and `design-review-pack`. Each device takes one seat of the licence (Solo 3, Team 20).
+
+## 3. Connect a project
+
+- New project: `kette init my-project`
+- Existing repo: `kette add` (repos already connected get the Enterprise templates this way)
+
+## 4. Install the design system packages
+
+`kette login` added npm access to `~/.npmrc`. In your project:
+
+```sh
+npm install @getitdone-gmbh/kette-design-enterprise
+```
+
+The registry also serves `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/zero` and `@getitdone-gmbh/zero-pages`.
+
+## 5. Check
+
+```sh
+kette doctor
+```
+
+Shows edition, version and update period.
+
+## What you get on top
+
+- 26 agents, 18 skills and 5 commands, and the code reviewer as a review gate
+- Stack and platform profiles with CI, Docker and check templates
+- 132 UX/UI rules, 52 of them with do and don't examples, plus 17 consistency checkpoints
+- Private npm packages (tokens, component library, domain components, page templates)
+- 12 months of updates
+
+## Useful
+
+| Command | Purpose |
+|---|---|
+| `kette update` | Get the latest version (within the update period) |
+| `kette logout` | Hand over the machine: removes key, bundle and npm access |
+| `kette token ci create <name>` | CI token for `npm ci` in your pipeline |
+| `kette doctor --ci` | Check in your pipeline |
+
+More: [kette.itdone.de/en/enterprise](https://kette.itdone.de/en/enterprise) · Without a licence: [Community](community.md)

@@ -1,96 +1,98 @@
-# Install-API (Vertrag zwischen kette-cli und chain-delivery)
+# Install API (contract between kette-cli and chain-delivery)
 
-Stand 2026-10-21. Beide Seiten bauen gegen diesen Vertrag. Änderungen nur gemeinsam (chain-delivery Branch `feat/npm-registry`, kette-cli Branch `feat/npm-access`).
+As of 2026-10-22. Both sides build against this contract. Change it only together, in kette-cli and chain-delivery at the same time.
 
-## Editionen
-- **Community (frei):** öffentlich unter `https://kette.itdone.de/dl` (Manifest, CLI, Paket `kette-community-<version>.tgz`). Kein Schlüssel.
-- **Enterprise (Die Kette):** Paket `kette-enterprise-<version>.tgz`, nur über diese API. In jeder Lizenzstufe der Kette enthalten (Solo und Team), kein eigenes Angebot.
+## Editions
+- **Community (free):** public under `https://kette.itdone.de/dl` (manifest, CLI, bundle `kette-community-<version>.tgz`). No key.
+- **Enterprise (Die Kette):** bundle `kette-enterprise-<version>.tgz`, only through this API. Included in every licence tier of Die Kette (Solo and Team), no separate offer.
 
-## Lizenzschlüssel
-Format `CDP-XXXXX-XXXXX-XXXXX-XXXXX` (wie heute in chain-delivery). Gültig für Angebote der Familie `kette` (kette-solo, kette-team).
+## Licence key
+Format `CDP-XXXXX-XXXXX-XXXXX-XXXXX` (as in chain-delivery). Valid for offers of the family `kette` (kette-solo, kette-team).
 
-## Geräte und Laufzeit
-- Die CLI erzeugt beim ersten `kette login` eine zufällige Geräte-ID (UUID v4) und speichert sie in `~/.kette/device-id`.
-- Grenzen: Solo 3 Geräte, Team (bis 10 Personen) 20 Geräte. Ein bekanntes Gerät zählt nicht neu.
-- Updates 12 Monate ab Kauf (`updates_until`). Danach liefert die API die neueste Version, die vor `updates_until` veröffentlicht wurde. Die Nutzung bleibt dauerhaft erlaubt.
+## Devices and term
+- On the first `kette login` the CLI creates a random device ID (UUID v4) and stores it in `~/.kette/device-id`.
+- Limits: Solo 3 devices, Team (up to 10 people) 20 devices. A known device does not count again.
+- Updates for 12 months from purchase (`updates_until`). After that the API delivers the newest version published before `updates_until`. Use stays allowed for good.
 
-## Endpunkte (Basis: Lieferdienst, Standard `https://app-kette-delivery-833790b5.itdone.cloud`, in der CLI über `KETTE_DELIVERY` überschreibbar)
+## Endpoints (base: delivery service, default `https://app-kette-delivery-833790b5.itdone.cloud`, overridable in the CLI with `KETTE_DELIVERY`)
 
 ### POST /install/token
-Anfrage (JSON): `{ "key": "CDP-…", "device": "<uuid>", "cli": "0.2.0" }`
+Request (JSON): `{ "key": "CDP-…", "device": "<uuid>", "cli": "0.2.0" }`
 
-Antworten:
+Responses:
 - `200` `{ "edition": "enterprise", "version": "0.20261020.7", "url": "https://…/install/download/<token>", "sha256": "<hex>", "expires_at": "<ISO>", "updates_until": "<ISO>", "seats": { "used": 2, "max": 3 } }`
-  - `url` ist ein signierter Link, 15 Minuten gültig, für genau diese Version.
-- `400` `{ "error": "bad_request" }` (Format von key oder device falsch)
-- `401` `{ "error": "invalid_key" }` (unbekannt)
-- `403` `{ "error": "revoked" }` (widerrufen oder voll erstattet)
-- `403` `{ "error": "wrong_offer" }` (Schlüssel gehört nicht zur Familie kette)
+  - `url` is a signed link, valid for 15 minutes, for exactly this version.
+- `400` `{ "error": "bad_request" }` (format of key or device wrong)
+- `401` `{ "error": "invalid_key" }` (unknown)
+- `403` `{ "error": "revoked" }` (revoked or fully refunded)
+- `403` `{ "error": "wrong_offer" }` (key does not belong to the family kette)
 - `429` `{ "error": "device_limit", "seats": { "used": 3, "max": 3 } }`
-- `503` `{ "error": "unavailable" }` (Paketquelle nicht erreichbar oder keine passende Version vorhanden)
-- Begrenzung gegen Raten: höchstens 10 Anfragen pro Minute je Lizenzschlüssel; fehlgeschlagene Anfragen (bad_request, invalid_key) zählen zusätzlich mit höchstens 60 pro Minute je gemeldeter IP, dann `429 { "error": "rate_limited" }`. (Die Plattform liefert nur Node-Adressen, deshalb führt der Schlüssel.)
+- `503` `{ "error": "unavailable" }` (bundle source not reachable or no matching version available)
+- Rate limit against guessing: at most 10 requests per minute per licence key; failed requests (bad_request, invalid_key) also count against at most 60 per minute per reported IP, then `429 { "error": "rate_limited" }`. (The platform only reports node addresses, so the key leads.)
 
 ### GET /install/download/:token
-Streamt das Paket (`application/gzip`). Abgelaufener oder falscher Token: `410` bzw. `404`.
+Streams the bundle (`application/gzip`). Expired or wrong token: `410` or `404`.
 
 ### POST /install/latest
-Anfrage (JSON): `{ "key": "CDP-…", "device": "<uuid>" }` (POST, damit der Schlüssel nicht in Zugriffslogs von Proxys landet; GET antwortet 405).
+Request (JSON): `{ "key": "CDP-…", "device": "<uuid>" }` (POST so the key does not end up in proxy access logs; GET answers 405).
 
-`200` `{ "version": "…" (neueste Version überhaupt), "available": "…", "updates_until": "…", "changelog": "…" }`. `available` ist die neueste Version, die dieser Schlüssel bekommt. Registriert kein neues Gerät (nur `/install/token` belegt Geräte). Gleiche Fehlercodes wie oben.
+`200` `{ "version": "…" (newest version overall), "available": "…", "updates_until": "…", "changelog": "…" }`. `available` is the newest version this key gets. Registers no new device (only `/install/token` takes devices). Same error codes as above.
 
-## npm-Registry (Design-System-Pakete)
+## npm registry (design system packages)
 
-Lesender npm-Proxy im Lieferdienst für genau vier Pakete aus GitHub Packages: `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/kette-design-enterprise`, `@getitdone-gmbh/zero`, `@getitdone-gmbh/zero-pages`. Zusätzlich liefert er dauerhaft die alten Namen `@getitdone-gmbh/figma-design-tokens` und `@getitdone-gmbh/component-library-react` (nur lesend): Die Versionen vor der Umbenennung gibt es nur dort, so behalten auch Lizenzen nach dem Update-Zeitraum den Zugang zu ihren Versionen. Unter den alten Namen wird ab 2027-01-31 nichts mehr veröffentlicht. Alles andere (auch `design-tokens-clients`, ungescopte Namen) antwortet `404 not_found`, wie ein nicht vorhandenes Paket.
+Read-only npm proxy in the delivery service for exactly four packages from GitHub Packages: `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/kette-design-enterprise`, `@getitdone-gmbh/zero`, `@getitdone-gmbh/zero-pages`. It also serves the old names `@getitdone-gmbh/figma-design-tokens` and `@getitdone-gmbh/component-library-react` for good (read only): the versions from before the rename exist only there, so licences past their update window keep access to their versions. Nothing new is published under the old names from 2027-01-31. Everything else (also `design-tokens-clients`, unscoped names) answers `404 not_found`, like a package that does not exist.
 
-Basis: `https://npm.kette.itdone.de/` (eigener Host, steht in Lockfiles und Projekt-.npmrc, ändert sich nie). Dieselbe Registry antwortet unter `<Lieferdienst>/npm/` für Vorschau und Tests.
+Base: `https://npm.kette.itdone.de/` (own host, written into lockfiles and project .npmrc, never changes). The same registry answers under `<delivery service>/npm/` for previews and tests.
 
-Ruhend bis eingerichtet: Solange der Lieferdienst ohne Registry-Adresse oder Upstream-Token läuft, antworten alle Registry-Pfade (auch `/-/ping`) und alle `/registry/*`-Endpunkte `503 { "error": "registry_not_configured", "message": "registry not configured" }`. Solange die Figma-Quelle fehlt, antworten `/figma/links` und `/figma/download/*` `503 { "error": "figma_not_configured", "message": "figma not configured" }`. Die CLI zeigt dann eine Zeile ("npm-Paketzugang folgt mit dem Update bis 30.11.2026" bzw. "Figma-Dateien folgen ..."), `kette login` gelingt trotzdem und schreibt keinen npmrc-Block, `kette init`/`add` schreiben keine Scope-Zeile.
+Live since 2026-10-22. `kette login` (CLI 0.6.1 or newer) writes the `@getitdone-gmbh` scope line and a device token into the user npmrc; pipelines use CI tokens from `kette token ci create <name>`. The Figma files are still due by 2026-11-30.
 
-Auth: `Authorization: Bearer kt_...` (so senden npm, pnpm, yarn `_authToken` bzw. `npmAuthToken`). Basic Auth und Tokens im Query-String werden ignoriert. Token-Format `kt_` plus 43 Zeichen base64url.
+Dormant until configured: while the delivery service runs without a registry address or upstream token, all registry paths (also `/-/ping`) and all `/registry/*` endpoints answer `503 { "error": "registry_not_configured", "message": "registry not configured" }`. While the Figma source is missing, `/figma/links` and `/figma/download/*` answer `503 { "error": "figma_not_configured", "message": "figma not configured" }`. The CLI then shows one line ("npm access is not available right now. Try again later with kette update." or "Figma files are not available right now. Try again later with kette figma."), `kette login` still succeeds and writes no npmrc block, `kette init`/`add` write no scope line.
 
-| Methode und Pfad | Antwort |
+Auth: `Authorization: Bearer kt_...` (that is how npm, pnpm and yarn send `_authToken` or `npmAuthToken`). Basic auth and tokens in the query string are ignored. Token format `kt_` plus 43 characters base64url.
+
+| Method and path | Response |
 |---|---|
-| `GET /@getitdone-gmbh%2f<name>`, `GET /@getitdone-gmbh/<name>` | Packument, gefiltert: nur Versionen, die vor `updates_until` der Lizenz erschienen sind; `dist-tags.latest` neu berechnet (Upstream-latest, falls erlaubt, sonst höchste erlaubte Version ohne Vorabkennung); Tarball-URLs auf dieselbe Basis umgeschrieben; ohne `readme`, `maintainers`, `repository`, `gitHead`, `_npmUser`. `Cache-Control: private, max-age=60` |
-| `GET /@getitdone-gmbh/<name>/-/<name>-<version>.tgz` | Tarball unverändert (Integrität aus dem Packument gilt). `Cache-Control: private, max-age=31536000, immutable` |
-| `GET /-/whoami` | `{ "username": "kette-<erste 8 Zeichen der Lizenz-ID>" }` |
-| `GET /-/ping` | `{}`, ohne Token |
+| `GET /@getitdone-gmbh%2f<name>`, `GET /@getitdone-gmbh/<name>` | Packument, filtered: only versions published before the licence's `updates_until`; `dist-tags.latest` recalculated (upstream latest if allowed, otherwise the highest allowed version without a prerelease tag); tarball URLs rewritten to the same base; without `readme`, `maintainers`, `repository`, `gitHead`, `_npmUser`. `Cache-Control: private, max-age=60` |
+| `GET /@getitdone-gmbh/<name>/-/<name>-<version>.tgz` | Tarball unchanged (integrity from the packument holds). `Cache-Control: private, max-age=31536000, immutable` |
+| `GET /-/whoami` | `{ "username": "kette-<first 8 characters of the licence ID>" }` |
+| `GET /-/ping` | `{}`, without token |
 | `PUT`, `POST`, `DELETE` | `405 { "error": "read_only" }` |
 
-Fehler (JSON `{ "error": ... }`):
-- `401 unauthorized`: Token fehlt, unbekannt, widerrufen oder Gerät freigegeben.
-- `403 licence_ended`: Lizenz erstattet oder widerrufen.
-- `403 outside_update_window`: Tarball einer Version nach `updates_until`; zusätzlich `message`, `updates_until`, `newest_allowed`, und die Statuszeile nennt Datum und neueste erlaubte Version (npm zeigt sie an).
-- `404 not_found`, `429 rate_limited` mit `Retry-After`, `502 upstream_error`, `503 unavailable`, `503 registry_not_configured`.
+Errors (JSON `{ "error": ... }`):
+- `401 unauthorized`: token missing, unknown, revoked or device freed.
+- `403 licence_ended`: licence refunded or revoked.
+- `403 outside_update_window`: tarball of a version after `updates_until`; also `message`, `updates_until`, `newest_allowed`, and the status line names the date and the newest allowed version (npm shows it).
+- `404 not_found`, `429 rate_limited` with `Retry-After`, `502 upstream_error`, `503 unavailable`, `503 registry_not_configured`.
 
-Limits: 300 Anfragen pro Minute je Token, 60 fehlgeschlagene Anmeldungen pro Minute je Adresse. Ende einer Lizenz oder eines Geräts wirkt nach höchstens 60 Sekunden, Widerruf über die Token-API sofort.
+Limits: 300 requests per minute per token, 60 failed sign-ins per minute per address. The end of a licence or device takes effect after at most 60 seconds, revocation through the token API at once.
 
-### Token-API (Basis: Lieferdienst, POST mit JSON, Schlüssel nie in URLs)
+### Token API (base: delivery service, POST with JSON, keys never in URLs)
 
-Alle Aufrufe laufen durch dieselbe Prüfung wie `/install/*` (Fehler `bad_request`, `invalid_key`, `wrong_offer`, `revoked`, `rate_limited`, gemeinsames Limit 10 pro Minute je Schlüssel) und belegen nie ein Gerät.
+All calls go through the same checks as `/install/*` (errors `bad_request`, `invalid_key`, `wrong_offer`, `revoked`, `rate_limited`, shared limit of 10 per minute per key) and never take a device.
 
-| Endpunkt | Anfrage | Antwort |
+| Endpoint | Request | Response |
 |---|---|---|
-| `POST /registry/token` | `{ key, device }` | `200 { token, registry, scope: "@getitdone-gmbh", kind: "device" }`. Das Gerät muss über `/install/token` registriert sein, sonst `409 device_unknown`. Ersetzt das bisherige Token dieses Geräts. `503 registry_not_configured`, solange die Registry nicht eingerichtet ist (gilt für alle `/registry/*`). |
-| `POST /registry/token/revoke` | `{ key, device }` | `200 { revoked: true \| false }` (idempotent, `false` wenn keins aktiv war). |
-| `POST /registry/ci-tokens/create` | `{ key, device, label }` | `200 { id, token, label, registry, kind: "ci" }`; `label` `[A-Za-z0-9 ._-]{1,48}`, sonst `400 bad_request`; über dem Limit `429 { error: "ci_token_limit", used, max }`. Gerät muss angemeldet sein (`409 device_unknown`). |
-| `POST /registry/ci-tokens/list` | `{ key, device }` | `200 { tokens: [{ id, label, prefix, created_at, last_used_at }], max }`, nur aktive, nie der Token selbst. |
-| `POST /registry/ci-tokens/revoke` | `{ key, device, id }` | `200 { revoked: true \| false }` (idempotent); `id` keine UUID: `400 bad_request`. |
+| `POST /registry/token` | `{ key, device }` | `200 { token, registry, scope: "@getitdone-gmbh", kind: "device" }`. The device must be registered through `/install/token`, otherwise `409 device_unknown`. Replaces the previous token of this device. `503 registry_not_configured` while the registry is not set up (applies to all `/registry/*`). |
+| `POST /registry/token/revoke` | `{ key, device }` | `200 { revoked: true \| false }` (idempotent, `false` when none was active). |
+| `POST /registry/ci-tokens/create` | `{ key, device, label }` | `200 { id, token, label, registry, kind: "ci" }`; `label` `[A-Za-z0-9 ._-]{1,48}`, otherwise `400 bad_request`; over the limit `429 { error: "ci_token_limit", used, max }`. The device must be signed in (`409 device_unknown`). |
+| `POST /registry/ci-tokens/list` | `{ key, device }` | `200 { tokens: [{ id, label, prefix, created_at, last_used_at }], max }`, active ones only, never the token itself. |
+| `POST /registry/ci-tokens/revoke` | `{ key, device, id }` | `200 { revoked: true \| false }` (idempotent); `id` not a UUID: `400 bad_request`. |
 
-CI-Tokens: Solo 2, Team (bis 10) 5. Sie belegen kein Gerät.
+CI tokens: Solo 2, Team (up to 10) 5. They take no device.
 
-Speicherung: nur SHA-256 des Tokens mit Lizenz-ID, Geräte-ID (Gerätetoken), Bezeichnung (CI), Präfix (erste 10 Zeichen), Zeitpunkten. Tokens beendeter Lizenzen werden widerrufen, widerrufene Tokens nach 30 Tagen gelöscht. Logs ohne Token, Schlüssel oder `Authorization`.
+Storage: only the SHA-256 of the token with licence ID, device ID (device token), label (CI), prefix (first 10 characters) and timestamps. Tokens of ended licences are revoked, revoked tokens are deleted after 30 days. Logs without token, key or `Authorization`.
 
 ### Figma
 
-| Endpunkt | Anfrage | Antwort |
+| Endpoint | Request | Response |
 |---|---|---|
-| `POST /figma/links` | `{ key }` (JSON oder Formular) | `200 { version, updates_until, guide_url, files: [{ name, title, size, sha256, url, expires_at }] }`: neuestes Figma-Release vor `updates_until`. Links 15 Minuten, je Lizenz, Version und Datei. Kein Gerät. Fehler wie `/install/*`, ohne Release im Zeitraum `503 unavailable`, ohne Figma-Quelle `503 figma_not_configured`. |
-| `GET /figma/download/:token` | | Datei (`application/octet-stream`, `Content-Disposition: attachment`). `410 expired`, `404 not_found` (auch nach Ende der Lizenz). |
-| `GET /figma` | | Formular ohne Skript für alle ohne Terminal. |
+| `POST /figma/links` | `{ key }` (JSON or form) | `200 { version, updates_until, guide_url, files: [{ name, title, size, sha256, url, expires_at }] }`: newest Figma release before `updates_until`. Links valid for 15 minutes, per licence, version and file. No device. Errors as for `/install/*`, without a release in the period `503 unavailable`, without a Figma source `503 figma_not_configured`. |
+| `GET /figma/download/:token` | | File (`application/octet-stream`, `Content-Disposition: attachment`). `410 expired`, `404 not_found` (also after the licence ended). |
+| `GET /figma` | | Form without script for everyone without a terminal. |
 
-Releases im privaten Repo `alexfriedl/kette-figma`, Tag `figma-<YYYY.MM.DD>`, Assets `kette-figma.json` (`{ version, published_at, files: [{ name, title, sha256, size }] }`), je Datei ein Asset (ASCII-Name, `.fig` oder `.md`, bis 50 Dateien) und `IMPORT.md`. `guide_url` ist der Link auf `IMPORT.md`.
+Releases in the private repo `alexfriedl/kette-figma`, tag `figma-<YYYY.MM.DD>`, assets `kette-figma.json` (`{ version, published_at, files: [{ name, title, sha256, size }] }`), one asset per file (ASCII name, `.fig` or `.md`, up to 50 files) and `IMPORT.md`. `guide_url` is the link to `IMPORT.md`.
 
-### Typen
+### Types
 
 ```ts
 type RegistryToken = { token: `kt_${string}`; registry: string; scope: '@getitdone-gmbh'; kind: 'device' };
@@ -100,17 +102,17 @@ type FigmaLinks = { version: string; updates_until: string; guide_url: string | 
 type RegistryError = { error: 'unauthorized' | 'licence_ended' | 'outside_update_window' | 'rate_limited' | 'not_found' | 'read_only' | 'upstream_error' | 'unavailable' | 'registry_not_configured' | 'figma_not_configured' | 'device_unknown' | 'ci_token_limit' | 'bad_request' };
 ```
 
-## Woher die Pakete kommen
-`kette-cli` (`npm run release`) lädt `kette-enterprise-<version>.tgz` plus `kette-enterprise.json` (`{version, sha256, published_at}`) als Asset in ein GitHub-Release des privaten Repos `alexfriedl/kette-engineering` (Tag `v<version>`). chain-delivery liest die Releases mit `GITHUB_TOKEN`, wie heute bei `claude-design-agent-pack`. Nie öffentlich hosten.
+## Where the bundles come from
+`kette-cli` (`npm run release`) uploads `kette-enterprise-<version>.tgz` plus `kette-enterprise.json` (`{version, sha256, published_at}`) as assets to a GitHub release of the private repo `alexfriedl/kette-engineering` (tag `v<version>`). chain-delivery reads the releases with `GITHUB_TOKEN`, as it does for `claude-design-agent-pack`. Never host them publicly.
 
-## CLI-Verhalten
-- `kette login <key>`: Schlüssel nach `~/.kette/credentials` (Rechte 600), Token holen, Paket laden, SHA-256 prüfen, entpacken, Plugins `kette-engineering-core`, `kette-engineering`, `design-system-agents`, und `design-review-pack` installieren, `ui-laws` und das umbenannte `ui-gesetze` aus Community entfernen. Das Agenten-Pack steckt im Enterprise-Paket, der Lieferdienst braucht dafür keinen weiteren Zugriff.
-- `kette update`: Community über das Manifest, Enterprise über `/install/latest` und `/install/token`.
-- `kette login` danach: `POST /registry/token`, markierter Block in der Benutzer-npmrc (`NPM_CONFIG_USERCONFIG` oder `~/.npmrc`, Rechte 600) mit Scope-Zeile und Token. Eine vorhandene fremde `@getitdone-gmbh:registry`-Zeile bleibt, der Schritt entfällt mit Hinweis; `--npm-replace` kommentiert sie aus, `--no-npm` überspringt. Scheitert der Schritt, bleibt der Login gültig, `kette update` holt ihn nach.
-- `kette logout`: `POST /registry/token/revoke` (offline egal), nur den Block entfernen (auskommentierte Zeilen wieder aktiv), dann Schlüssel und Enterprise-Paket lokal entfernen (gibt kein Gerät frei, das macht der Support).
-- `kette update`: Block fehlt oder `GET /-/whoami` antwortet 401: neues Token.
-- `kette init` und `kette add` (Enterprise): nur `@getitdone-gmbh:registry=<registry>` in die Projekt-`.npmrc`, nie ein Token; eine vorhandene Scope-Zeile bleibt.
-- `kette token ci create <label>` / `list` / `revoke <id>`: Token nur einmal anzeigen, CI-Ausschnitt für GitHub Actions und andere.
-- `kette figma [--out ordner]`: `POST /figma/links`, alle Dateien laden, SHA-256 prüfen, Import-Reihenfolge zeigen.
-- `kette doctor`: Block vorhanden (Hinweis, kein Fehler), Token gültig (ohne `--ci`), Projekt-`.npmrc` zeigt nicht auf npm.pkg.github.com, kein Token in Dateien im Git.
-- Fehlertexte auf Deutsch, verständlich, mit nächstem Schritt.
+## CLI behaviour
+- `kette login <key>`: key to `~/.kette/credentials` (mode 600), get a token, download the bundle, verify the SHA-256, unpack, install the plugins `kette-engineering-core`, `kette-engineering`, `design-system-agents` and `design-review-pack`, remove `ui-laws` and the renamed `ui-gesetze` from Community. The agent pack is inside the Enterprise bundle, the delivery service needs no further access for it.
+- `kette update`: Community through the manifest, Enterprise through `/install/latest` and `/install/token`.
+- `kette login` afterwards: `POST /registry/token`, marked block in the user npmrc (`NPM_CONFIG_USERCONFIG` or `~/.npmrc`, mode 600) with scope line and token. An existing foreign `@getitdone-gmbh:registry` line stays and the step is skipped with a hint; `--npm-replace` comments it out, `--no-npm` skips the step. If the step fails, the login stays valid and `kette update` catches up.
+- `kette logout`: `POST /registry/token/revoke` (offline does not matter), remove only the block (commented-out lines become active again), then remove key and Enterprise bundle locally (frees no device, support does that).
+- `kette update`: block missing or `GET /-/whoami` answers 401: new token.
+- `kette init` and `kette add` (Enterprise): only `@getitdone-gmbh:registry=<registry>` into the project `.npmrc`, never a token; an existing scope line stays.
+- `kette token ci create <label>` / `list` / `revoke <id>`: show the token only once, CI snippet for GitHub Actions and others.
+- `kette figma [--out folder]`: `POST /figma/links`, download all files, verify SHA-256, show the import order.
+- `kette doctor`: block present (hint, not an error), token valid (without `--ci`), project `.npmrc` does not point to npm.pkg.github.com, no token in files tracked by git.
+- Error texts in English, understandable, with the next step.
