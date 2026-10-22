@@ -38,32 +38,43 @@ function roleStyle(role, level, palette) {
 
 let current = null;
 
-// Called once per command with the parsed flags; until then the environment alone decides
-export function configure({ color, ci = false } = {}, env = process.env) {
-  const level = colorLevel(env, { flag: color, ci });
+// Called once per command with the parsed flags; until then the environment alone decides. stdout and stderr each get their own
+// decision, so 2>err.log stays plain while the terminal shows colors
+export function configure({ color, ci = false } = {}, env = process.env, tty = { out: process.stdout.isTTY, err: process.stderr.isTTY }) {
   const palette = PALETTES[backgroundTheme(env)] || null;
-  const styles = level ? Object.fromEntries(Object.keys(BASIC).map((role) => [role, roleStyle(role, level, palette)])) : null;
+  const stylesFor = (isTTY) => {
+    const level = colorLevel(env, { flag: color, ci, isTTY });
+    return level ? Object.fromEntries(Object.keys(BASIC).map((role) => [role, roleStyle(role, level, palette)])) : null;
+  };
   const unicode = process.platform !== 'win32' || Boolean(env.WT_SESSION) || env.TERM_PROGRAM === 'vscode';
-  current = { styles, symbols: unicode ? SYMBOLS : ASCII };
+  current = { out: stylesFor(tty.out), err: stylesFor(tty.err), symbols: unicode ? SYMBOLS : ASCII };
 }
 const state = () => current || (configure(), current);
-const role = (name) => (s) => (state().styles ? state().styles[name](s) : s);
 
-export const accent = role('accent');
-export const hint = role('hint');
-export const error = role('error');
-export const dim = role('dim');
-export const bold = (s) => (state().styles ? wrap('1', '22')(s) : s);
+// Role helpers for one stream; stdout is the default export, toStderr styles text for console.error
+function roles(stream) {
+  const role = (name) => (s) => (state()[stream] ? state()[stream][name](s) : s);
+  const accent = role('accent');
+  const hint = role('hint');
+  const error = role('error');
+  const dim = role('dim');
+  const bold = (s) => (state()[stream] ? wrap('1', '22')(s) : s);
+  return {
+    accent, hint, error, dim, bold,
+    cmd: accent,
+    num: (n) => bold(accent(String(n))),
+    // kind is ok, fail, warn or info; text is already padded so styling never shifts columns
+    status: (kind, text) => bold({ ok: accent, fail: error, warn: hint, info: dim }[kind](text)),
+  };
+}
+
+export const { accent, hint, error, dim, bold, cmd, num, status } = roles('out');
+export const toStderr = roles('err');
 export const symbols = () => state().symbols;
 // Escape codes around what the user types, so the answer stands out from the question
-export const inputStyle = () => (state().styles ? [`${ESC}1m`, `${ESC}22m`] : ['', '']);
-
-export const cmd = accent;
+export const inputStyle = () => (state().out ? [`${ESC}1m`, `${ESC}22m`] : ['', '']);
 // Paths keep the default text color, the strongest contrast in every theme
 export const file = (s) => s;
-export const num = (n) => bold(accent(String(n)));
-// kind is ok, fail, warn or info; text is already padded so styling never shifts columns
-export const status = (kind, text) => bold({ ok: accent, fail: error, warn: hint, info: dim }[kind](text));
 export const brandLine = (detail) => `${bold(accent(`${symbols().dot} DIE KETTE`))}  ${dim(detail)}`;
 
 // Unambiguous YYYY-MM-DD in UTC; fallback when the value is missing or not a date

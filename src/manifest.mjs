@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { activeBundleLink, bundlesDir, isSecureUrl, mirror, stateFile } from './paths.mjs';
 import { writePrivate } from './files.mjs';
-import { cmd, status } from './out.mjs';
+import { toStderr } from './out.mjs';
 
 export async function fetchManifest() {
   const url = `${mirror()}/manifest.json`;
@@ -57,7 +57,7 @@ export function readState() {
     if (err.code === 'ENOENT') return {};
     let moved = true;
     try { fs.renameSync(file, `${file}.bak`); } catch { moved = false; }
-    console.error(`${status('warn', 'WARN')} ${file} is not readable (${err.message}). ${moved ? `Moved to ${file}.bak, ` : ''}kette starts with an empty state; ${cmd('kette update')} loads the rulebook again.`);
+    console.error(`${toStderr.status('warn', 'WARN')} ${file} is not readable (${err.message}). ${moved ? `Moved to ${file}.bak, ` : ''}kette starts with an empty state; ${toStderr.cmd('kette update')} loads the rulebook again.`);
     return {};
   }
 }

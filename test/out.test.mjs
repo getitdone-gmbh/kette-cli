@@ -1,5 +1,7 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tmp } from './helpers.mjs';
@@ -85,4 +87,22 @@ test('kette help: brand line in mint with FORCE_COLOR=3 and KETTE_THEME=dark, pl
   for (const env of [{}, { NO_COLOR: '1', FORCE_COLOR: '3' }]) assert.doesNotMatch(kette(['help'], env).stdout, /\x1b/);
   assert.doesNotMatch(kette(['help', '--no-color'], { FORCE_COLOR: '3' }).stdout, /\x1b/);
   assert.match(kette(['help', '--color'], {}).stdout, /\x1b\[1m\x1b\[32m/);
+});
+
+test('stdout and stderr decide separately: a terminal on stdout, a file on stderr stays plain', async () => {
+  configure({}, { TERM: 'xterm-256color' }, { out: true, err: false });
+  const { toStderr } = await import('../src/out.mjs');
+  assert.match(status('warn', 'WARN'), /\x1b\[/);
+  assert.equal(toStderr.status('warn', 'WARN') + toStderr.cmd('kette update'), 'WARNkette update');
+  configure({}, { TERM: 'xterm-256color' }, { out: false, err: true });
+  assert.equal(status('ok', 'OK'), 'OK');
+  assert.match(toStderr.status('fail', 'FAIL'), /\x1b\[/);
+});
+
+test('a damaged state.json warns on stderr without escape codes when stderr is not a terminal', () => {
+  const kh = tmp();
+  fs.writeFileSync(path.join(kh, 'state.json'), '{broken');
+  const r = kette(['doctor', '--ci'], { KETTE_HOME: kh, TERM: 'xterm-256color' });
+  assert.match(r.stderr, /WARN .*state\.json is not readable/);
+  assert.doesNotMatch(r.stderr, /\x1b/);
 });
