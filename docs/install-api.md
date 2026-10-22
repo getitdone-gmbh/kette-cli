@@ -40,7 +40,7 @@ Anfrage (JSON): `{ "key": "CDP-…", "device": "<uuid>" }` (POST, damit der Schl
 
 ## npm-Registry (Design-System-Pakete)
 
-Lesender npm-Proxy im Lieferdienst für genau vier Pakete aus GitHub Packages: `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/kette-design-enterprise`, `@getitdone-gmbh/zero`, `@getitdone-gmbh/zero-pages`. Bis 2027-01-31 liefert er zusätzlich die alten Namen `@getitdone-gmbh/figma-design-tokens` und `@getitdone-gmbh/component-library-react` (Versionen vor der Umbenennung) für bestehende Lockfiles. Alles andere (auch `design-tokens-clients`, ungescopte Namen) antwortet `404 not_found`, wie ein nicht vorhandenes Paket.
+Lesender npm-Proxy im Lieferdienst für genau vier Pakete aus GitHub Packages: `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/kette-design-enterprise`, `@getitdone-gmbh/zero`, `@getitdone-gmbh/zero-pages`. Zusätzlich liefert er dauerhaft die alten Namen `@getitdone-gmbh/figma-design-tokens` und `@getitdone-gmbh/component-library-react` (nur lesend): Die Versionen vor der Umbenennung gibt es nur dort, so behalten auch Lizenzen nach dem Update-Zeitraum den Zugang zu ihren Versionen. Unter den alten Namen wird ab 2027-01-31 nichts mehr veröffentlicht. Alles andere (auch `design-tokens-clients`, ungescopte Namen) antwortet `404 not_found`, wie ein nicht vorhandenes Paket.
 
 Basis: `https://npm.kette.itdone.de/` (eigener Host, steht in Lockfiles und Projekt-.npmrc, ändert sich nie). Dieselbe Registry antwortet unter `<Lieferdienst>/npm/` für Vorschau und Tests.
 
