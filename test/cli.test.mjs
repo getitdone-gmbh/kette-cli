@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { tmp, write } from './helpers.mjs';
 import { detectPlatform, detectStack } from '../src/detect.mjs';
 import { describe as describePlan, apply } from '../src/plan.mjs';
@@ -48,4 +49,12 @@ test('Plan überschreibt nie und ergänzt nur mit Marker', () => {
   assert.equal(fs.readFileSync(path.join(d, '.kette/profile.json'), 'utf8'), '{"alt":true}');
   assert.match(fs.readFileSync(path.join(d, 'CLAUDE.md'), 'utf8'), /# Projekt\n\n@\.kette\/README\.md/);
   assert.equal(describePlan(plan, d)[1].action, 'keep');
+});
+
+test('without a terminal a question stops with exit code 2 and a hint instead of a crash', { skip: process.platform === 'win32' && 'detached has no setsid on Windows' }, () => {
+  const bin = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'bin', 'kette.mjs');
+  // detached runs in a new session without a controlling terminal, like CI, Docker or an agent shell
+  const r = spawnSync(process.execPath, [bin, 'init'], { cwd: tmp(), env: { ...process.env, KETTE_HOME: tmp() }, stdio: ['ignore', 'pipe', 'pipe'], detached: true, encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  assert.equal(r.stderr.trim(), 'kette: No terminal. Use --yes with --stack/--platform/--patterns.');
 });

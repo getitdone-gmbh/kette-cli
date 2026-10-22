@@ -6,6 +6,6 @@ main(process.argv.slice(2)).then(
   (err) => {
     console.error(`kette: ${err.message}`);
     if (process.env.KETTE_DEBUG) console.error(err.stack);
-    process.exit(1);
+    process.exit(err.exitCode ?? 1);
   },
 );
