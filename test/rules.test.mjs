@@ -82,6 +82,17 @@ test('rules --path zeigt Dateipfade statt Inhalt', async () => {
   assert.ok(all.includes(path.join(d, 'rules', 'architecture', 'modularer-monolith.md')));
 });
 
+test('rules resolves the German topic names of older rulebooks through rules/aliases.json', async () => {
+  const d = rulebook('community');
+  fs.renameSync(path.join(d, 'rules', 'core', '01-lesbarkeit.md'), path.join(d, 'rules', 'core', '01-readability.md'));
+  write(d, 'rules/aliases.json', JSON.stringify({ format: 1, topics: { lesbarkeit: 'readability', '01-lesbarkeit': 'readability' } }));
+  const file = path.join(d, 'rules', 'core', '01-readability.md');
+  assert.equal((await run('rules', 'readability', '--path')).out, file);
+  assert.equal((await run('rules', 'Lesbarkeit', '--path')).out, file);
+  assert.equal((await run('rules', '01-lesbarkeit', '--path')).out, file);
+  await assert.rejects(run('rules', 'lesbarkei'), /Unknown topic "lesbarkei"/);
+});
+
 test('rules mit unbekanntem Thema nennt ähnliche Themen', async () => {
   rulebook('community');
   await assert.rejects(run('rules', 'fehlr'), /Unknown topic "fehlr"\. Did you mean: fehler\? All topics: kette rules/);

@@ -59,12 +59,14 @@ function platformTopics(dir) {
 }
 
 // All topics of the bundle; profiles without a file in the bundle (Community) stay known but not readable
+// renamed: German topic names of older rulebooks mapped to the English ones (rules/aliases.json)
 export function catalog(dir) {
   return {
     core: coreTopics(dir),
     patterns: patternTopics(dir),
     stacks: stackTopics(dir),
     platforms: platformTopics(dir),
+    renamed: readJson(path.join(dir, 'rules', 'aliases.json'))?.topics || {},
   };
 }
 
@@ -144,7 +146,8 @@ export function render(md) {
 function find(cat, topic) {
   const q = topic.toLowerCase();
   const all = [...cat.core, ...cat.patterns, ...cat.stacks, ...cat.platforms];
-  return { hit: all.find((t) => t.id === q || t.aliases.includes(q)), ids: all.map((t) => t.id) };
+  const match = (id) => all.find((t) => t.id === id || t.aliases.includes(id));
+  return { hit: match(q) || (Object.hasOwn(cat.renamed, q) ? match(cat.renamed[q]) : undefined), ids: all.map((t) => t.id) };
 }
 
 // kette rules [topic] [--path]; reads only the installed bundle, no network
