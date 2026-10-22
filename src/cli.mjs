@@ -276,7 +276,8 @@ function detectedLine(detected, opts) {
   const fallback = (value) => (opts.yes ? value : null);
   const stack = detectedNote('stack', detected.stack.join(', '), listArg(opts.stack)?.join(', '), fallback(DEFAULT_STACK.join(', ')));
   const platform = detectedNote('platform', detected.platform, opts.platform, fallback(DEFAULT_PLATFORM));
-  return `Detected: ${stack} · ${platform}`;
+  const defaulted = opts.yes ? [!detected.stack.length && !opts.stack && '--stack', !detected.platform && !opts.platform && '--platform'].filter(Boolean) : [];
+  return `Detected: ${stack} · ${platform}${defaulted.length ? ` (change with ${defaulted.join(' / ')})` : ''}`;
 }
 
 async function setup(root, opts, isNew) {

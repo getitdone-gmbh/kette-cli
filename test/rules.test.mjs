@@ -348,7 +348,7 @@ test('add names the stack and platform it writes: detected, from a flag, or the 
     const plain = tmp();
     process.chdir(plain);
     let { out } = await run('add', '--yes', '--no-plugins');
-    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · no platform, using github-docker$/m);
+    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · no platform, using github-docker \(change with --stack \/ --platform\)$/m);
     assert.deepEqual(profileOf(plain).stack, ['nextjs-ts-tailwind', 'nestjs-prisma']);
     assert.equal(profileOf(plain).platform.id, 'github-docker');
     const chosen = tmp();
@@ -360,12 +360,12 @@ test('add names the stack and platform it writes: detected, from a flag, or the 
     write(docker, 'Dockerfile', 'FROM node:22\n');
     process.chdir(docker);
     ({ out } = await run('add', '--yes', '--no-plugins'));
-    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · platform github-docker$/m);
+    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · platform github-docker \(change with --stack\)$/m);
     const overridden = tmp();
     write(overridden, 'Dockerfile', 'FROM node:22\n');
     process.chdir(overridden);
     ({ out } = await run('add', '--yes', '--no-plugins', '--platform', 'gitlab'));
-    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · using platform gitlab \(detected github-docker\)$/m);
+    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · using platform gitlab \(detected github-docker\) \(change with --stack\)$/m);
     assert.equal(profileOf(overridden).platform.id, 'gitlab');
   } finally {
     process.chdir(cwd);
