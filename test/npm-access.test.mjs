@@ -221,6 +221,20 @@ test('add schreibt nur die Scope-Zeile ohne Token in die Projekt-.npmrc und läs
   assert.match(out, /WARN \.npmrc in the project points @getitdone-gmbh to npm\.pkg\.github\.com/);
 });
 
+test('a read-only npmrc does not abort the login: hint with kette update, login completes', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+  const dir = path.dirname(userrc);
+  write(dir, 'user.npmrc', 'save-exact=true\n');
+  fs.chmodSync(dir, 0o500);
+  try {
+    const { result, out } = await run('login', KEY, '--no-plugins');
+    assert.equal(result, 0);
+    assert.match(out, /WARN npm access not set up: .*user\.npmrc is not writable \(EACCES\)/);
+    assert.match(out, /then run: kette update/);
+    assert.match(out, /Signed in: Enterprise/);
+  } finally { fs.chmodSync(dir, 0o700); }
+  assert.equal(rc(), 'save-exact=true\n');
+});
+
 test('doctor warns when the npm token file is readable by others', { skip: process.platform === 'win32' }, async () => {
   await run('login', KEY, '--no-plugins');
   fs.chmodSync(userrc, 0o644);

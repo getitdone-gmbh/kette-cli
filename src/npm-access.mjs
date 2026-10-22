@@ -28,6 +28,18 @@ function requireLogin() {
 export async function setupNpm(key, opts) {
   if (opts.noNpm) { console.log('npm access skipped (--no-npm).'); return false; }
   const file = npmUserConfig();
+  try {
+    return await writeNpmAccess(key, opts, file);
+  } catch (err) {
+    // File system errors (EACCES, EROFS, ...) carry a syscall; everything else is a real bug and stays loud
+    if (!err.syscall) throw err;
+    console.log(`${WARN} npm access not set up: ${fileName(file)} is not writable (${err.code}).`);
+    console.log(`     Fix the file or its folder, then run: ${cmd('kette update')}`);
+    return false;
+  }
+}
+
+async function writeNpmAccess(key, opts, file) {
   const current = readFile(file);
   const foreign = foreignScopeLines(current);
   if (foreign.length && !opts.npmReplace) {
