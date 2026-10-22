@@ -11,7 +11,8 @@ import { cmd, isoDate, status } from './out.mjs';
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
 
 export const formatDate = (iso) => isoDate(iso, 'unknown');
-export const newCliHint = (version) => `New CLI ${version} available: ${cmd('curl -fsSL https://kette.itdone.de/install | sh')}`;
+export const installCommand = () => `${cmd('curl -fsSL https://kette.itdone.de/install | sh')} (Windows: ${cmd('irm https://kette.itdone.de/install.ps1 | iex')})`;
+export const newCliHint = (version) => `New CLI ${version} available: ${installCommand()}`;
 
 // none, valid or broken; a damaged file unlocks nothing, doctor reports it
 export function credentialsStatus() {

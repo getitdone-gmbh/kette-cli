@@ -4,7 +4,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const readJson = (file) => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null);
-const DIRECTIVE = /^\s*(?:#|\/\/|<!--)\s*kette:(if\s+(\S+)|end)\b.*$/;
+
+// Highest index format this renderer understands; an index without format is format 1
+export const TEMPLATE_FORMAT = 1;
+
+// Template the renderer cannot read: a newer format, directive or placeholder; checks keep shipped bundles free of it, so in the CLI it means the bundle is newer than the CLI
+export class TemplateError extends Error {}
+
+function readIndex(file) {
+  const index = readJson(file);
+  if (index && (index.format ?? 1) > TEMPLATE_FORMAT) throw new TemplateError(`${path.basename(path.dirname(file))}/index.json has format ${index.format}, this renderer understands up to ${TEMPLATE_FORMAT}`);
+  return index;
+}
+const DIRECTIVE = /^\s*(?:#|\/\/|<!--)\s*kette:(\w+)(?:\s+(\S+))?.*$/;
 const PLACEHOLDER = /\[\[([a-z]+\/?)\]\]/g;
 
 // A condition is a comma separated list that must all hold; a term is a flag, !flag or flag|flag
@@ -22,19 +34,20 @@ function applyDirectives(text, flags, file) {
   const out = [];
   for (const line of text.split('\n')) {
     const m = line.match(DIRECTIVE);
-    if (m && m[2]) open.push(holds(m[2], flags));
-    else if (m) {
-      if (!open.length) throw new Error(`${file}: kette:end without kette:if`);
+    if (m?.[1] === 'if' && m[2]) open.push(holds(m[2], flags));
+    else if (m?.[1] === 'end') {
+      if (!open.length) throw new TemplateError(`${file}: kette:end without kette:if`);
       open.pop();
-    } else if (open.every(Boolean)) out.push(line);
+    } else if (m) throw new TemplateError(`${file}: unknown directive kette:${m[1]}`);
+    else if (open.every(Boolean)) out.push(line);
   }
-  if (open.length) throw new Error(`${file}: kette:if without kette:end`);
+  if (open.length) throw new TemplateError(`${file}: kette:if without kette:end`);
   return out.join('\n');
 }
 
 function fill(text, vars, file) {
   return text.replace(PLACEHOLDER, (_, name) => {
-    if (!(name in vars)) throw new Error(`${file}: unknown placeholder [[${name}]]`);
+    if (!(name in vars)) throw new TemplateError(`${file}: unknown placeholder [[${name}]]`);
     return vars[name];
   });
 }
@@ -75,7 +88,7 @@ function resolveApps(bundleDir, profile) {
 // Files for the profile; null when the bundle predates profile-aware templates. workspace: npm workspaces at the repository root
 export function renderTemplates(bundleDir, profile, { workspace = false } = {}) {
   const resolved = resolveApps(bundleDir, profile);
-  const checks = readJson(path.join(bundleDir, 'checks', 'index.json'));
+  const checks = readIndex(path.join(bundleDir, 'checks', 'index.json'));
   if (!resolved || !checks) return null;
   const { apps, skipped } = resolved;
   const flags = new Set([...apps.flatMap((app) => [app.role, ...app.flags]), ...(workspace ? ['workspace'] : [])]);
@@ -83,7 +96,7 @@ export function renderTemplates(bundleDir, profile, { workspace = false } = {}) 
   const files = checks.files.filter(applies(flags)).map((entry) => render(path.join(bundleDir, 'checks'), entry, flags, vars));
 
   const tplDir = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'templates');
-  const platform = readJson(path.join(tplDir, 'index.json'));
+  const platform = readIndex(path.join(tplDir, 'index.json'));
   if (!platform) return { files, skipped, platform: false };
   const templated = apps.filter((app) => {
     const entry = platform.apps[app.stack];

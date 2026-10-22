@@ -5,14 +5,14 @@ import { fetchManifest, installBundle, installedBundle, readState, setActiveBund
 import { detectApps, detectPlatform, detectStack, detectWorkspace } from './detect.mjs';
 import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
-import { renderTemplates } from './templates.mjs';
+import { renderTemplates, TemplateError } from './templates.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
 import { MARKETPLACE, editionHints, hasClaude, installEdition, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins, isNewer } from './editions.mjs';
 import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
-import { credentialsStatus, formatDate, loginState, login, logout, newCliHint, tierOf, updateEnterprise } from './enterprise.mjs';
+import { credentialsStatus, formatDate, installCommand, loginState, login, logout, newCliHint, tierOf, updateEnterprise } from './enterprise.mjs';
 import { SCOPE } from './npmrc.mjs';
 import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
 import { cmd, file, status } from './out.mjs';
@@ -150,12 +150,21 @@ function projectTier(root, machineTier) {
   return tier in RANK && RANK[tier] >= RANK[machineTier] ? tier : machineTier;
 }
 
-// Existing profile: only raise tier, otherwise the file stays unchanged
-function raiseTier(current, tier) {
+// Existing profile: only raise tier and add apps when the field is missing, every other field stays as the user wrote it
+function renewProfile(current, tier, apps) {
   let profile;
   try { profile = JSON.parse(current); } catch { return current; }
-  if (RANK[normalizeTier(profile.tier)] >= RANK[tier]) return current;
-  return JSON.stringify({ ...profile, tier }, null, 2) + '\n';
+  const raise = RANK[normalizeTier(profile.tier)] < RANK[tier];
+  const addApps = apps && Object.keys(apps).length && !('apps' in profile);
+  if (!raise && !addApps) return current;
+  const next = raise ? { ...profile, tier } : profile;
+  return JSON.stringify(addApps ? insertAfter(next, 'stack', 'apps', apps) : next, null, 2) + '\n';
+}
+
+// New key right after an existing one, so the file keeps its reading order; at the end when that key is missing
+function insertAfter(obj, after, key, value) {
+  if (!(after in obj)) return { ...obj, [key]: value };
+  return Object.fromEntries(Object.entries(obj).flatMap((entry) => (entry[0] === after ? [entry, [key, value]] : [entry])));
 }
 
 // App folders in the profile only when the installed schema knows the field, older bundles reject unknown fields; folders already in the profile stay
@@ -166,9 +175,9 @@ function withApps(profile, schema, detected) {
   return { ...profile, apps: { ...apps, ...profile.apps } };
 }
 
-function planFor(root, profile, bundleDir, tier, noteTier, templates) {
+function planFor(root, profile, bundleDir, tier, noteTier, templates, apps) {
   const plan = [
-    { path: '.kette/profile.json', mode: 'renew', content: JSON.stringify(profile, null, 2) + '\n', renew: (current) => raiseTier(current, noteTier) },
+    { path: '.kette/profile.json', mode: 'renew', content: JSON.stringify(profile, null, 2) + '\n', renew: (current) => renewProfile(current, noteTier, apps) },
     noteItem(noteTier),
     { path: 'CLAUDE.md', mode: 'append', marker: '@.kette/README.md', content: '@.kette/README.md\n', note: 'points to the Die Kette rules' },
     { path: 'docs/adr/0000-vorlage.md', content: fs.readFileSync(path.join(bundleDir, 'rules', 'architecture', 'adr-vorlage.md'), 'utf8') },
@@ -180,6 +189,16 @@ function planFor(root, profile, bundleDir, tier, noteTier, templates) {
     for (const f of templates?.files || []) plan.push({ path: f.path, content: f.content, note: f.note });
   }
   return plan;
+}
+
+// Shipped bundles render with their own lib/templates.mjs, so a TemplateError means the bundle is newer than this CLI
+function templatesFor(bundleDir, profile, workspace) {
+  try {
+    return { templates: renderTemplates(bundleDir, profile, { workspace }) };
+  } catch (err) {
+    if (!(err instanceof TemplateError)) throw err;
+    return { newer: err.message };
+  }
 }
 
 function platformStatus(bundleDir, id) {
@@ -203,13 +222,15 @@ async function setup(root, opts, isNew) {
   // Templates follow the profile in the project if there is one, it is never replaced
   const current = existingProfile(root);
   const target = current ? withApps(current, schema, detected.apps) : profile;
-  const templates = tier === ENTERPRISE ? renderTemplates(bundleDir, target, { workspace: isNew || detectWorkspace(root) }) : null;
-  const described = describe(planFor(root, profile, bundleDir, tier, projectTier(root, tier), templates), root);
+  const rendered = tier === ENTERPRISE ? templatesFor(bundleDir, target, isNew || detectWorkspace(root)) : {};
+  const templates = rendered.templates || null;
+  const described = describe(planFor(root, profile, bundleDir, tier, projectTier(root, tier), templates, target.apps), root);
   console.log(`\n${opts.dryRun ? 'Would create' : 'Plan'} in ${file(path.resolve(root))} (edition ${editionLabel(tier)}):`);
   print(described);
   const stale = staleNote(described);
   if (stale) console.log(stale);
   if (tier === COMMUNITY) console.log(`\n  Agents, gates with code reviewer, platform templates and checks come with the Enterprise edition (Die Kette): ${cmd('kette login <key>')}`);
+  else if (rendered.newer) console.log(`\n  The installed rulebook is newer than this CLI understands (${rendered.newer}), platform templates and checks are skipped. Reinstall the CLI: ${installCommand()}`);
   else if (!templates) console.log(`\n  The installed rulebook has no profile-aware templates yet, load the current one with: ${cmd('kette update')}`);
   else if (!templates.platform) console.log(`\n  No templates for ${target.platform.id} yet (status: ${platformStatus(bundleDir, target.platform.id) || 'unknown'}).`);
   for (const s of templates?.skipped || []) console.log(`  No templates for ${s.stack}: ${s.reason}`);

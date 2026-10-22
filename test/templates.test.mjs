@@ -179,3 +179,60 @@ test('an older bundle without apps in the schema: no apps field, no templates, h
   assert.deepEqual(files(root), []);
   assert.match(out, /no profile-aware templates yet, load the current one with: kette update/);
 });
+
+async function addIn(root, args = []) {
+  const cwd = process.cwd();
+  process.chdir(root);
+  try {
+    return await capture(() => main(['add', '--yes', '--no-plugins', ...args]));
+  } finally {
+    process.chdir(cwd);
+  }
+}
+
+test('add on a Community profile without apps: tier raised, detected apps added after stack, every other field stays', async () => {
+  install(bundle());
+  const root = tmp();
+  write(root, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  write(root, 'frontend/package.json', JSON.stringify({ dependencies: { next: '16' } }));
+  const own = { version: 1, project: { name: 'mine' }, stack: ['nestjs-prisma', 'nextjs-ts-tailwind'], platform: { id: 'github-docker' }, patterns: ['hexagonal', 'cqrs'], tier: 'community' };
+  write(root, '.kette/profile.json', JSON.stringify(own, null, 2) + '\n');
+  const { out } = await addIn(root);
+  assert.match(out, /~ update\s+\.kette\/profile\.json/);
+  const raw = read(root, '.kette/profile.json');
+  assert.deepEqual(JSON.parse(raw), { ...own, tier: 'enterprise', apps: { 'nestjs-prisma': 'backend', 'nextjs-ts-tailwind': 'frontend' } });
+  assert.deepEqual(Object.keys(JSON.parse(raw)), ['version', 'project', 'stack', 'apps', 'platform', 'patterns', 'tier']);
+  assert.ok(['backend/Dockerfile', 'frontend/Dockerfile'].every((f) => files(root).includes(f)));
+});
+
+test('add on a profile without apps while the installed schema has no apps: profile stays byte for byte', async () => {
+  install(bundle({ apps: false }));
+  const root = tmp();
+  write(root, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  const own = JSON.stringify({ version: 1, project: { name: 'mine' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'enterprise' }, null, 4) + '\n';
+  write(root, '.kette/profile.json', own);
+  await addIn(root);
+  assert.equal(read(root, '.kette/profile.json'), own);
+});
+
+const REINSTALL = /newer than this CLI understands \((.+)\), platform templates and checks are skipped\. Reinstall the CLI: curl -fsSL https:\/\/kette\.itdone\.de\/install \| sh \(Windows: irm https:\/\/kette\.itdone\.de\/install\.ps1 \| iex\)/;
+
+test('a bundle with a newer template format: reinstall hint for macOS, Linux and Windows, rules still set up, no templates', async () => {
+  const d = bundle();
+  write(d, 'checks/index.json', JSON.stringify({ format: 2, files: [] }));
+  install(d);
+  const { root, out } = await init('nestjs-prisma');
+  assert.match(out, REINSTALL);
+  assert.match(out.match(REINSTALL)[1], /checks\/index\.json has format 2/);
+  assert.deepEqual(files(root), []);
+  assert.ok(fs.existsSync(path.join(root, '.kette/profile.json')));
+});
+
+test('a bundle template with a placeholder this CLI does not know: same reinstall hint instead of a crash', async () => {
+  const d = bundle();
+  write(d, 'profiles/platform/github-docker/templates/root/ci.yml', 'jobs: [[queue]]\n');
+  install(d);
+  const { root, out } = await init('nestjs-prisma');
+  assert.match(out.match(REINSTALL)?.[1] || '', /unknown placeholder \[\[queue\]\]/);
+  assert.deepEqual(files(root), []);
+});
