@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { serve, tarball, tmp, write } from './helpers.mjs';
 
 const exec = promisify(execFile);
@@ -11,13 +11,17 @@ const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const script = path.join(repo, 'install', 'install.sh');
 const LINE = 'export PATH="$HOME/.kette/bin:$PATH"';
 const shells = ['/bin/sh', '/bin/dash'].filter((s) => fs.existsSync(s));
+const pwsh = ['pwsh', 'pwsh.exe'].find((bin) => spawnSync(bin, ['-NoProfile', '-Command', 'exit 0']).status === 0);
 let mirror;
+let cli;
+let manifest;
+const goodManifest = () => ({ version: 'test', cli: { version: 'test', url: 'kette-cli-test.tgz', sha256: cli.sha256 }, bundles: {} });
 
 before(async () => {
-  const cli = tarball(repo, ['bin', 'src', 'package.json', 'LICENSE']);
-  const manifest = JSON.stringify({ version: 'test', cli: { version: 'test', url: 'kette-cli-test.tgz', sha256: cli.sha256 }, bundles: {} });
+  cli = tarball(repo, ['bin', 'src', 'package.json', 'LICENSE']);
+  manifest = goodManifest();
   mirror = await serve((req, res) => {
-    if (req.url === '/manifest.json') { res.writeHead(200); return res.end(manifest); }
+    if (req.url === '/manifest.json') { res.writeHead(200); return res.end(JSON.stringify(manifest)); }
     if (req.url === '/kette-cli-test.tgz') { res.writeHead(200); return res.end(cli.buf); }
     res.writeHead(404); res.end();
   });
@@ -48,10 +52,10 @@ for (const shell of shells) {
   });
 }
 
-test('bash schreibt in ~/.bashrc, andere Shells in ~/.profile', { skip: process.platform === 'win32' }, async () => {
+test('bash schreibt in ~/.bashrc (macOS: ~/.bash_profile), andere Shells in ~/.profile', { skip: process.platform === 'win32' }, async () => {
   const bashHome = tmp();
   await install('/bin/sh', bashHome, { SHELL: '/bin/bash' });
-  assert.equal(count(path.join(bashHome, '.bashrc')), 1);
+  assert.equal(count(path.join(bashHome, process.platform === 'darwin' ? '.bash_profile' : '.bashrc')), 1);
   assert.equal(fs.existsSync(path.join(bashHome, '.zshrc')), false);
   const otherHome = tmp();
   await install('/bin/sh', otherHome, { SHELL: '/usr/bin/fish' });
@@ -64,4 +68,55 @@ test('KETTE_NO_MODIFY_PATH=1 ändert keine Datei und zeigt die Zeile zum Selbste
   assert.equal(fs.existsSync(path.join(home, '.zshrc')), false);
   assert.match(stdout, /PATH not changed \(KETTE_NO_MODIFY_PATH=1\)/);
   assert.ok(stdout.includes(LINE));
+});
+
+// Installer with a changed manifest; returns the failure (or null) and restores the good manifest
+async function installWith(changes, run) {
+  manifest = { ...goodManifest(), cli: { ...goodManifest().cli, ...changes } };
+  try { await run(); return null; } catch (err) { return err; } finally { manifest = goodManifest(); }
+}
+
+const HOSTILE = [
+  ['a wrong checksum', { sha256: '0'.repeat(64) }, /Checksum does not match/],
+  ['version ../../outside', { version: '../../outside' }, /invalid CLI version/],
+  ['version ..', { version: '..' }, /invalid CLI version/],
+  ['version -rf', { version: '-rf' }, /invalid CLI version/],
+  ['url ../secret.tgz', { url: '../secret.tgz' }, /invalid CLI download/],
+  ['a url on a foreign host', { url: 'https://evil.example/kette-cli-test.tgz' }, /invalid CLI download/],
+];
+
+for (const [label, changes, message] of HOSTILE) {
+  test(`install.sh rejects ${label} and installs nothing`, { skip: process.platform === 'win32' }, async () => {
+    const home = tmp();
+    write(home, 'outside/keep.txt', 'stays');
+    const err = await installWith(changes, () => install('/bin/sh', home, { KETTE_HOME: path.join(home, 'a', 'b') }));
+    assert.ok(err, 'installer must fail');
+    assert.match(err.stderr, message);
+    assert.equal(fs.existsSync(path.join(home, 'outside', 'keep.txt')), true);
+    assert.equal(fs.existsSync(path.join(home, 'a', 'b', 'bin', 'kette')), false);
+  });
+
+  test(`install.ps1 rejects ${label} and installs nothing`, { skip: !pwsh && 'pwsh not available' }, async () => {
+    const home = tmp();
+    write(home, 'outside/keep.txt', 'stays');
+    const env = { ...process.env, KETTE_MIRROR: mirror.url, KETTE_HOME: path.join(home, 'a', 'b'), KETTE_NO_MODIFY_PATH: '1' };
+    const err = await installWith(changes, () => exec(pwsh, ['-NoProfile', '-File', path.join(repo, 'install', 'install.ps1')], { env }));
+    assert.ok(err, 'installer must fail');
+    assert.match(err.stderr + err.stdout, message);
+    assert.equal(fs.existsSync(path.join(home, 'outside', 'keep.txt')), true);
+    assert.equal(fs.existsSync(path.join(home, 'a', 'b', 'bin', 'kette.cmd')), false);
+  });
+}
+
+test('install.sh refuses a plain http mirror that is not local', { skip: process.platform === 'win32' }, async () => {
+  const err = await install('/bin/sh', tmp(), { KETTE_MIRROR: 'http://kette.example/dl' }).catch((e) => e);
+  assert.match(err.stderr, /Mirror must use https/);
+});
+
+test('install.ps1 installs from the local mirror and kette.cmd runs', { skip: (!pwsh || process.platform !== 'win32') && 'needs pwsh on Windows' }, async () => {
+  const home = tmp();
+  const env = { ...process.env, KETTE_MIRROR: mirror.url, KETTE_HOME: home, KETTE_NO_MODIFY_PATH: '1' };
+  const { stdout } = await exec(pwsh, ['-NoProfile', '-File', path.join(repo, 'install', 'install.ps1')], { env });
+  assert.match(stdout, /Installed: /);
+  assert.equal(fs.existsSync(path.join(home, 'cli', 'test', 'bin', 'kette.mjs')), true);
 });

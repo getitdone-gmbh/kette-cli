@@ -8,11 +8,11 @@ KETTE_HOME="${KETTE_HOME:-$HOME/.kette}"
 say() { printf '%s\n' "$*"; }
 fail() { printf 'kette: %s\n' "$*" >&2; exit 1; }
 
-# Startup file of the login shell: zsh, bash, otherwise ~/.profile
+# Startup file of the login shell: zsh, bash (macOS Terminal opens login shells, so ~/.bash_profile there), otherwise ~/.profile
 rc_file() {
   case "$(basename "${SHELL:-sh}")" in
     zsh) printf '%s\n' "$HOME/.zshrc" ;;
-    bash) printf '%s\n' "$HOME/.bashrc" ;;
+    bash) if [ "$(uname -s)" = Darwin ]; then printf '%s\n' "$HOME/.bash_profile"; else printf '%s\n' "$HOME/.bashrc"; fi ;;
     *) printf '%s\n' "$HOME/.profile" ;;
   esac
 }
@@ -43,13 +43,22 @@ add_to_path() {
   say "Open a new terminal or run once: . \"$RC\""
 }
 
+# Plain http only for a local test mirror or with KETTE_INSECURE=1
+case "$MIRROR" in
+  https://*) PROTO='=https' ;;
+  http://127.0.0.1:*|http://127.0.0.1/*|http://localhost:*|http://localhost/*) PROTO='=http,https' ;;
+  http://*) [ "${KETTE_INSECURE:-}" = "1" ] || fail "Mirror must use https: $MIRROR (set KETTE_INSECURE=1 only for a trusted test mirror)."; PROTO='=http,https' ;;
+  *) fail "Mirror must be an https URL: $MIRROR" ;;
+esac
+MIRROR_HOST=$(printf '%s' "$MIRROR" | sed -E 's#^[a-z]+://([^/]+).*#\1#')
+
 command -v node >/dev/null 2>&1 || fail "Node.js 20 or newer is missing. Install it from https://nodejs.org and start again."
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 [ "$NODE_MAJOR" -ge 20 ] || fail "Found Node.js $NODE_MAJOR, version 20 or newer is required."
 command -v git >/dev/null 2>&1 || fail "git is missing."
 command -v tar >/dev/null 2>&1 || fail "tar is missing."
 
-if command -v curl >/dev/null 2>&1; then get() { curl -fsSL "$1" -o "$2"; }
+if command -v curl >/dev/null 2>&1; then get() { curl -fsSL --proto "$PROTO" --proto-redir "$PROTO" --tlsv1.2 "$1" -o "$2"; }
 elif command -v wget >/dev/null 2>&1; then get() { wget -qO "$2" "$1"; }
 else fail "curl or wget is missing."; fi
 
@@ -66,14 +75,24 @@ VERSION=$(node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1]
 FILE=$(node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(m.cli.url)' "$TMP/manifest.json")
 WANT=$(node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(m.cli.sha256)' "$TMP/manifest.json")
 
+# The version becomes a folder that gets replaced, the URL is either a file name on the mirror or https on the mirror host
+case "$VERSION" in *..*|'') fail "Manifest names an invalid CLI version, installation cancelled." ;; esac
+printf '%s' "$VERSION" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z.+-]*$' || fail "Manifest names an invalid CLI version, installation cancelled."
+case "$FILE" in
+  *..*|'') fail "Manifest names an invalid CLI download, installation cancelled." ;;
+  "https://$MIRROR_HOST/"*) URL="$FILE" ;;
+  *) printf '%s' "$FILE" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z._+-]*$' || fail "Manifest names an invalid CLI download, installation cancelled."; URL="$MIRROR/$FILE" ;;
+esac
+
 say "Downloading CLI $VERSION ..."
-get "$MIRROR/$FILE" "$TMP/cli.tgz" || fail "Download failed: $MIRROR/$FILE"
+get "$URL" "$TMP/cli.tgz" || fail "Download failed: $URL"
 [ "$(sum "$TMP/cli.tgz")" = "$WANT" ] || fail "Checksum does not match, installation cancelled."
 
 DEST="$KETTE_HOME/cli/$VERSION"
 rm -rf "$DEST"
 mkdir -p "$DEST" "$KETTE_HOME/bin"
-tar -xzf "$TMP/cli.tgz" -C "$DEST"
+tar -xzf "$TMP/cli.tgz" -C "$DEST" || fail "Unpacking failed, installation cancelled."
+[ -f "$DEST/bin/kette.mjs" ] || fail "The CLI package is incomplete, installation cancelled."
 chmod +x "$DEST/bin/kette.mjs"
 ln -sf "$DEST/bin/kette.mjs" "$KETTE_HOME/bin/kette"
 

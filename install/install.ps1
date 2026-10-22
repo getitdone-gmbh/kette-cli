@@ -1,47 +1,69 @@
 # kette installer for Windows: downloads the CLI, verifies the checksum and puts it in ~\.kette
-$ErrorActionPreference = 'Stop'
-$Mirror = if ($env:KETTE_MIRROR) { $env:KETTE_MIRROR } else { 'https://kette.itdone.de/dl' }
-$KetteHome = if ($env:KETTE_HOME) { $env:KETTE_HOME } else { Join-Path $HOME '.kette' }
+# Runs in a script block and stops with throw, so irm | iex never closes the PowerShell window of the user
+& {
+  $ErrorActionPreference = 'Stop'
+  $Mirror = if ($env:KETTE_MIRROR) { $env:KETTE_MIRROR.TrimEnd('/') } else { 'https://kette.itdone.de/dl' }
+  $KetteHome = if ($env:KETTE_HOME) { $env:KETTE_HOME } else { Join-Path $HOME '.kette' }
 
-function Fail($msg) { Write-Host "kette: $msg" -ForegroundColor Red; exit 1 }
+  function Fail($msg) { throw "kette: $msg" }
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'Node.js 20 or newer is missing. Install it from https://nodejs.org and start again.' }
-$major = [int](node -p 'process.versions.node.split(".")[0]')
-if ($major -lt 20) { Fail "Found Node.js $major, version 20 or newer is required." }
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail 'git is missing.' }
-if (-not (Get-Command tar -ErrorAction SilentlyContinue)) { Fail 'tar is missing (included since Windows 10).' }
-
-Write-Host 'kette · rules and agents of Die Kette'
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("kette-" + [Guid]::NewGuid())
-New-Item -ItemType Directory -Path $tmp | Out-Null
-try {
-  $manifest = Invoke-RestMethod "$Mirror/manifest.json"
-  $file = Join-Path $tmp 'cli.tgz'
-  Write-Host "Downloading CLI $($manifest.cli.version) ..."
-  Invoke-WebRequest "$Mirror/$($manifest.cli.url)" -OutFile $file -UseBasicParsing
-  $sum = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
-  if ($sum -ne $manifest.cli.sha256) { Fail 'Checksum does not match, installation cancelled.' }
-  $dest = Join-Path $KetteHome "cli\$($manifest.cli.version)"
-  if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-  New-Item -ItemType Directory -Path $dest -Force | Out-Null
-  tar -xzf $file -C $dest
-  $bin = Join-Path $KetteHome 'bin'
-  New-Item -ItemType Directory -Path $bin -Force | Out-Null
-  Set-Content -Path (Join-Path $bin 'kette.cmd') -Value "@node `"$dest\bin\kette.mjs`" %*" -Encoding ASCII
-  Write-Host "Installed: $bin\kette.cmd ($($manifest.cli.version))"
-  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-  if (-not ($userPath -split ';' | Where-Object { $_ -eq $bin })) {
-    if ($env:KETTE_NO_MODIFY_PATH -eq '1') {
-      Write-Host "PATH not changed (KETTE_NO_MODIFY_PATH=1). Add $bin to the user PATH by hand."
-    } else {
-      [Environment]::SetEnvironmentVariable('Path', "$bin;$userPath", 'User')
-      Write-Host "PATH updated with $bin (open a new terminal)."
-    }
+  # Plain http only for a local test mirror or with KETTE_INSECURE=1
+  $mirrorUri = [Uri]$Mirror
+  $local = $mirrorUri.Host -in @('127.0.0.1', 'localhost')
+  if ($mirrorUri.Scheme -ne 'https' -and -not ($mirrorUri.Scheme -eq 'http' -and ($local -or $env:KETTE_INSECURE -eq '1'))) {
+    Fail "Mirror must use https: $Mirror (set KETTE_INSECURE=1 only for a trusted test mirror)."
   }
-  Write-Host ''
-  Write-Host 'Next:'
-  Write-Host '  kette init my-project   new project'
-  Write-Host '  kette add               connect an existing repo'
-} finally {
-  Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+  if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'Node.js 20 or newer is missing. Install it from https://nodejs.org and start again.' }
+  $major = [int](node -p 'process.versions.node.split(".")[0]')
+  if ($major -lt 20) { Fail "Found Node.js $major, version 20 or newer is required." }
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail 'git is missing.' }
+  if (-not (Get-Command tar -ErrorAction SilentlyContinue)) { Fail 'tar is missing (included since Windows 10).' }
+
+  Write-Host 'kette · rules and agents of Die Kette'
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) ("kette-" + [Guid]::NewGuid())
+  New-Item -ItemType Directory -Path $tmp | Out-Null
+  try {
+    $manifest = Invoke-RestMethod "$Mirror/manifest.json"
+    $version = [string]$manifest.cli.version
+    $url = [string]$manifest.cli.url
+    # The version becomes a folder that gets replaced, the URL is either a file name on the mirror or https on the mirror host
+    if ($version -notmatch '^[0-9A-Za-z][0-9A-Za-z.+-]*$' -or $version.Contains('..')) { Fail 'Manifest names an invalid CLI version, installation cancelled.' }
+    if ($url.Contains('..')) { Fail 'Manifest names an invalid CLI download, installation cancelled.' }
+    if ($url.StartsWith("https://$($mirrorUri.Authority)/")) { $download = $url }
+    elseif ($url -match '^[0-9A-Za-z][0-9A-Za-z._+-]*$') { $download = "$Mirror/$url" }
+    else { Fail 'Manifest names an invalid CLI download, installation cancelled.' }
+
+    $file = Join-Path $tmp 'cli.tgz'
+    Write-Host "Downloading CLI $version ..."
+    Invoke-WebRequest $download -OutFile $file -UseBasicParsing
+    $sum = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+    if ($sum -ne $manifest.cli.sha256) { Fail 'Checksum does not match, installation cancelled.' }
+    $dest = Join-Path $KetteHome "cli\$version"
+    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+    New-Item -ItemType Directory -Path $dest -Force | Out-Null
+    tar -xzf $file -C $dest
+    if ($LASTEXITCODE -ne 0) { Fail "Unpacking failed (tar exit code $LASTEXITCODE), installation cancelled." }
+    if (-not (Test-Path (Join-Path $dest 'bin\kette.mjs'))) { Fail 'The CLI package is incomplete, installation cancelled.' }
+    $bin = Join-Path $KetteHome 'bin'
+    New-Item -ItemType Directory -Path $bin -Force | Out-Null
+    Set-Content -Path (Join-Path $bin 'kette.cmd') -Value "@node `"$dest\bin\kette.mjs`" %*" -Encoding ASCII
+    Write-Host "Installed: $bin\kette.cmd ($version)"
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not ($userPath -split ';' | Where-Object { $_ -eq $bin })) {
+      if ($env:KETTE_NO_MODIFY_PATH -eq '1') {
+        Write-Host "PATH not changed (KETTE_NO_MODIFY_PATH=1). Add $bin to the user PATH by hand."
+      } else {
+        [Environment]::SetEnvironmentVariable('Path', "$bin;$userPath", 'User')
+        Write-Host "PATH updated with $bin (open a new terminal)."
+      }
+    }
+    Write-Host ''
+    Write-Host 'Next:'
+    Write-Host '  kette init my-project   new project'
+    Write-Host '  kette add               connect an existing repo'
+  } finally {
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }
