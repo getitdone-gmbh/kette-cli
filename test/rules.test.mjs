@@ -112,7 +112,7 @@ test('init endet mit Zusammenfassung, .kette/README.md beschreibt den Ablauf der
   assert.match(tail, /^Done\. In the project: \.kette\/profile\.json, \.kette\/README\.md, CLAUDE\.md, docs\/adr\/0000-vorlage\.md\n/);
   assert.match(tail, /Not active in Claude Code yet \(plugins: kette-engineering-core@kette \(Agent kette-check, Skills architecture-patterns, engineering-rules\), ui-gesetze@kette \(Skills a11y-standards, interaction-principles, ui-laws\)\)/);
   assert.match(tail, /browse with: kette rules/);
-  assert.match(tail, /1\. kette doctor\n  2\. Open Claude Code in the project .*\n  3\. kette login <key>/);
+  assert.match(tail, /Next steps:\n  1\. cd \S+neu\n  2\. kette doctor\n  3\. Open Claude Code in the project .*\n  4\. kette login <key>/);
   assert.ok(tail.split('\n').length <= 10);
   assert.doesNotMatch(out, /[\u2013\u2014]/);
   const note = fs.readFileSync(path.join(root, '.kette', 'README.md'), 'utf8');
@@ -254,4 +254,46 @@ test('doctor zeigt, wo Regelwerk und Plugins liegen', async () => {
   const d = rulebook('community');
   const { out } = await run('doctor', '--ci');
   assert.match(out, new RegExp(`INFO Rulebook and plugins live in .*${path.basename(path.dirname(d))}`));
+});
+
+test('init in another folder starts the next steps with cd, init in the current folder does not', async () => {
+  rulebook('community');
+  const parent = tmp();
+  const cwd = process.cwd();
+  process.chdir(parent);
+  try {
+    const nested = await run('init', 'my-app', '--yes', '--no-plugins');
+    assert.match(nested.out, /Next steps:\n  1\. cd my-app\n  2\. kette doctor\n/);
+    const spaced = await run('init', 'my app', '--yes', '--no-plugins');
+    assert.match(spaced.out, /Next steps:\n  1\. cd "my app"\n/);
+    const empty = path.join(parent, 'empty');
+    fs.mkdirSync(empty);
+    process.chdir(empty);
+    const here = await run('init', '.', '--yes', '--no-plugins');
+    assert.match(here.out, /Next steps:\n  1\. kette doctor\n/);
+    assert.doesNotMatch(here.out, /\bcd /);
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
+test('doctor outside a project gives a hint instead of an open issue, --ci stays strict', { skip: process.platform === 'win32' }, async () => {
+  rulebook('community');
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-gesetze@kette\n');
+  const cwd = process.cwd();
+  process.chdir(tmp());
+  try {
+    const { result, out } = await run('doctor');
+    assert.match(out, /^INFO No kette project in this folder\. cd into your project or run kette init\.$/m);
+    assert.doesNotMatch(out, /FAIL/);
+    assert.match(out, /\nall good$/);
+    assert.equal(result, 0);
+    const ci = await run('doctor', '--ci');
+    assert.match(ci.out, /^FAIL \.kette\/profile\.json present$/m);
+    assert.match(ci.out, /\n1 open issue\(s\)$/);
+    assert.equal(ci.result, 1);
+  } finally {
+    claude.restore();
+    process.chdir(cwd);
+  }
 });

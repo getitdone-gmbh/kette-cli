@@ -236,7 +236,7 @@ async function setup(root, opts, isNew) {
     plugins = installEdition(rulesDir, tier, otherEditionPlugins(tier));
     for (const l of editionHints(plugins, rulesDir)) console.log(l);
   }
-  console.log(summary(described, tier, plugins.ok, rulesDir));
+  console.log(summary(described, tier, plugins.ok, rulesDir, root));
   return 0;
 }
 
@@ -248,11 +248,17 @@ function staleNote(described) {
   return `  ${file(NOTE_PATH)} has no kette block and stays unchanged. To regenerate it, save your own notes, delete the file and run ${cmd('kette add')} again.`;
 }
 
+// Shell-safe cd into the project when it is not the current folder, as the first next step
+function cdStep(root) {
+  if (path.resolve(root) === process.cwd()) return [];
+  return [cmd(`cd ${/^[\w./~-]+$/.test(root) ? root : `"${root}"`}`)];
+}
+
 // Kurzer Abschluss: was im Projekt entstand, was auf dem Rechner aktiv ist, wie es weitergeht
-function summary(described, tier, pluginsOk, rulesDir) {
+function summary(described, tier, pluginsOk, rulesDir, root) {
   const label = { append: ' (appended)', update: ' (updated)' };
   const changed = described.filter((d) => d.action !== 'keep').map((d) => `${file(d.path)}${label[d.action] || ''}`);
-  const steps = [cmd('kette doctor'), 'Open Claude Code in the project and ask: "Check this code against the Die Kette rules"'];
+  const steps = [...cdStep(root), cmd('kette doctor'), 'Open Claude Code in the project and ask: "Check this code against the Die Kette rules"'];
   if (tier === COMMUNITY) steps.push(`${cmd('kette login <key>')} for agents, gates, profiles and checks (Enterprise)`);
   else steps.push(`A whole feature with all roles and gates: ${cmd('/feature-loop start <feature>')}`);
   const plugins = pluginSummary(tier, MARKETPLACE, rulesDir);
@@ -296,7 +302,9 @@ async function doctor(root, opts) {
   if (bundle) info(`Rulebook and plugins live in ${file(tilde(fs.existsSync(activeBundleLink()) ? activeBundleLink() : bundle.dir))}`);
   const raw = readProfile(root);
   const profile = normalizeProfile(raw);
-  line(Boolean(profile), '.kette/profile.json present');
+  // Outside a project only --ci counts a missing profile, a person just gets told where to go
+  if (profile || opts.ci) line(Boolean(profile), '.kette/profile.json present');
+  else info(`No kette project in this folder. cd into your project or run ${cmd('kette init')}.`);
   if (raw && isLegacyTier(raw.tier)) warn(`Profile uses the old value tier "${raw.tier}", read as "${profile.tier}". Change it to "${profile.tier}" in .kette/profile.json.`);
   if (profile && bundle) {
     const errs = validate(loadSchema(bundle.dir), profile);
