@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cmdArgs } from '../src/claude.mjs';
+import { cmdLine } from '../src/claude.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginContents, pluginDetails, pluginsFor, pluginSummary, retiredPlugins } from '../src/editions.mjs';
 import { tmp, write } from './helpers.mjs';
 
@@ -69,8 +69,9 @@ test('isNewer vergleicht Versionen numerisch', async () => {
 });
 
 test('Windows claude.cmd: arguments quoted for cmd.exe, unsafe ones refused', () => {
-  assert.deepEqual(cmdArgs(['plugin', 'install', 'kette-engineering@kette']), ['plugin', 'install', 'kette-engineering@kette']);
-  assert.deepEqual(cmdArgs(['plugin', 'marketplace', 'add', 'C:\\Users\\Jo Do\\.kette\\bundles\\active']), ['plugin', 'marketplace', 'add', '"C:\\Users\\Jo Do\\.kette\\bundles\\active"']);
-  assert.equal(cmdArgs(['plugin', 'marketplace', 'add', 'C:\\%PATH%']), null);
-  assert.equal(cmdArgs(['a"b']), null);
+  assert.equal(cmdLine(['plugin', 'install', 'kette-engineering@kette']), 'claude.cmd plugin install kette-engineering@kette');
+  assert.equal(cmdLine(['plugin', 'marketplace', 'add', 'C:\\Users\\Jo Do\\.kette\\bundles\\active']), 'claude.cmd plugin marketplace add "C:\\Users\\Jo Do\\.kette\\bundles\\active"');
+  assert.equal(cmdLine(['plugin', 'marketplace', 'add', 'C:\\%PATH%']), null);
+  assert.equal(cmdLine(['a"b']), null);
+  assert.equal(cmdLine(['plugin', 'marketplace', 'add', 'C:\\Jo Do\\']), null, 'a trailing backslash would escape the closing quote');
 });
