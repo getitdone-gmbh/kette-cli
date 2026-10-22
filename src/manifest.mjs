@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { activeBundleLink, bundlesDir, mirror, stateFile } from './paths.mjs';
+import { activeBundleLink, bundlesDir, isSecureUrl, mirror, stateFile } from './paths.mjs';
 
 export async function fetchManifest() {
   const url = `${mirror()}/manifest.json`;
@@ -11,7 +11,18 @@ export async function fetchManifest() {
   return res.json();
 }
 
-const resolveUrl = (u) => (/^https?:\/\//.test(u) ? u : `${mirror()}/${u}`);
+// A version becomes a folder name under ~/.kette that gets replaced, so only plain names
+const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
+export const validVersion = (v) => typeof v === 'string' && VERSION_PATTERN.test(v) && !v.includes('..');
+const FILE_NAME = /^[0-9A-Za-z][0-9A-Za-z._+-]*$/;
+
+// A file name on the mirror or an https URL; anyHost for signed links of the delivery service, otherwise only the mirror host
+function resolveUrl(u, anyHost) {
+  if (typeof u !== 'string') return null;
+  if (FILE_NAME.test(u)) return u.includes('..') ? null : `${mirror()}/${u}`;
+  if (!isSecureUrl(u)) return null;
+  return anyHost || new URL(u).host === new URL(mirror()).host ? u : null;
+}
 
 // Download error with a reason, so callers can show their own message with the next step
 export class DownloadError extends Error {
@@ -22,8 +33,10 @@ export class DownloadError extends Error {
   }
 }
 
-export async function download(entry, target) {
-  const res = await fetch(resolveUrl(entry.url));
+export async function download(entry, target, { anyHost = false } = {}) {
+  const url = resolveUrl(entry.url, anyHost);
+  if (!url) throw new DownloadError(`Invalid download URL ${JSON.stringify(entry.url)}, nothing was installed`);
+  const res = await fetch(url);
   if (!res.ok) throw new DownloadError(`Download failed (${res.status}): ${entry.url}`, { status: res.status });
   const buf = Buffer.from(await res.arrayBuffer());
   const sum = crypto.createHash('sha256').update(buf).digest('hex');
@@ -50,10 +63,11 @@ export function removeState(keys) {
 }
 
 // Downloads a bundle, verifies it and unpacks it to ~/.kette/bundles/<tier>/<version>
-export async function installEntry(tier, version, entry) {
+export async function installEntry(tier, version, entry, { anyHost = false } = {}) {
+  if (!validVersion(version)) throw new Error(`Invalid bundle version ${JSON.stringify(version)}, nothing was installed`);
   const dir = path.join(bundlesDir(), tier, version);
   if (!fs.existsSync(path.join(dir, '.claude-plugin', 'marketplace.json'))) {
-    const tgz = await download(entry, path.join(bundlesDir(), `${tier}-${version}.tgz`));
+    const tgz = await download(entry, path.join(bundlesDir(), `${tier}-${version}.tgz`), { anyHost });
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });
     execFileSync('tar', ['-xzf', tgz, '-C', dir]);

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DeliveryError, FIGMA_PENDING, NPM_PENDING, createCiToken, deviceId, figmaLinks, listCiTokens, readCredentials, registryToken, revokeCiToken, revokeRegistryToken } from './delivery.mjs';
 import { readState, writeState } from './manifest.mjs';
-import { npmUserConfig, registryDefault } from './paths.mjs';
+import { isSecureUrl, npmUserConfig, registryDefault } from './paths.mjs';
 import { cmd, file as fileName, isoDate, status } from './out.mjs';
 import { SCOPE, TOKEN_PATTERN, authKey, blockToken, foreignScopeLines, hasBlock, projectScope, readFile, withBlock, withoutBlock, writePrivate } from './npmrc.mjs';
 
@@ -49,7 +49,7 @@ export async function setupNpm(key, opts) {
     console.log(`     Set it up later with: ${cmd('kette update')}`);
     return false;
   }
-  if (!TOKEN_PATTERN.test(grant.token || '') || !/^https?:\/\//.test(grant.registry || '')) {
+  if (!TOKEN_PATTERN.test(grant.token || '') || !isSecureUrl(grant.registry)) {
     console.log(`${WARN} npm access not set up: incomplete response from the delivery service. Set it up later with: ${cmd('kette update')}`);
     return false;
   }
@@ -162,6 +162,7 @@ const IMPORT_ORDER = [
 ];
 
 async function downloadChecked(file, target) {
+  if (!isSecureUrl(file.url)) throw new DeliveryError('bad_response', `${file.name} has no https download link. Run the command again, if it persists contact support.`);
   const res = await fetch(file.url);
   if (!res.ok) throw new DeliveryError(`http_${res.status}`, `${file.name} could not be downloaded (${res.status}). Run the command again, the links are valid for 15 minutes.`);
   const buf = Buffer.from(await res.arrayBuffer());

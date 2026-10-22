@@ -2,13 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { COMMUNITY, ENTERPRISE, editionLabel, retiredPlugins, isNewer } from './editions.mjs';
 import { DeliveryError, KEY_PATTERN, deviceId, downloadErrorText, latest, readCredentials, removeCredentials, requestToken, writeCredentials } from './delivery.mjs';
-import { DownloadError, fetchManifest, installEntry, installedBundle, readState, removeState, setActiveBundle, writeState } from './manifest.mjs';
+import { DownloadError, fetchManifest, installEntry, installedBundle, readState, removeState, setActiveBundle, validVersion, writeState } from './manifest.mjs';
 import { editionHints, hasClaude, installEdition, pluginId, uninstallPlugin } from './claude.mjs';
 import { bundlesDir, credentialsFile, delivery } from './paths.mjs';
 import { ensureNpm, setupNpm, teardownNpm } from './npm-access.mjs';
 import { cmd, isoDate, status } from './out.mjs';
-
-const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
 
 export const formatDate = (iso) => isoDate(iso, 'unknown');
 export const installCommand = () => `${cmd('curl -fsSL https://kette.itdone.de/install | sh')} (Windows: ${cmd('irm https://kette.itdone.de/install.ps1 | iex')})`;
@@ -25,7 +23,7 @@ export const loginState = () => readState().login || null;
 
 async function grant(key, cli) {
   const g = await requestToken({ key, device: deviceId(), cli });
-  if (!g.url || !g.sha256 || !VERSION_PATTERN.test(g.version || '')) {
+  if (!g.url || !g.sha256 || !validVersion(g.version)) {
     throw new DeliveryError('bad_response', 'The delivery service sent an incomplete response. Try again later, if it persists contact support.');
   }
   return g;
@@ -34,7 +32,7 @@ async function grant(key, cli) {
 async function install(g) {
   let dir;
   try {
-    dir = await installEntry(ENTERPRISE, g.version, { url: g.url, sha256: g.sha256 });
+    dir = await installEntry(ENTERPRISE, g.version, { url: g.url, sha256: g.sha256 }, { anyHost: true });
   } catch (err) {
     if (err instanceof DownloadError) throw new DeliveryError(err.checksum ? 'checksum' : 'download', downloadErrorText(err));
     throw err;
