@@ -142,6 +142,8 @@ const enterpriseMarket = { ...market, version, plugins: withVersion([...market.p
 const community = pack(`kette-community-${version}.tgz`, [[fromEng('rules'), 'rules'], [fromEng('schema'), 'schema'], [fromEng('plugins/kette-engineering-core'), 'plugins/kette-engineering-core'], ...COMMUNITY_PACK_PLUGINS.map(fromPack)], {
   '.claude-plugin/marketplace.json': JSON.stringify(communityMarket, null, 2) + '\n',
   'profiles/platform/index.json': fs.readFileSync(path.join(eng, 'profiles/platform/index.json'), 'utf8'),
+  // Names of the Enterprise stack profiles, so kette rules <stack> in Community points to kette login
+  'profiles/stack/index.json': fs.readFileSync(path.join(eng, 'profiles/stack/index.json'), 'utf8'),
   'VERSION': version + '\n',
 });
 const enterprise = pack(`private/kette-enterprise-${version}.tgz`, [...['rules', 'schema', 'profiles', 'checks', 'plugins', 'LICENSE'].map((p) => [fromEng(p), p]), ...ENTERPRISE_PACK_PLUGINS.map(fromPack)], {

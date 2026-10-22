@@ -120,6 +120,17 @@ test('topics named like Object prototype keys are unknown topics, not the overvi
   }
 });
 
+test('Community: any stack profile named in the bundle index is an Enterprise topic, not unknown', async () => {
+  const d = rulebook('community');
+  write(d, 'profiles/stack/index.json', JSON.stringify({ 'react-spa': { role: 'spa' }, 'elixir-phoenix': { role: 'api' } }));
+  for (const t of ['react-spa', 'elixir-phoenix', 'gitlab']) {
+    await assert.rejects(run('rules', t), new RegExp(`^Error: ${t} is an Enterprise profile \\(Die Kette\\), unlock with: kette login <key>$`), t);
+  }
+  await assert.rejects(run('rules', 'elixir-phoenx'), /Did you mean: elixir-phoenix\?/);
+  fs.rmSync(path.join(d, 'profiles', 'stack'), { recursive: true });
+  await assert.rejects(run('rules', 'react-spa'), /react-spa is an Enterprise profile/, 'known to the CLI even without the index');
+});
+
 test('rules mit unbekanntem Thema nennt ähnliche Themen', async () => {
   rulebook('community');
   await assert.rejects(run('rules', 'fehlr'), /Unknown topic "fehlr"\. Did you mean: fehler\? All topics: kette rules/);

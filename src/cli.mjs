@@ -11,7 +11,7 @@ import { MARKETPLACE, REPAIR_NOTE, editionHints, hasClaude, installEdition, inst
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins } from './editions.mjs';
 import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
-import { rules, tilde } from './rules.mjs';
+import { coreTopicIds, rules, tilde } from './rules.mjs';
 import { cliHint, cliUpgradeHint, credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 import { SCOPE } from './npmrc.mjs';
 import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
@@ -27,6 +27,7 @@ const STACKS = [
   { value: 'nestjs-mongoose', label: 'NestJS + Mongoose (backend, documents)' },
   { value: 'python-fastapi', label: 'Python + FastAPI' },
   { value: 'react-native-expo', label: 'React Native + Expo (mobile)' },
+  { value: 'react-spa', label: 'React + Vite (single page app)' },
 ];
 const PLATFORMS = [
   { value: 'github-docker', label: 'GitHub + Docker on your own server' },
@@ -150,8 +151,9 @@ async function buildProfile(root, opts, detected) {
 }
 
 // .kette/README.md as a marked block, so init, add and update renew only that part; tier is the project edition
-function noteItem(tier) {
-  const note = agentNote(tier);
+// The core topic list comes from the bundle, so a new core rule shows up in the note with the rulebook that brings it
+function noteItem(tier, bundleDir) {
+  const note = agentNote(tier, bundleDir ? coreTopicIds(bundleDir) : undefined);
   return { path: NOTE_PATH, mode: 'renew', content: note, renew: (current) => renewNote(current, note) };
 }
 
@@ -209,7 +211,7 @@ function adrItem(root, bundleDir) {
 function planFor(root, profile, bundleDir, tier, noteTier, templates, apps) {
   const plan = [
     { path: '.kette/profile.json', mode: 'renew', content: JSON.stringify(profile, null, 2) + '\n', renew: (current) => renewProfile(current, noteTier, apps) },
-    noteItem(noteTier),
+    noteItem(noteTier, bundleDir),
     { path: 'CLAUDE.md', mode: 'append', marker: '@.kette/README.md', content: '@.kette/README.md\n', note: 'points to the Die Kette rules' },
     adrItem(root, bundleDir),
   ].filter(Boolean);
@@ -451,7 +453,7 @@ function renewProjectNote(root) {
   const profile = existingProfile(root);
   if (!profile) return;
   const tier = Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
-  const [d] = describe([noteItem(tier)], root);
+  const [d] = describe([noteItem(tier, installedBundle(tierOf())?.dir)], root);
   if (d.unmarked) { console.log(staleNote([d])); return; }
   if (d.action === 'keep') return;
   apply([d], root);

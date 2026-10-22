@@ -23,6 +23,8 @@ function stacksOf(file) {
   else if (deps['@nestjs/core'] && (deps.mongoose || deps['@nestjs/mongoose'])) stacks.push('nestjs-mongoose');
   else if (deps['@nestjs/core']) stacks.push('nestjs-prisma');
   if (deps.expo) stacks.push('react-native-expo');
+  // A Vite React app; Next.js and Expo bring React too and are their own stacks
+  else if (deps.vite && deps.react && !deps.next) stacks.push('react-spa');
   return stacks;
 }
 

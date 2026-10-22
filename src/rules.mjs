@@ -28,6 +28,9 @@ function tableRows(md) {
   return md.split('\n').filter((l) => l.trim().startsWith('|')).slice(2).map(cells);
 }
 
+// Ids of the core rules in the bundle, in file order, e.g. readability ... comments
+export const coreTopicIds = (dir) => coreTopics(dir).map((t) => t.id);
+
 function coreTopics(dir) {
   const core = path.join(dir, 'rules', 'core');
   if (!fs.existsSync(core)) return [];
@@ -67,7 +70,15 @@ export function catalog(dir) {
     stacks: stackTopics(dir),
     platforms: platformTopics(dir),
     renamed: aliasTopics(dir),
+    profileIds: profileIds(dir),
   };
+}
+
+// Ids of all stack and platform profiles from the index files; the Community bundle ships them without the profiles themselves
+function profileIds(dir) {
+  const stacks = readJson(path.join(dir, 'profiles', 'stack', 'index.json'));
+  const stackIds = stacks && typeof stacks === 'object' && !Array.isArray(stacks) ? Object.keys(stacks) : [];
+  return [...stackIds, ...platformTopics(dir).map((t) => t.id)].map((id) => String(id).toLowerCase());
 }
 
 // Only string to string entries count, so a missing or damaged aliases.json just means no aliases
@@ -175,12 +186,14 @@ export function rules(topic, opts, { bundle, tier, stackIds = [] }) {
   }
   const { hit, ids } = find(cat, topic);
   const missing = !hit || !fs.existsSync(hit.file);
-  if (missing && tier !== ENTERPRISE && (cat.platforms.includes(hit) || stackIds.includes(topic.toLowerCase()))) {
+  // Every profile the bundle or this CLI knows by name but cannot show in Community is an Enterprise topic, not an unknown one
+  const profiles = [...new Set([...cat.profileIds, ...stackIds])];
+  if (missing && tier !== ENTERPRISE && (cat.platforms.includes(hit) || profiles.includes(topic.toLowerCase()))) {
     throw new Error(`${topic} is an Enterprise profile (Die Kette), unlock with: kette login <key>`);
   }
   if (hit && missing) throw new Error(`${tilde(hit.file)} is missing from the bundle. Reload with: kette update`);
   if (!hit) {
-    const close = suggestTopics(topic, cat, [...ids, ...stackIds.filter((s) => !ids.includes(s))]);
+    const close = suggestTopics(topic, cat, [...ids, ...profiles.filter((s) => !ids.includes(s))]);
     throw new Error(`Unknown topic "${topic}".${close.length ? ` Did you mean: ${close.join(', ')}?` : ''} All topics: kette rules`);
   }
   console.log(opts.path ? hit.file : render(read(hit.file)));

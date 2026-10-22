@@ -23,6 +23,17 @@ test('erkennt Mongoose, Expo und FastAPI', () => {
   assert.deepEqual(detectStack(d).sort(), ['nestjs-mongoose', 'python-fastapi', 'react-native-expo']);
 });
 
+test('detects a Vite React app as react-spa with its folder, Next.js and Expo stay their own stacks', async () => {
+  const { detectAppFolders } = await import('../src/detect.mjs');
+  const d = tmp();
+  write(d, 'apps/spa/package.json', JSON.stringify({ dependencies: { react: '19' }, devDependencies: { vite: '7' } }));
+  write(d, 'apps/web/package.json', JSON.stringify({ dependencies: { next: '16', react: '19' }, devDependencies: { vite: '7' } }));
+  write(d, 'apps/mobile/package.json', JSON.stringify({ dependencies: { expo: '52', react: '19' }, devDependencies: { vite: '7' } }));
+  write(d, 'tools/docs/package.json', JSON.stringify({ devDependencies: { vite: '7' } }));
+  assert.deepEqual(detectStack(d).sort(), ['nextjs-ts-tailwind', 'react-native-expo', 'react-spa']);
+  assert.equal(detectAppFolders(d).apps['react-spa'], 'apps/spa');
+});
+
 test('erkennt Plattformen an CI- und IaC-Dateien', () => {
   const cases = [
     ['azure-pipelines.yml', 'trigger: [main]', 'azure-devops'],
