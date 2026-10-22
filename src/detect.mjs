@@ -12,25 +12,60 @@ const listFiles = (dir, depth = 2) => {
   });
 };
 
-// Erkennt Stacks aus den Paketdateien im Repo und in apps/*, packages/*
-export function detectStack(dir) {
-  const stacks = new Set();
-  const manifests = listFiles(dir, 3).filter((f) => path.basename(f) === 'package.json');
-  for (const f of manifests) {
-    const p = readJson(f) || {};
-    const deps = { ...p.dependencies, ...p.devDependencies };
-    if (deps.next) stacks.add('nextjs-ts-tailwind');
-    if (deps['@nestjs/core'] && (deps['@prisma/client'] || deps.prisma)) stacks.add('nestjs-prisma');
-    else if (deps['@nestjs/core'] && (deps.mongoose || deps['@nestjs/mongoose'])) stacks.add('nestjs-mongoose');
-    else if (deps['@nestjs/core']) stacks.add('nestjs-prisma');
-    if (deps.expo) stacks.add('react-native-expo');
-  }
-  const py = listFiles(dir, 2).filter((f) => /(pyproject\.toml|requirements\.txt)$/.test(f));
-  if (py.some((f) => /fastapi/i.test(fs.readFileSync(f, 'utf8')))) stacks.add('python-fastapi');
-  return [...stacks];
+// Stacks of one manifest: package.json, pyproject.toml or requirements.txt
+function stacksOf(file) {
+  if (path.basename(file) !== 'package.json') return /fastapi/i.test(fs.readFileSync(file, 'utf8')) ? ['python-fastapi'] : [];
+  const p = readJson(file) || {};
+  const deps = { ...p.dependencies, ...p.devDependencies };
+  const stacks = [];
+  if (deps.next) stacks.push('nextjs-ts-tailwind');
+  if (deps['@nestjs/core'] && (deps['@prisma/client'] || deps.prisma)) stacks.push('nestjs-prisma');
+  else if (deps['@nestjs/core'] && (deps.mongoose || deps['@nestjs/mongoose'])) stacks.push('nestjs-mongoose');
+  else if (deps['@nestjs/core']) stacks.push('nestjs-prisma');
+  if (deps.expo) stacks.push('react-native-expo');
+  return stacks;
 }
 
-// Erkennt die Plattform an CI- und Infrastruktur-Dateien
+const manifests = (dir) => [
+  ...listFiles(dir, 3).filter((f) => path.basename(f) === 'package.json'),
+  ...listFiles(dir, 2).filter((f) => /(pyproject\.toml|requirements\.txt)$/.test(f)),
+];
+
+// Detects stacks from the package files in the repo and in apps/*, packages/*
+export function detectStack(dir) {
+  return [...new Set(manifests(dir).flatMap(stacksOf))];
+}
+
+// Same rule as apps in the profile schema: plain folder names joined by /, so a detected folder always makes a valid profile
+export const APP_FOLDER_PATTERN = '^(\\.|(?!(.*/)?\\.\\.?(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?)$';
+const APP_FOLDER = new RegExp(APP_FOLDER_PATTERN);
+
+// App folder per stack, relative with / (e.g. backend, frontend, apps/web); the least nested manifest wins, the root of an npm workspace never counts
+// unusable: stacks found only in folders whose name the profile cannot hold (spaces, umlauts), they get no apps entry
+export function detectAppFolders(dir) {
+  const depth = (rel) => (rel === '.' ? 0 : rel.split('/').length);
+  const found = manifests(dir)
+    .map((f) => ({ f, rel: path.relative(dir, path.dirname(f)).split(path.sep).join('/') || '.' }))
+    .filter(({ f, rel }) => !(rel === '.' && readJson(f)?.workspaces))
+    .sort((a, b) => depth(a.rel) - depth(b.rel) || a.rel.localeCompare(b.rel));
+  const apps = {};
+  const unusable = {};
+  for (const { f, rel } of found) {
+    for (const stack of stacksOf(f)) {
+      if (APP_FOLDER.test(rel)) apps[stack] ??= rel;
+      else unusable[stack] ??= rel;
+    }
+  }
+  for (const stack of Object.keys(apps)) delete unusable[stack];
+  return { apps, unusable };
+}
+
+export const detectApps = (dir) => detectAppFolders(dir).apps;
+
+// npm workspaces at the repository root: the Node apps then share one install and one lockfile
+export const detectWorkspace = (dir) => Boolean(readJson(path.join(dir, 'package.json'))?.workspaces);
+
+// Detects the platform from CI and infrastructure files
 export function detectPlatform(dir) {
   const files = listFiles(dir, 3).map((f) => path.relative(dir, f));
   const tf = files.filter((f) => f.endsWith('.tf')).map((f) => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');

@@ -62,7 +62,7 @@ const creds = () => path.join(kh, 'credentials');
 test('login 200: Schlüssel mit Rechten 600, Paket geprüft und entpackt, Edition Enterprise', async () => {
   const { result, out } = await run('login', KEYS.ok, '--no-plugins');
   assert.equal(result, 0);
-  assert.match(out, /Angemeldet: Enterprise \(Die Kette\), Version 0\.20261020\.9, Updates bis 20\.10\.2027, Geräte 1 von 3/);
+  assert.match(out, /Signed in: Enterprise \(Die Kette\), version 0\.20261020\.9, updates until 2027-10-20, devices 1 of 3/);
   assert.deepEqual(JSON.parse(fs.readFileSync(creds(), 'utf8')), { key: KEYS.ok });
   if (process.platform !== 'win32') assert.equal(fs.statSync(creds()).mode & 0o777, 0o600);
   assert.ok(fs.existsSync(path.join(kh, 'bundles', 'enterprise', V1, '.claude-plugin', 'marketplace.json')));
@@ -84,10 +84,10 @@ test('login zieht die Rechte einer vorhandenen Schlüsseldatei auf 600 und behä
 });
 
 const failing = [
-  ['401 unbekannter Schlüssel', KEYS.unknown, /kennen wir nicht.*Kaufbestätigung/],
-  ['403 widerrufen', KEYS.revoked, /widerrufen oder erstattet.*info@itdone\.de.*Community-Edition bleibt nutzbar/],
-  ['403 falsches Angebot', KEYS.other, /anderen Angebot.*Solo oder Team/],
-  ['429 Gerätegrenze', KEYS.full, /Gerätegrenze.*3 von 3 Geräten.*Support/],
+  ['401 unbekannter Schlüssel', KEYS.unknown, /do not know this license key.*purchase confirmation/],
+  ['403 widerrufen', KEYS.revoked, /revoked or refunded.*info@itdone\.de.*Community edition keeps working/],
+  ['403 falsches Angebot', KEYS.other, /different offer.*Solo or Team/],
+  ['429 Gerätegrenze', KEYS.full, /device limit.*3 of 3 devices.*Support/],
 ];
 for (const [name, key, message] of failing) {
   test(`login ${name}: verständlicher Fehler, nichts gespeichert`, async () => {
@@ -98,15 +98,25 @@ for (const [name, key, message] of failing) {
 }
 
 test('login mit falscher Prüfsumme installiert nichts', async () => {
-  await assert.rejects(run('login', KEYS.badsum, '--no-plugins'), /Prüfsumme des Enterprise-Pakets stimmt nicht, es wurde nichts installiert/);
+  await assert.rejects(run('login', KEYS.badsum, '--no-plugins'), /checksum of the Enterprise bundle does not match, nothing was installed/);
   assert.equal(fs.existsSync(path.join(kh, 'bundles', 'enterprise', V1)), false);
   assert.equal(tierOf(), 'community');
   const { out } = await run('doctor', '--ci');
-  assert.match(out, /FEHLT Lizenz hinterlegt, aber das Enterprise-Paket fehlt\. Nachladen mit: kette update/);
+  assert.match(out, /FAIL License stored, but the Enterprise bundle is missing\. Load it with: kette update/);
+});
+
+test('login without an argument takes the key from KETTE_LICENSE_KEY', async () => {
+  process.env.KETTE_LICENSE_KEY = KEYS.ok.toLowerCase();
+  try {
+    const { result } = await run('login', '--no-plugins');
+    assert.equal(result, 0);
+  } finally { delete process.env.KETTE_LICENSE_KEY; }
+  assert.equal(requests[0].key, KEYS.ok);
+  assert.deepEqual(JSON.parse(fs.readFileSync(creds(), 'utf8')), { key: KEYS.ok });
 });
 
 test('login lehnt ein falsches Format ab, ohne den Lieferdienst zu fragen', async () => {
-  await assert.rejects(run('login', 'CDP-123'), /Format CDP-XXXXX/);
+  await assert.rejects(run('login', 'CDP-123'), /format CDP-XXXXX/);
   assert.equal(requests.length, 0);
 });
 
@@ -116,8 +126,8 @@ test('doctor zeigt Edition, Version und Updates bis ohne Netz', async () => {
   process.env.KETTE_DELIVERY = 'http://127.0.0.1:1';
   try {
     const { out } = await run('doctor', '--ci');
-    assert.match(out, /OK {4}Edition Enterprise \(Die Kette\), Version 0\.20261020\.9, Updates bis 20\.10\.2027/);
-    assert.match(out, /OK {4}Regelwerk installiert \(Enterprise \(Die Kette\), Version 0\.20261020\.9\)/);
+    assert.match(out, /OK {3}Edition Enterprise \(Die Kette\), version 0\.20261020\.9, updates until 2027-10-20/);
+    assert.match(out, /OK {3}Rulebook installed \(Enterprise \(Die Kette\), version 0\.20261020\.9\)/);
   } finally {
     process.env.KETTE_DELIVERY = offline;
   }
@@ -132,8 +142,8 @@ test('doctor liest ein Profil aus 0.1.0 mit tier kette und weist auf den neuen N
   process.chdir(project);
   try {
     const { result, out } = await run('doctor', '--ci');
-    assert.match(out, /OK {4}Profil gültig/);
-    assert.match(out, /alten Wert tier "kette", gelesen als "enterprise"/);
+    assert.match(out, /OK {3}Profile valid/);
+    assert.match(out, /old value tier "kette", read as "enterprise"/);
     assert.equal(result, 0);
   } finally {
     process.chdir(cwd);
@@ -143,23 +153,23 @@ test('doctor liest ein Profil aus 0.1.0 mit tier kette und weist auf den neuen N
 test('update lädt eine neue Enterprise-Version über latest und token', async () => {
   await run('login', KEYS.ok, '--no-plugins');
   const same = await run('update', '--no-plugins');
-  assert.match(same.out, /Aktuell \(Enterprise \(Die Kette\) 0\.20261020\.9\)/);
+  assert.match(same.out, /Up to date \(Enterprise \(Die Kette\) 0\.20261020\.9\)/);
   current = V2;
   const { result, out } = await run('update', '--no-plugins');
   assert.equal(result, 0);
-  assert.match(out, /Neue Enterprise \(Die Kette\)-Version 0\.20261101\.12 \(installiert: 0\.20261020\.9\)/);
+  assert.match(out, /New Enterprise \(Die Kette\) version 0\.20261101\.12 \(installed: 0\.20261020\.9\)/);
   assert.ok(fs.existsSync(path.join(kh, 'bundles', 'enterprise', V2, 'VERSION')));
 });
 
 test('logout entfernt Schlüssel und Paket, die Geräte-ID bleibt', async () => {
   await run('login', KEYS.ok, '--no-plugins');
   const { out } = await run('logout', '--no-plugins');
-  assert.match(out, /Abgemeldet/);
+  assert.match(out, /Signed out/);
   assert.equal(fs.existsSync(creds()), false);
   assert.equal(fs.existsSync(path.join(kh, 'bundles', 'enterprise')), false);
   assert.ok(fs.existsSync(path.join(kh, 'device-id')));
   assert.equal(tierOf(), 'community');
-  assert.match((await run('logout')).out, /Nicht angemeldet/);
+  assert.match((await run('logout')).out, /Not signed in/);
 });
 
 test('login installiert beide Plugins über den festen Pfad des aktiven Pakets', { skip: process.platform === 'win32' }, async () => {
@@ -197,8 +207,8 @@ test('login: scheitert ein Schritt nach dem Entfernen von ui-gesetze, steht das 
   const claude = fakeClaude([], 'kette-engineering-core@kette\nui-gesetze@kette\n', { 'plugin install design-system-agents@kette': { code: 1, out: 'boom' } });
   let out;
   try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
-  assert.match(out, /Plugins nicht installiert \(design-system-agents@kette: boom; vorher schon entfernt: ui-gesetze@kette\)\. Von Hand:\n  claude plugin marketplace add "[^"]+"\n  claude plugin install kette-engineering-core@kette\n/);
-  assert.doesNotMatch(out, /Claude-Code-Plugins installiert/);
+  assert.match(out, /Plugins not installed \(design-system-agents@kette: boom; already removed before: ui-gesetze@kette\)\. By hand:\n  claude plugin marketplace add "[^"]+"\n  claude plugin install kette-engineering-core@kette\n/);
+  assert.doesNotMatch(out, /Claude Code plugins installed/);
   assert.ok(!claude.installed().includes('design-review-pack@kette'));
 });
 
@@ -207,8 +217,8 @@ test('logout entfernt Enterprise-Plugins vor dem Umschalten, prüft per Liste un
   const claude = fakeClaude([], ['kette-engineering-core@kette', ...ENTERPRISE_IDS].join('\n'), { 'plugin uninstall design-system-agents@kette': { code: 1, out: 'Plugin not found' } });
   let out;
   try { ({ out } = await run('logout')); } finally { claude.restore(); }
-  assert.match(out, /Plugin design-system-agents nicht entfernt \(Plugin not found\)\. Von Hand: claude plugin uninstall design-system-agents@kette/);
-  assert.doesNotMatch(out, /Plugin kette-engineering nicht entfernt/);
+  assert.match(out, /Plugin design-system-agents not removed \(Plugin not found\)\. By hand: claude plugin uninstall design-system-agents@kette/);
+  assert.doesNotMatch(out, /Plugin kette-engineering not removed/);
   assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'design-system-agents@kette']);
 });
 
@@ -220,8 +230,8 @@ test('logout meldet den Fehler, wenn weder die Plugin-Liste noch das Entfernen g
   });
   let out;
   try { ({ out } = await run('logout')); } finally { claude.restore(); }
-  assert.match(out, /Plugin kette-engineering nicht entfernt \(gesperrt\)\. Von Hand: claude plugin uninstall kette-engineering@kette/);
-  assert.doesNotMatch(out, /Plugin design-system-agents nicht entfernt/);
+  assert.match(out, /Plugin kette-engineering not removed \(gesperrt\)\. By hand: claude plugin uninstall kette-engineering@kette/);
+  assert.doesNotMatch(out, /Plugin design-system-agents not removed/);
   assert.ok(claude.installed().includes('kette-engineering@kette'));
 });
 
@@ -232,7 +242,7 @@ test('login versucht ui-gesetze auch ohne lesbare Plugin-Liste zu entfernen und 
   });
   let out;
   try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
-  assert.match(out, /Plugins nicht installiert \(gesperrt\)/);
+  assert.match(out, /Plugins not installed \(gesperrt\)/);
   assert.ok(!claude.calls().some((c) => c.startsWith('plugin install')));
 });
 
@@ -246,7 +256,7 @@ test('ohne lesbare Plugin-Liste gilt "not found in installed plugins" als schon 
   });
   let out;
   try { ({ out } = await run('logout')); } finally { claude.restore(); }
-  assert.doesNotMatch(out, /nicht entfernt/);
+  assert.doesNotMatch(out, /not removed/);
   assert.ok(!claude.installed().includes('kette-engineering@kette'));
 });
 
@@ -265,7 +275,7 @@ test('logout installiert Community aus dem lokalen Paket und nennt kette update,
   assert.ok(lastUninstall >= 0 && lastUninstall < calls.indexOf('plugin marketplace update kette'));
   assert.ok(calls.includes('plugin install kette-engineering-core@kette'));
   assert.ok(!calls.includes('plugin install ui-gesetze@kette'));
-  assert.match(out, /HINW  Das Paket auf diesem Rechner enthält ui-gesetze noch nicht\. Neu laden mit: kette update/);
+  assert.match(out, /WARN The bundle on this machine does not contain ui-gesetze yet\. Reload with: kette update/);
   assert.equal(fs.realpathSync(path.join(kh, 'bundles', 'active')), fs.realpathSync(old));
   assert.deepEqual(claude.installed(), ['kette-engineering-core@kette']);
 });
@@ -274,7 +284,7 @@ test('ein einzeln installiertes Agenten-Pack wird nicht angefasst, doppelte Plug
   const claude = fakeClaude([{ name: 'claude-design-agent-pack', source: 'directory', path: '/zip/agent-pack' }], 'design-system-agents@claude-design-agent-pack\nui-gesetze@claude-design-agent-pack\n');
   let out;
   try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
-  assert.match(out, /HINW  Marketplace claude-design-agent-pack \(\/zip\/agent-pack\) bleibt unangetastet\. .*Deaktivieren mit: claude plugin disable design-system-agents@claude-design-agent-pack$/m);
+  assert.match(out, /WARN Marketplace claude-design-agent-pack \(\/zip\/agent-pack\) stays untouched\. .*Disable with: claude plugin disable design-system-agents@claude-design-agent-pack$/m);
   assert.ok(!claude.calls().some((c) => /claude-design-agent-pack/.test(c) && /uninstall|remove/.test(c)));
 });
 
@@ -287,11 +297,11 @@ test('update im Projekt erneuert den Kette-Block für die angemeldete Edition', 
   process.chdir(project);
   try {
     const { out } = await run('update', '--no-plugins');
-    assert.match(out, /\.kette\/README\.md erneuert \(Ablauf für Enterprise \(Die Kette\)\)/);
+    assert.match(out, /\.kette\/README\.md updated \(flow for Enterprise \(Die Kette\)\)/);
     const note = fs.readFileSync(path.join(project, '.kette', 'README.md'), 'utf8');
     assert.match(note, /kette-engineering:code-reviewer/);
     assert.match(note, /<!-- kette:end -->\nNotiz\n$/);
-    assert.doesNotMatch((await run('update', '--no-plugins')).out, /erneuert/);
+    assert.doesNotMatch((await run('update', '--no-plugins')).out, /updated/);
   } finally {
     process.chdir(cwd);
   }
@@ -309,7 +319,7 @@ test('ein fremder Marketplace kette bleibt unangetastet', { skip: process.platfo
   const claude = fakeClaude([{ name: 'kette', source: 'directory', path: '/repos/kette' }]);
   let out;
   try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
-  assert.match(out, /Plugins nicht installiert \(Marketplace kette zeigt auf \/repos\/kette\./);
+  assert.match(out, /Plugins not installed \(Marketplace kette points to \/repos\/kette\./);
   assert.ok(!claude.calls().some((c) => /marketplace (remove|add)|plugin install/.test(c)));
 });
 
@@ -323,7 +333,7 @@ test('Migration: der alte, selbst angelegte Marketplace kette-engineering wird d
   assert.ok(calls.indexOf('plugin uninstall kette-engineering@kette-engineering') < rm);
   assert.ok(rm >= 0 && calls.indexOf(`plugin marketplace add ${path.join(kh, 'bundles', 'active')}`) > rm);
   assert.ok(calls.includes('plugin install kette-engineering@kette'));
-  assert.doesNotMatch(out, /doppelt/);
+  assert.doesNotMatch(out, /twice/);
 });
 
 test('Migration: kette-engineering auf ein Entwickler-Repo bleibt, kette kommt dazu, Hinweis auf doppelte Skills', { skip: process.platform === 'win32' }, async () => {
@@ -335,5 +345,5 @@ test('Migration: kette-engineering auf ein Entwickler-Repo bleibt, kette kommt d
   assert.ok(!calls.some((c) => /marketplace remove|uninstall/.test(c)));
   assert.ok(calls.includes(`plugin marketplace add ${path.join(kh, 'bundles', 'active')}`));
   assert.ok(calls.includes('plugin install kette-engineering-core@kette'));
-  assert.match(out, /HINW  Marketplace kette-engineering \(\/repos\/kette-engineering\) bleibt unangetastet\. .*Skills erscheinen doppelt\. Deaktivieren mit: claude plugin disable kette-engineering-core@kette-engineering$/m);
+  assert.match(out, /WARN Marketplace kette-engineering \(\/repos\/kette-engineering\) stays untouched\. .*skills show up twice\. Disable with: claude plugin disable kette-engineering-core@kette-engineering$/m);
 });

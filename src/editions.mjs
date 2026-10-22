@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Editionen der Kette; free und kette sind die Namen aus Version 0.1.0 und werden beim Lesen übersetzt
+// Editions of Die Kette; free and kette are the names from version 0.1.0 and are mapped when read
 export const COMMUNITY = 'community';
 export const ENTERPRISE = 'enterprise';
 
@@ -16,20 +16,20 @@ export const isLegacyTier = (tier) => tier in LEGACY;
 export const editionLabel = (tier) => EDITIONS[normalizeTier(tier)]?.label || String(tier);
 export const pluginsFor = (tier) => EDITIONS[normalizeTier(tier)].plugins;
 
-// Plugins der Edition, die ein älteres Paket auf diesem Rechner noch nicht enthält
+// Edition plugins that an older bundle on this machine does not contain yet
 export const missingPlugins = (bundleDir, tier) => pluginsFor(tier).filter((p) => !fs.existsSync(path.join(bundleDir, 'plugins', p)));
 
-// Plugins der Edition from, die in to fehlen; beim Wechsel der Edition werden sie entfernt
+// Plugins of edition from that edition to lacks; they are removed when the edition changes
 export const retiredPlugins = (from, to) => pluginsFor(from).filter((p) => !pluginsFor(to).includes(p));
 
 const KINDS = [
-  ['agents', 'Agent', 'Agenten'],
+  ['agents', 'Agent', 'Agents'],
   ['skills', 'Skill', 'Skills'],
-  ['commands', 'Befehl', 'Befehle'],
+  ['commands', 'Command', 'Commands'],
 ];
 const names = (dir, pick) => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).map(pick).filter(Boolean).sort() : []);
 
-// Agenten, Skills und Befehle eines Plugins, gezählt aus dem Ordner im Paket; null, wenn das Paket das Plugin nicht enthält
+// Agents, skills and commands of a plugin, counted from its folder in the bundle; null when the bundle lacks the plugin
 export function pluginContents(bundleDir, plugin) {
   const dir = bundleDir && path.join(bundleDir, 'plugins', plugin);
   if (!dir || !fs.existsSync(dir)) return null;
@@ -41,7 +41,7 @@ export function pluginContents(bundleDir, plugin) {
   };
 }
 
-// Kurzform je Art: bis drei Einträge mit Namen, darüber nur die Anzahl
+// Short form per kind: up to three entries by name, above that only the count
 function shortContents(contents) {
   return KINDS.map(([kind, one, many]) => {
     const list = contents[kind];
@@ -58,22 +58,22 @@ export function pluginSummary(tier, market, bundleDir) {
   }).join(', ');
 }
 
-// Vollständige Liste je Plugin für kette doctor
+// Full list per plugin for kette doctor
 export function pluginDetails(tier, market, bundleDir) {
   return pluginsFor(tier).map((p) => {
     const contents = pluginContents(bundleDir, p);
-    const lines = contents ? KINDS.filter(([kind]) => contents[kind].length).map(([kind, , many]) => `${many} (${contents[kind].length}): ${contents[kind].join(', ')}`) : ['nicht im Paket enthalten'];
+    const lines = contents ? KINDS.filter(([kind]) => contents[kind].length).map(([kind, , many]) => `${many} (${contents[kind].length}): ${contents[kind].join(', ')}`) : ['not in the bundle'];
     return { id: `${p}@${market}`, lines };
   });
 }
 
-// Profil aus 0.1.0 mit tier free oder kette auf die neuen Namen bringen, ohne die Datei zu ändern
+// Map a 0.1.0 profile with tier free or kette to the new names without changing the file
 export function normalizeProfile(profile) {
   if (!profile || !('tier' in profile)) return profile;
   return { ...profile, tier: normalizeTier(profile.tier) };
 }
 
-// true, wenn Version a neuer ist als b (x.y.z, numerisch verglichen)
+// true when version a is newer than b (x.y.z, compared numerically)
 export function isNewer(a, b) {
   const pa = String(a).split('.').map(Number);
   const pb = String(b).split('.').map(Number);

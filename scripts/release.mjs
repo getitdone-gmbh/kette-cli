@@ -41,9 +41,27 @@ const commitTime = (repo, ref) => Number(execFileSync('git', ['-C', repo, 'log',
 const sourceTime = new Date(Math.max(commitTime(eng, 'HEAD'), commitTime(agentPack, agentPackCommit)) * 1000);
 
 const strip = (s) => s.split('\n').filter((l) => !l.startsWith('// Kopie von')).join('\n');
-if (strip(fs.readFileSync(path.join(root, 'src/validate.mjs'), 'utf8')) !== fs.readFileSync(path.join(eng, 'lib/validate.mjs'), 'utf8')) {
-  throw new Error('src/validate.mjs weicht von kette-engineering/lib/validate.mjs ab');
+for (const lib of ['validate.mjs', 'templates.mjs']) {
+  if (strip(fs.readFileSync(path.join(root, 'src', lib), 'utf8')) !== fs.readFileSync(path.join(eng, 'lib', lib), 'utf8')) {
+    throw new Error(`src/${lib} differs from kette-engineering/lib/${lib}`);
+  }
 }
+
+// CLI 0.5.x copies the flat files, CLI 0.6 renders from render/; both sets must be in the Enterprise bundle until 2027-01-31
+const LEGACY_SET = [
+  ...['DEPLOY.md', 'Dockerfile.api', 'Dockerfile.web', 'ci.yml', 'compose.yaml', 'deploy.yml', 'playwright.config.ts', 'prune-runtime.mjs'].map((f) => `profiles/platform/github-docker/templates/${f}`),
+  ...['tsconfig.strict.json', 'eslint.config.mjs', 'dependency-cruiser.cjs', 'gitleaks.toml'].map((f) => `checks/${f}`),
+  'rules/architecture/adr-vorlage.md',
+];
+const RENDER_SET = ['checks/render/index.json', 'profiles/platform/github-docker/render/index.json', 'rules/architecture/adr-template.md'];
+const missingSet = [...LEGACY_SET, ...RENDER_SET].filter((f) => !fs.existsSync(path.join(eng, f)));
+if (missingSet.length) throw new Error(`kette-engineering is missing template files for CLI 0.5.x or 0.6: ${missingSet.join(', ')}`);
+
+// detect.mjs filters app folders with its own copy of the schema pattern; both must stay the same rule
+const { APP_FOLDER_PATTERN } = await import('../src/detect.mjs');
+const schemaApps = JSON.parse(fs.readFileSync(path.join(eng, 'schema', 'profile.schema.json'), 'utf8')).properties.apps.properties;
+const drifted = Object.entries(schemaApps).filter(([, entry]) => entry.pattern !== APP_FOLDER_PATTERN).map(([stack]) => stack);
+if (drifted.length) throw new Error(`APP_FOLDER in src/detect.mjs differs from the apps pattern in the schema (${drifted.join(', ')})`);
 
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(path.join(out, 'private'), { recursive: true });

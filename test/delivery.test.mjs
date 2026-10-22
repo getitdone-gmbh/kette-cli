@@ -4,25 +4,25 @@ import { downloadErrorText, errorFor } from '../src/delivery.mjs';
 
 test('jeder Fehlercode aus dem Vertrag hat einen eigenen Text mit nächstem Schritt', () => {
   const cases = [
-    [400, { error: 'bad_request' }, /ungültiges Format.*kette login erneut/],
-    [401, { error: 'invalid_key' }, /kennen wir nicht/],
-    [403, { error: 'revoked' }, /widerrufen/],
-    [403, { error: 'wrong_offer' }, /anderen Angebot/],
-    [429, { error: 'device_limit', seats: { used: 20, max: 20 } }, /20 von 20 Geräten/],
-    [429, { error: 'rate_limited' }, /Eine Minute warten/],
-    [503, { error: 'unavailable' }, /gerade nicht bereitstellen.*info@itdone\.de.*Community-Edition bleibt nutzbar/],
+    [400, { error: 'bad_request' }, /invalid format.*run kette login again/],
+    [401, { error: 'invalid_key' }, /do not know this license key/],
+    [403, { error: 'revoked' }, /revoked or refunded/],
+    [403, { error: 'wrong_offer' }, /different offer/],
+    [429, { error: 'device_limit', seats: { used: 20, max: 20 } }, /20 of 20 devices/],
+    [429, { error: 'rate_limited' }, /Wait a minute/],
+    [503, { error: 'unavailable' }, /cannot provide the Enterprise bundle right now.*info@itdone\.de.*Community edition keeps working/],
   ];
   for (const [status, body, message] of cases) {
     const err = errorFor(status, body);
     assert.equal(err.code, body.error);
     assert.match(err.message, message);
-    assert.doesNotMatch(err.message, /Unerwartete Antwort/);
+    assert.doesNotMatch(err.message, /Unexpected response/);
   }
-  assert.match(errorFor(500, {}).message, /Unerwartete Antwort vom Lieferdienst \(500\)/);
+  assert.match(errorFor(500, {}).message, /Unexpected response from the delivery service \(500\)/);
 });
 
 test('Download-Fehler nennen Ursache und nächsten Schritt', () => {
-  assert.match(downloadErrorText({ status: 410 }), /abgelaufen.*erneut ausführen/);
-  assert.match(downloadErrorText({ status: 404 }), /ungültig.*erneut ausführen/);
-  assert.match(downloadErrorText({ checksum: true }), /Prüfsumme/);
+  assert.match(downloadErrorText({ status: 410 }), /expired.*run the command again/);
+  assert.match(downloadErrorText({ status: 404 }), /invalid.*Run the command again/);
+  assert.match(downloadErrorText({ checksum: true }), /checksum/);
 });

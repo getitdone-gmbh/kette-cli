@@ -39,7 +39,7 @@ test('eine fremde Scope-Zeile wird erkannt, mit replace auskommentiert und beim 
   assert.deepEqual(foreignScopeLines(dev), ['@getitdone-gmbh:registry=https://npm.pkg.github.com']);
   const replaced = withBlock(dev, REG, T1, { replace: true });
   assert.deepEqual(foreignScopeLines(replaced), [], 'nur noch die Zeile im Block');
-  assert.match(replaced, /^# kette login hat deaktiviert: @getitdone-gmbh:registry=https:\/\/npm\.pkg\.github\.com$/m);
+  assert.match(replaced, /^# disabled by kette login: @getitdone-gmbh:registry=https:\/\/npm\.pkg\.github\.com$/m);
   assert.equal(withoutBlock(replaced), dev);
   assert.deepEqual(foreignScopeLines(withBlock('', REG, T1)), [], 'die Zeile im Block zählt nicht als fremd');
 });
@@ -54,4 +54,10 @@ test('projectScope liest die Scope-Zeile einer Projekt-.npmrc', () => {
   assert.equal(projectScope('@getitdone-gmbh:registry=https://npm.pkg.github.com\n'), 'https://npm.pkg.github.com');
   assert.equal(projectScope('  @getitdone-gmbh:registry = https://npm.kette.itdone.de/  \r\n'), 'https://npm.kette.itdone.de/');
   assert.equal(projectScope('fund=false\n'), null);
+});
+
+test('logout also restores a line commented out by a German version up to 0.5', () => {
+  const dev = '@getitdone-gmbh:registry=https://npm.pkg.github.com\n';
+  const old = `# kette login hat deaktiviert: ${dev}${BLOCK_START}\n@getitdone-gmbh:registry=${REG}\n//npm.kette.itdone.de/:_authToken=${T1}\n${BLOCK_END}\n`;
+  assert.equal(withoutBlock(old), dev);
 });

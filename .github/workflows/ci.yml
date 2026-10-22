@@ -6,38 +6,24 @@ on:
 permissions:
   contents: read
 jobs:
+  # Whole suite on Linux, macOS and Windows with the oldest and the current supported Node; on Windows it also runs install.ps1 against a local mirror
   test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+
+  installer-lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - run: npm test
       - run: sh -n install/install.sh
-
-  # Installer auf Windows gegen ein lokales Testpaket (ohne Regelwerk-Paket, nur CLI)
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Testpaket bauen
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory dist | Out-Null
-          tar -czf dist/kette-cli-test.tgz bin src package.json LICENSE
-          $sum = (Get-FileHash dist/kette-cli-test.tgz -Algorithm SHA256).Hash.ToLower()
-          @{ version = 'test'; cli = @{ version = 'test'; url = 'kette-cli-test.tgz'; sha256 = $sum }; bundles = @{} } | ConvertTo-Json -Depth 4 | Set-Content dist/manifest.json
-      - name: Installer ausführen
-        shell: pwsh
-        run: |
-          $job = Start-Job { Set-Location $using:PWD; python -m http.server 8767 --directory dist }
-          Start-Sleep 3
-          $env:KETTE_MIRROR = 'http://127.0.0.1:8767'
-          ./install/install.ps1
-          & "$HOME\.kette\bin\kette.cmd" version
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          Stop-Job $job
+      - run: shellcheck install/install.sh

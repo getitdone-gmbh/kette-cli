@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { cmdLine } from '../src/claude.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginContents, pluginDetails, pluginsFor, pluginSummary, retiredPlugins } from '../src/editions.mjs';
 import { tmp, write } from './helpers.mjs';
 
@@ -45,10 +46,10 @@ test('Inhalt der Plugins wird aus den Ordnern im Paket gezählt', () => {
   assert.deepEqual(pluginContents(d, 'design-system-agents').commands, ['/feature-loop']);
   assert.equal(pluginContents(d, 'design-review-pack'), null);
   assert.equal(pluginContents(null, 'kette-engineering'), null);
-  assert.equal(pluginSummary(ENTERPRISE, 'kette', d), 'kette-engineering-core@kette (Agent kette-check, Skills architecture-patterns, engineering-rules), kette-engineering@kette (Agent code-reviewer, Skill platform-profile), design-system-agents@kette (4 Agenten, Skill loop-contract, Befehl /feature-loop), design-review-pack@kette');
+  assert.equal(pluginSummary(ENTERPRISE, 'kette', d), 'kette-engineering-core@kette (Agent kette-check, Skills architecture-patterns, engineering-rules), kette-engineering@kette (Agent code-reviewer, Skill platform-profile), design-system-agents@kette (4 Agents, Skill loop-contract, Command /feature-loop), design-review-pack@kette');
   const details = pluginDetails(ENTERPRISE, 'kette', d);
-  assert.deepEqual(details[2], { id: 'design-system-agents@kette', lines: ['Agenten (4): a, b, c, d', 'Skills (1): loop-contract', 'Befehle (1): /feature-loop'] });
-  assert.deepEqual(details[3].lines, ['nicht im Paket enthalten']);
+  assert.deepEqual(details[2], { id: 'design-system-agents@kette', lines: ['Agents (4): a, b, c, d', 'Skills (1): loop-contract', 'Commands (1): /feature-loop'] });
+  assert.deepEqual(details[3].lines, ['not in the bundle']);
 });
 
 test('Profil aus 0.1.0 wird gelesen, ohne das Original zu ändern', () => {
@@ -65,4 +66,12 @@ test('isNewer vergleicht Versionen numerisch', async () => {
   assert.equal(isNewer('0.1.0', '0.2.0'), false);
   assert.equal(isNewer('0.10.0', '0.9.9'), true);
   assert.equal(isNewer('0.2.0', '0.2.0'), false);
+});
+
+test('Windows claude.cmd: arguments quoted for cmd.exe, unsafe ones refused', () => {
+  assert.equal(cmdLine(['plugin', 'install', 'kette-engineering@kette']), 'claude.cmd plugin install kette-engineering@kette');
+  assert.equal(cmdLine(['plugin', 'marketplace', 'add', 'C:\\Users\\Jo Do\\.kette\\bundles\\active']), 'claude.cmd plugin marketplace add "C:\\Users\\Jo Do\\.kette\\bundles\\active"');
+  assert.equal(cmdLine(['plugin', 'marketplace', 'add', 'C:\\%PATH%']), null);
+  assert.equal(cmdLine(['a"b']), null);
+  assert.equal(cmdLine(['plugin', 'marketplace', 'add', 'C:\\Jo Do\\']), null, 'a trailing backslash would escape the closing quote');
 });
