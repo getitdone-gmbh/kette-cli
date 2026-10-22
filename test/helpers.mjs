@@ -10,6 +10,8 @@ export const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kette-test-'));
 // Tests schreiben nie in die echte ~/.npmrc
 process.env.NPM_CONFIG_USERCONFIG = path.join(tmp(), 'user.npmrc');
 delete process.env.npm_config_userconfig;
+// Output assertions expect plain text, even when the shell running the tests forces colors
+delete process.env.FORCE_COLOR;
 export const write = (dir, f, c) => { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); };
 export const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
