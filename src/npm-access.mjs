@@ -175,6 +175,9 @@ const IMPORT_ORDER = [
   'Import the product and area files and swap the libraries.',
 ];
 
+// Plain file names only (docs/install-api.md: ASCII, .fig or .md), so a reply can never write outside the target folder
+const FIGMA_FILE = /^[\w.-]+\.(?:fig|md)$/;
+
 async function downloadChecked(file, target) {
   if (!isSecureUrl(file.url)) throw new DeliveryError('bad_response', `${file.name} has no https download link. Run the command again, if it persists contact support.`);
   const res = await fetch(file.url);
@@ -199,9 +202,14 @@ export async function figma(opts) {
   fs.mkdirSync(dir, { recursive: true });
   console.log(`Figma release ${release.version} (updates until ${dateOf(release.updates_until)}), ${release.files.length} files to ${fileName(dir)}`);
   for (const file of release.files) {
-    const target = path.join(dir, path.basename(file.name));
+    if (!FIGMA_FILE.test(file.name || '')) {
+      console.log(`${WARN} Skipped ${JSON.stringify(file.name)}: not a plain .fig or .md file name`);
+      continue;
+    }
+    const target = path.join(dir, file.name);
+    const replaced = fs.existsSync(target);
     await downloadChecked(file, target);
-    console.log(`  ${file.title} (${file.name}, ${(file.size / 1048576).toFixed(1)} MB)`);
+    console.log(`  ${file.title} (${file.name}, ${(file.size / 1048576).toFixed(1)} MB)${replaced ? ', replaced the existing file' : ''}`);
   }
   console.log('\nImport in Figma (File > Import, keep this order):');
   IMPORT_ORDER.forEach((s, i) => console.log(`  ${i + 1}. ${s}`));

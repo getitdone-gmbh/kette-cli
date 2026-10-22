@@ -15,7 +15,7 @@ const bundle = fakeBundle(V, undefined, checks);
 const token = (c) => `kt_${c.repeat(43)}`;
 const figmaFiles = { 'Design-Tokens.fig': 'tokens-fig', 'zero.fig': 'zero-fig', 'IMPORT.md': '# Import\n' };
 const calls = [];
-const state = { minted: 0, valid: new Set(), ci: [], badFigma: false, registryDown: false, dormant: false };
+const state = { minted: 0, valid: new Set(), ci: [], badFigma: false, hostileFigma: false, registryDown: false, dormant: false };
 let server;
 let registry;
 
@@ -55,7 +55,7 @@ before(async () => {
         version: '2026.11.30',
         updates_until: '2027-10-20T00:00:00Z',
         guide_url: `${server.url}/figma/download/IMPORT.md`,
-        files: Object.entries(figmaFiles).map(([name, c]) => ({ name, title: name, size: c.length, sha256: state.badFigma ? '0'.repeat(64) : sha256(Buffer.from(c)), url: `${server.url}/figma/download/${name}`, expires_at: '2026-10-21T10:15:00Z' })),
+        files: Object.entries({ ...figmaFiles, ...(state.hostileFigma ? { '../evil.fig': 'x', 'run.sh': 'x' } : {}) }).map(([name, c]) => ({ name, title: name, size: c.length, sha256: state.badFigma ? '0'.repeat(64) : sha256(Buffer.from(c)), url: `${server.url}/figma/download/${encodeURIComponent(name)}`, expires_at: '2026-10-21T10:15:00Z' })),
       });
     }
     const fig = url.pathname.match(/^\/figma\/download\/(.+)$/);
@@ -203,6 +203,22 @@ test('figma lädt alle Dateien mit Prüfsumme in den Zielordner und nennt die Im
 
   state.badFigma = true;
   await assert.rejects(run('figma', '--out', path.join(tmp(), 'bad')), /checksum of Design-Tokens\.fig does not match/);
+});
+
+test('figma skips file names with a path or another type and reports replaced files', async () => {
+  await run('login', KEY, '--no-plugins');
+  const base = tmp();
+  const out = path.join(base, 'figma');
+  write(out, 'zero.fig', 'old');
+  state.hostileFigma = true;
+  const r = await run('figma', '--out', out);
+  assert.equal(r.result, 0);
+  assert.match(r.out, /WARN Skipped "\.\.\/evil\.fig": not a plain \.fig or \.md file name/);
+  assert.match(r.out, /WARN Skipped "run\.sh"/);
+  assert.match(r.out, /zero\.fig \(zero\.fig, 0\.0 MB\), replaced the existing file/);
+  assert.doesNotMatch(r.out, /Design-Tokens\.fig \(Design-Tokens\.fig, 0\.0 MB\), replaced/);
+  assert.deepEqual(fs.readdirSync(base), ['figma']);
+  assert.deepEqual(fs.readdirSync(out).sort(), ['Design-Tokens.fig', 'IMPORT.md', 'zero.fig']);
 });
 
 test('add schreibt nur die Scope-Zeile ohne Token in die Projekt-.npmrc und lässt eine vorhandene Zeile stehen', async () => {
