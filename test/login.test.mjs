@@ -105,6 +105,16 @@ test('login mit falscher Prüfsumme installiert nichts', async () => {
   assert.match(out, /FAIL License stored, but the Enterprise bundle is missing\. Load it with: kette update/);
 });
 
+test('login without an argument takes the key from KETTE_LICENSE_KEY', async () => {
+  process.env.KETTE_LICENSE_KEY = KEYS.ok.toLowerCase();
+  try {
+    const { result } = await run('login', '--no-plugins');
+    assert.equal(result, 0);
+  } finally { delete process.env.KETTE_LICENSE_KEY; }
+  assert.equal(requests[0].key, KEYS.ok);
+  assert.deepEqual(JSON.parse(fs.readFileSync(creds(), 'utf8')), { key: KEYS.ok });
+});
+
 test('login lehnt ein falsches Format ab, ohne den Lieferdienst zu fragen', async () => {
   await assert.rejects(run('login', 'CDP-123'), /format CDP-XXXXX/);
   assert.equal(requests.length, 0);

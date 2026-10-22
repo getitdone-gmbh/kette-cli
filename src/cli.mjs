@@ -52,7 +52,8 @@ Commands:
   kette update          Load the latest rulebook
   kette rules [topic]   Show installed rules, with a topic read that rule (--path for file paths)
   kette profile         Show the project profile
-  kette login <key>     Unlock Enterprise (Die Kette): agents, gates, platform profiles, checks
+  kette login [key]     Unlock Enterprise (Die Kette): agents, gates, platform profiles, checks
+                        Without key: from KETTE_LICENSE_KEY, otherwise a hidden prompt
   kette logout          Remove license key, Enterprise bundle and npm access from this machine
   kette token ci create <name> | list | revoke <id>
                         CI tokens for npm ci in pipelines (Solo 2, Team 5, no device seat)

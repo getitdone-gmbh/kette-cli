@@ -6,6 +6,7 @@ import { DownloadError, fetchManifest, installEntry, installedBundle, readState,
 import { editionHints, hasClaude, installEdition, pluginId, uninstallPlugin } from './claude.mjs';
 import { bundlesDir, credentialsFile, delivery } from './paths.mjs';
 import { ensureNpm, setupNpm, teardownNpm } from './npm-access.mjs';
+import { askSecret } from './prompt.mjs';
 import { cmd, isoDate, status } from './out.mjs';
 
 export const formatDate = (iso) => isoDate(iso, 'unknown');
@@ -49,8 +50,10 @@ function plugins(dir, opts) {
   for (const l of editionHints(r, link)) console.log(l);
 }
 
+// Key from the argument, KETTE_LICENSE_KEY or a hidden prompt, so it does not have to land in the shell history
 export async function login(rawKey, opts, cli) {
-  const key = (rawKey || '').trim().toUpperCase();
+  const given = rawKey || process.env.KETTE_LICENSE_KEY || (await askSecret('License key (input hidden)'));
+  const key = given.trim().toUpperCase();
   if (!KEY_PATTERN.test(key)) throw new Error('Enter the license key in the format CDP-XXXXX-XXXXX-XXXXX-XXXXX, e.g. kette login CDP-AB12C-...');
   console.log(`Checking license with ${delivery()} ...`);
   const g = await grant(key, cli);
