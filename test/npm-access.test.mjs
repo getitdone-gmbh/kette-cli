@@ -90,7 +90,7 @@ test('login richtet den npm-Zugang als Block mit Rechten 600 ein, nach dem Regis
   write(path.dirname(userrc), 'user.npmrc', 'save-exact=true\n');
   const { result, out } = await run('login', KEY, '--no-plugins');
   assert.equal(result, 0);
-  assert.match(out, /npm-Zugang eingerichtet: @getitdone-gmbh über 127\.0\.0\.1:\d+/);
+  assert.match(out, /npm access set up: @getitdone-gmbh via 127\.0\.0\.1:\d+/);
   const host = registry.replace('http:', '');
   assert.equal(rc(), `save-exact=true\n\n${BLOCK_START}\n@getitdone-gmbh:registry=${registry}\n${host}:_authToken=${token('a')}\n# <<< kette\n`);
   if (process.platform !== 'win32') assert.equal(fs.statSync(userrc).mode & 0o777, 0o600);
@@ -105,13 +105,13 @@ test('eine fremde @getitdone-gmbh-Zeile bleibt unangetastet, --npm-replace stell
   const dev = '@getitdone-gmbh:registry=https://npm.pkg.github.com\n';
   write(path.dirname(userrc), 'user.npmrc', dev);
   const { out } = await run('login', KEY, '--no-plugins');
-  assert.match(out, /enthält schon @getitdone-gmbh:registry=https:\/\/npm\.pkg\.github\.com.*bleibt unverändert/s);
+  assert.match(out, /already contains @getitdone-gmbh:registry=https:\/\/npm\.pkg\.github\.com.*stays unchanged/s);
   assert.match(out, /--npm-replace/);
   assert.equal(rc(), dev);
   assert.ok(!calls.some((c) => c.path === '/registry/token'), 'kein Token ohne Ziel');
 
   await run('login', KEY, '--no-plugins', '--npm-replace');
-  assert.match(rc(), /^# kette login hat deaktiviert: @getitdone-gmbh/m);
+  assert.match(rc(), /^# disabled by kette login: @getitdone-gmbh/m);
   await run('logout', '--no-plugins');
   assert.equal(rc(), dev);
 });
@@ -120,7 +120,7 @@ test('logout widerruft den Token und entfernt nur den Block, eine nur von kette 
   write(path.dirname(userrc), 'user.npmrc', 'fund=false\r\n');
   await run('login', KEY, '--no-plugins');
   const { out } = await run('logout', '--no-plugins');
-  assert.match(out, /npm-Zugang entfernt/);
+  assert.match(out, /npm access removed/);
   assert.equal(rc(), 'fund=false\r\n');
   assert.deepEqual(calls.at(-1).body, { key: KEY, device: fs.readFileSync(path.join(kh, 'device-id'), 'utf8').trim() });
   assert.equal(calls.at(-1).path, '/registry/token/revoke');
@@ -136,7 +136,7 @@ test('logout ohne Netz entfernt den Block trotzdem', async () => {
   process.env.KETTE_DELIVERY = 'http://127.0.0.1:1';
   try {
     const { out } = await run('logout', '--no-plugins');
-    assert.match(out, /npm-Token nicht widerrufen.*Block wird trotzdem entfernt/s);
+    assert.match(out, /npm token not revoked.*block is removed anyway/s);
     assert.equal(fs.existsSync(userrc), false);
   } finally {
     process.env.KETTE_DELIVERY = server.url;
@@ -144,46 +144,46 @@ test('logout ohne Netz entfernt den Block trotzdem', async () => {
 });
 
 test('--no-npm überspringt den Schritt, ein Fehler des Lieferdienstes bricht den Login nicht ab, update holt ihn nach', async () => {
-  assert.match((await run('login', KEY, '--no-plugins', '--no-npm')).out, /npm-Zugang übersprungen/);
+  assert.match((await run('login', KEY, '--no-plugins', '--no-npm')).out, /npm access skipped/);
   assert.equal(fs.existsSync(userrc), false);
   state.registryDown = true;
   const down = await run('login', KEY, '--no-plugins');
   assert.equal(down.result, 0);
-  assert.match(down.out, /npm-Zugang nicht eingerichtet: Der Lieferdienst kann.*kette update/s);
+  assert.match(down.out, /npm access not set up: The delivery service cannot.*kette update/s);
   state.registryDown = false;
-  assert.match((await run('update', '--no-plugins')).out, /npm-Zugang fehlt, richte ihn ein/);
+  assert.match((await run('update', '--no-plugins')).out, /npm access missing, setting it up/);
   assert.equal(state.valid.size, 1);
 });
 
 test('update stellt ein neues Token aus, wenn die Registry das alte ablehnt, und lässt ein gültiges in Ruhe', async () => {
   await run('login', KEY, '--no-plugins');
-  assert.doesNotMatch((await run('update', '--no-plugins')).out, /npm-/);
+  assert.doesNotMatch((await run('update', '--no-plugins')).out, /npm /);
   state.valid.clear();
   const { out } = await run('update', '--no-plugins');
-  assert.match(out, /npm-Token wird nicht mehr angenommen, stelle ein neues aus/);
+  assert.match(out, /npm token no longer accepted, issuing a new one/);
   assert.match(rc(), new RegExp(token('b')));
 });
 
 test('token ci create, list und revoke', async () => {
   await run('login', KEY, '--no-plugins');
   const created = await run('token', 'ci', 'create', 'GitHub Actions');
-  assert.match(created.out, new RegExp(`Es wird nur jetzt angezeigt:\\n\\n  ${token('Z')}`));
+  assert.match(created.out, new RegExp(`It is shown only now:\\n\\n  ${token('Z')}`));
   assert.match(created.out, /registry-url: http:\/\/127\.0\.0\.1:\d+\/, scope: '@getitdone-gmbh'/);
   assert.match(created.out, /NODE_AUTH_TOKEN: \$\{\{ secrets\.KETTE_NPM_TOKEN \}\}/);
   assert.match(created.out, /npm config set \/\/127\.0\.0\.1:\d+\/:_authToken "\$KETTE_NPM_TOKEN"/);
   await run('token', 'ci', 'create', 'gitlab');
-  await assert.rejects(run('token', 'ci', 'create', 'third'), /2 von 2 CI-Tokens.*kette token ci revoke/);
+  await assert.rejects(run('token', 'ci', 'create', 'third'), /2 of 2 CI tokens.*kette token ci revoke/);
   const list = await run('token', 'ci', 'list');
-  assert.match(list.out, /CI-Tokens: 2 von 2/);
+  assert.match(list.out, /CI tokens: 2 of 2/);
   assert.ok(!list.out.includes(token('Z')));
-  assert.match((await run('token', 'ci', 'revoke', state.ci[0].id)).out, /widerrufen/);
-  assert.match((await run('token', 'ci', 'revoke', '00000000-0000-4000-8000-000000000009')).out, /Kein aktives CI-Token/);
+  assert.match((await run('token', 'ci', 'revoke', state.ci[0].id)).out, /revoked/);
+  assert.match((await run('token', 'ci', 'revoke', '00000000-0000-4000-8000-000000000009')).out, /No active CI token/);
   await assert.rejects(run('token', 'npm', 'list'), /kette token ci/);
 });
 
 test('token ci und figma verlangen einen Login', async () => {
-  await assert.rejects(run('token', 'ci', 'list'), /Nicht angemeldet/);
-  await assert.rejects(run('figma'), /Nicht angemeldet/);
+  await assert.rejects(run('token', 'ci', 'list'), /Not signed in/);
+  await assert.rejects(run('figma'), /Not signed in/);
 });
 
 test('figma lädt alle Dateien mit Prüfsumme in den Zielordner und nennt die Import-Reihenfolge', async () => {
@@ -193,16 +193,16 @@ test('figma lädt alle Dateien mit Prüfsumme in den Zielordner und nennt die Im
   assert.equal(r.result, 0);
   assert.deepEqual(fs.readdirSync(out).sort(), ['Design-Tokens.fig', 'IMPORT.md', 'zero.fig']);
   assert.equal(fs.readFileSync(path.join(out, 'zero.fig'), 'utf8'), 'zero-fig');
-  assert.match(r.out, /Figma-Release 2026\.11\.30/);
-  assert.match(r.out, /1\. Design-Tokens\.fig importieren.*2\. GetITDone-Basic\.fig.*3\. zero\.fig/s);
-  assert.match(r.out, /Professional oder höher/);
+  assert.match(r.out, /Figma release 2026\.11\.30/);
+  assert.match(r.out, /1\. Import Design-Tokens\.fig.*2\. Import GetITDone-Basic\.fig.*3\. Import zero\.fig/s);
+  assert.match(r.out, /Professional or higher/);
 
   const project = tmp();
   await inDir(project, () => run('figma'));
   assert.ok(fs.existsSync(path.join(project, 'kette-figma-2026.11.30', 'IMPORT.md')), 'ohne --out ein Ordner mit der Version');
 
   state.badFigma = true;
-  await assert.rejects(run('figma', '--out', path.join(tmp(), 'bad')), /Prüfsumme von Design-Tokens\.fig stimmt nicht/);
+  await assert.rejects(run('figma', '--out', path.join(tmp(), 'bad')), /checksum of Design-Tokens\.fig does not match/);
 });
 
 test('add schreibt nur die Scope-Zeile ohne Token in die Projekt-.npmrc und lässt eine vorhandene Zeile stehen', async () => {
@@ -218,7 +218,7 @@ test('add schreibt nur die Scope-Zeile ohne Token in die Projekt-.npmrc und läs
   await inDir(dev, () => run('add', '--yes', '--no-plugins', '--stack', 'nextjs-ts-tailwind', '--platform', 'github-docker', '--patterns', 'modular-monolith'));
   assert.equal(fs.readFileSync(path.join(dev, '.npmrc'), 'utf8'), '@getitdone-gmbh:registry=https://npm.pkg.github.com\n');
   const { out } = await inDir(dev, () => run('doctor', '--ci'));
-  assert.match(out, /HINW  \.npmrc im Projekt zeigt @getitdone-gmbh auf npm\.pkg\.github\.com/);
+  assert.match(out, /WARN \.npmrc in the project points @getitdone-gmbh to npm\.pkg\.github\.com/);
 });
 
 test('doctor prüft Block und Token und findet einen Token in einer Datei im Git', async () => {
@@ -229,16 +229,16 @@ test('doctor prüft Block und Token und findet einen Token in einer Datei im Git
   execFileSync('git', ['-C', project, 'init', '-q']);
   execFileSync('git', ['-C', project, 'add', '.']);
   let { out } = await inDir(project, () => run('doctor'));
-  assert.match(out, /OK {4}npm-Zugang in /);
-  assert.match(out, /OK {4}npm-Token gültig/);
-  assert.match(out, /OK {4}kein npm-Token in Dateien im Git/);
+  assert.match(out, /OK {3}npm access in /);
+  assert.match(out, /OK {3}npm token valid/);
+  assert.match(out, /OK {3}no npm token in files tracked by git/);
 
   write(project, 'ci/.npmrc', `//npm.kette.itdone.de/:_authToken=${token('q')}\n`);
   execFileSync('git', ['-C', project, 'add', '.']);
   state.valid.clear();
   ({ out } = await inDir(project, () => run('doctor')));
-  assert.match(out, /FEHLT npm-Token gültig \(Antwort 401, neu ausstellen mit: kette update\)/);
-  assert.match(out, /FEHLT npm-Token in Dateien im Git: ci\/\.npmrc/);
+  assert.match(out, /FAIL npm token valid \(response 401, issue a new one with: kette update\)/);
+  assert.match(out, /FAIL npm token in files tracked by git: ci\/\.npmrc/);
 });
 
 test('Registry noch nicht eingerichtet: login gelingt mit einer Zeile, kein npmrc-Block, keine Projekt-Zeile, update und logout bleiben still', async () => {
@@ -246,8 +246,8 @@ test('Registry noch nicht eingerichtet: login gelingt mit einer Zeile, kein npmr
   write(path.dirname(userrc), 'user.npmrc', 'save-exact=true\n');
   const { result, out } = await run('login', KEY, '--no-plugins');
   assert.equal(result, 0);
-  assert.equal(out.split('\n').filter((l) => /npm/i.test(l)).join('\n'), 'npm-Paketzugang folgt mit dem Update bis 30.11.2026');
-  assert.match(out, /Angemeldet: .*Updates bis/);
+  assert.equal(out.split('\n').filter((l) => /npm/i.test(l)).join('\n'), 'npm access is not available right now. Try again later with kette update.');
+  assert.match(out, /Signed in: .*updates until/);
   assert.equal(rc(), 'save-exact=true\n', 'kein Block in der Benutzer-npmrc');
 
   const project = tmp();
@@ -255,11 +255,11 @@ test('Registry noch nicht eingerichtet: login gelingt mit einer Zeile, kein npmr
   await inDir(project, () => run('add', '--yes', '--no-plugins', '--stack', 'nextjs-ts-tailwind', '--platform', 'github-docker', '--patterns', 'modular-monolith'));
   assert.equal(fs.existsSync(path.join(project, '.npmrc')), false, 'keine Scope-Zeile auf eine Registry, die noch nicht antwortet');
   const doctor = await inDir(project, () => run('doctor', '--ci'));
-  assert.match(doctor.out, /OK {4}npm-Paketzugang folgt mit dem Update bis 30\.11\.2026/);
+  assert.match(doctor.out, /WARN npm access is not available right now\. Try again later with kette update\./);
 
   const update = await run('update', '--no-plugins');
   assert.equal(update.result, 0);
-  assert.equal(update.out.split('\n').filter((l) => /npm/i.test(l)).join('\n'), 'npm-Paketzugang folgt mit dem Update bis 30.11.2026');
+  assert.equal(update.out.split('\n').filter((l) => /npm/i.test(l)).join('\n'), 'npm access is not available right now. Try again later with kette update.');
   assert.equal(rc(), 'save-exact=true\n');
 
   const logout = await run('logout', '--no-plugins');
@@ -271,7 +271,7 @@ test('Registry später eingerichtet: update richtet den Block ein, add schreibt 
   state.dormant = true;
   await run('login', KEY, '--no-plugins');
   state.dormant = false;
-  assert.match((await run('update', '--no-plugins')).out, /npm-Zugang eingerichtet/);
+  assert.match((await run('update', '--no-plugins')).out, /npm access set up/);
   assert.match(rc(), new RegExp(token('a')));
   const project = tmp();
   write(project, 'package.json', '{}');
@@ -285,7 +285,7 @@ test('Figma noch nicht eingerichtet: kette figma nennt das Update und lädt nich
   const out = path.join(tmp(), 'figma');
   const r = await run('figma', '--out', out);
   assert.equal(r.result, 0);
-  assert.equal(r.out, 'Figma-Dateien folgen mit dem Update bis 30.11.2026');
+  assert.equal(r.out, 'Figma files are not available right now. Try again later with kette figma.');
   assert.equal(fs.existsSync(out), false);
-  await assert.rejects(run('token', 'ci', 'list'), /npm-Paketzugang folgt mit dem Update bis 30\.11\.2026/);
+  await assert.rejects(run('token', 'ci', 'list'), /npm access is not available right now\. Try again later with kette update\./);
 });

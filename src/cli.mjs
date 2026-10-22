@@ -11,34 +11,35 @@ import { activeBundleLink, credentialsFile, delivery, home, mirror } from './pat
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins, isNewer } from './editions.mjs';
 import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
-import { credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
+import { credentialsStatus, formatDate, loginState, login, logout, newCliHint, tierOf, updateEnterprise } from './enterprise.mjs';
 import { SCOPE } from './npmrc.mjs';
 import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
+import { cmd, file, status } from './out.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const STACKS = [
   { value: 'nextjs-ts-tailwind', label: 'Next.js + TypeScript + Tailwind (Web)' },
-  { value: 'nestjs-prisma', label: 'NestJS + Prisma (Backend, relationale Daten)' },
-  { value: 'nestjs-mongoose', label: 'NestJS + Mongoose (Backend, Dokumente)' },
+  { value: 'nestjs-prisma', label: 'NestJS + Prisma (backend, relational data)' },
+  { value: 'nestjs-mongoose', label: 'NestJS + Mongoose (backend, documents)' },
   { value: 'python-fastapi', label: 'Python + FastAPI' },
-  { value: 'react-native-expo', label: 'React Native + Expo (Mobile)' },
+  { value: 'react-native-expo', label: 'React Native + Expo (mobile)' },
 ];
 const PLATFORMS = [
-  { value: 'github-docker', label: 'GitHub + Docker auf eigenem Server' },
+  { value: 'github-docker', label: 'GitHub + Docker on your own server' },
   { value: 'aws-github', label: 'AWS + GitHub' },
   { value: 'azure-devops', label: 'Azure + Azure DevOps' },
   { value: 'gitlab', label: 'GitLab' },
-  { value: 'oss-selfhosted', label: 'Open Source auf eigenen Servern' },
+  { value: 'oss-selfhosted', label: 'Open source on your own servers' },
 ];
 const PATTERNS = [
-  { value: 'modular-monolith', label: 'Modularer Monolith (Standard)' },
-  { value: 'layered', label: 'Schichten' },
-  { value: 'hexagonal', label: 'Ports und Adapter' },
-  { value: 'event-driven', label: 'Ereignisgesteuert mit Outbox' },
+  { value: 'modular-monolith', label: 'Modular monolith (default)' },
+  { value: 'layered', label: 'Layered' },
+  { value: 'hexagonal', label: 'Ports and adapters' },
+  { value: 'event-driven', label: 'Event-driven with outbox' },
   { value: 'cqrs', label: 'CQRS' },
   { value: 'bff', label: 'Backend for Frontend' },
-  { value: 'multi-tenant', label: 'Mandantenfähigkeit' },
+  { value: 'multi-tenant', label: 'Multi-tenancy' },
 ];
 
 // github-docker: Vorlage im Paket -> Ziel im Projekt
@@ -61,35 +62,35 @@ const CHECK_FILES = [
   ['gitleaks.toml', '.gitleaks.toml'],
 ];
 
-const HELP = `kette ${VERSION} · Regelwerk und Agenten der Kette einrichten
+const HELP = `kette ${VERSION} · set up the rules and agents of Die Kette
 
-Befehle:
-  kette init [ordner]   Neues Projekt mit Profil, Regeln und Agenten anlegen
-  kette add             Bestehendes Repo an die Kette anbinden (erkennt Stack und Plattform)
-  kette doctor          Projekt und Einrichtung prüfen (--ci für Pipelines)
-  kette update          Neueste Version des Regelwerks laden
-  kette rules [thema]   Installierte Regeln zeigen, mit Thema die Regel lesen (--path für Dateipfade)
-  kette profile         Projektprofil anzeigen
-  kette login <key>     Enterprise (Die Kette) freischalten: Agenten, Gates, Plattform-Profile, Prüfungen
-  kette logout          Lizenzschlüssel, Enterprise-Paket und npm-Zugang von diesem Rechner entfernen
+Commands:
+  kette init [folder]   Create a new project with profile, rules and agents
+  kette add             Connect an existing repo (detects stack and platform)
+  kette doctor          Check the project and setup (--ci for pipelines)
+  kette update          Load the latest rulebook
+  kette rules [topic]   Show installed rules, with a topic read that rule (--path for file paths)
+  kette profile         Show the project profile
+  kette login <key>     Unlock Enterprise (Die Kette): agents, gates, platform profiles, checks
+  kette logout          Remove license key, Enterprise bundle and npm access from this machine
   kette token ci create <name> | list | revoke <id>
-                        CI-Tokens für npm ci in Pipelines (Solo 2, Team 5, belegen kein Gerät)
-  kette figma           Aktuelles Figma-Release der Kette laden (--out ordner)
+                        CI tokens for npm ci in pipelines (Solo 2, Team 5, no device seat)
+  kette figma           Download the current Figma release of Die Kette (--out folder)
   kette version
 
-Optionen:
-  --dry-run             Nur zeigen, nichts schreiben
-  --yes                 Keine Rückfragen, Standardwerte oder Angaben aus den Optionen nutzen
-  --stack a,b           Stacks festlegen
-  --platform id         Plattform festlegen
-  --patterns a,b        Muster festlegen
-  --no-plugins          Claude-Code-Plugins nicht installieren
-  --path                Bei kette rules die Dateipfade statt des Inhalts zeigen
-  --no-npm              Bei kette login und update den npm-Zugang nicht einrichten
-  --npm-replace         Eine vorhandene @getitdone-gmbh-Zeile in ~/.npmrc auskommentieren und die Kette eintragen
-  --out ordner          Zielordner für kette figma
+Options:
+  --dry-run             Show the plan, write nothing
+  --yes                 No questions, use defaults or the values from the options
+  --stack a,b           Set stacks
+  --platform id         Set platform
+  --patterns a,b        Set patterns
+  --no-plugins          Do not install Claude Code plugins
+  --path                With kette rules, show file paths instead of content
+  --no-npm              With kette login and update, do not set up npm access
+  --npm-replace         Comment out an existing @getitdone-gmbh line in ~/.npmrc and use Die Kette
+  --out folder          Target folder for kette figma
 
-Der Installer legt nie Cloud-Ressourcen an und deployt nichts. Infrastruktur entsteht als Code im Repo.`;
+The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.`;
 
 function parse(argv) {
   const opts = { _: [] };
@@ -114,7 +115,7 @@ const listArg = (s) => (s ? s.split(',').map((x) => x.trim()).filter(Boolean) : 
 async function ensureBundle(tier) {
   const have = installedBundle(tier);
   if (have) return have.dir;
-  console.log(`Lade Regelwerk (${editionLabel(tier)}) von ${mirror()} ...`);
+  console.log(`Loading rulebook (${editionLabel(tier)}) from ${mirror()} ...`);
   return installBundle(await fetchManifest(), tier);
 }
 
@@ -130,13 +131,13 @@ async function buildProfile(root, opts, detected) {
   if (!opts.yes) {
     if (!listArg(opts.stack)) {
       const def = stack.length ? stack.map((s) => STACKS.findIndex((x) => x.value === s) + 1).join(',') : '1,2';
-      stack = await choose('Welche Stacks nutzt das Projekt?', STACKS, def);
+      stack = await choose('Which stacks does the project use?', STACKS, def);
     }
     if (!opts.platform) {
       const def = String((PLATFORMS.findIndex((x) => x.value === platform) + 1) || 1);
-      [platform] = await choose('Wo wird gebaut und betrieben?', PLATFORMS, def);
+      [platform] = await choose('Where is it built and run?', PLATFORMS, def);
     }
-    if (!patterns) patterns = await choose('Welche Architektur-Muster? (im Zweifel 1)', PATTERNS, '1');
+    if (!patterns) patterns = await choose('Which architecture patterns? (if unsure, 1)', PATTERNS, '1');
   }
   return {
     $schema: 'https://kette.itdone.de/schema/profile.schema.json',
@@ -180,20 +181,20 @@ function planFor(root, profile, bundleDir, tier, noteTier) {
   const plan = [
     { path: '.kette/profile.json', mode: 'renew', content: JSON.stringify(profile, null, 2) + '\n', renew: (current) => raiseTier(current, noteTier) },
     noteItem(noteTier),
-    { path: 'CLAUDE.md', mode: 'append', marker: '@.kette/README.md', content: '@.kette/README.md\n', note: 'Verweis auf die Kette-Regeln' },
+    { path: 'CLAUDE.md', mode: 'append', marker: '@.kette/README.md', content: '@.kette/README.md\n', note: 'points to the Die Kette rules' },
     { path: 'docs/adr/0000-vorlage.md', content: fs.readFileSync(path.join(bundleDir, 'rules', 'architecture', 'adr-vorlage.md'), 'utf8') },
   ];
   if (tier === ENTERPRISE) {
     // nur die Scope-Zeile, nie ein Token: die Datei darf ins Repo, der Token kommt aus ~/.npmrc oder dem CI-Secret;
     // ohne npm-Zugang keine Zeile, sonst zeigt das Projekt auf eine Registry, die noch nicht antwortet
-    if (npmGranted()) plan.push({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'Design-System-Pakete über die Kette, ohne Token' });
+    if (npmGranted()) plan.push({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'design system packages via Die Kette, no token' });
     const tpl = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'templates');
     for (const [from, to] of PLATFORM_FILES[profile.platform.id] || []) {
       const src = path.join(tpl, from);
-      if (fs.existsSync(src)) plan.push({ path: to, content: fs.readFileSync(src, 'utf8'), note: 'Vorlage, Platzhalter OWNER/REPO und app anpassen' });
+      if (fs.existsSync(src)) plan.push({ path: to, content: fs.readFileSync(src, 'utf8'), note: 'template, adjust placeholders OWNER/REPO and app' });
     }
     for (const [from, to] of CHECK_FILES) {
-      plan.push({ path: to, content: fs.readFileSync(path.join(bundleDir, 'checks', from), 'utf8'), note: 'Prüfung' });
+      plan.push({ path: to, content: fs.readFileSync(path.join(bundleDir, 'checks', from), 'utf8'), note: 'check' });
     }
   }
   return plan;
@@ -210,25 +211,25 @@ async function setup(root, opts, isNew) {
   const bundleDir = await ensureBundle(tier);
   if (isNew) fs.mkdirSync(root, { recursive: true });
   const detected = isNew ? { stack: [], platform: null } : { stack: detectStack(root), platform: detectPlatform(root) };
-  if (!isNew) console.log(`Erkannt: Stack ${detected.stack.join(', ') || 'keiner'}, Plattform ${detected.platform || 'keine'}`);
+  if (!isNew) console.log(`Detected: stack ${detected.stack.join(', ') || 'none'}, platform ${detected.platform || 'none'}`);
   const profile = await buildProfile(root, opts, detected);
   const errors = validate(loadSchema(bundleDir), profile);
-  if (errors.length) throw new Error(`Profil ungültig: ${errors.join('; ')}`);
+  if (errors.length) throw new Error(`Invalid profile: ${errors.join('; ')}`);
 
   const described = describe(planFor(root, profile, bundleDir, tier, projectTier(root, tier)), root);
-  console.log(`\n${opts.dryRun ? 'Würde anlegen' : 'Plan'} in ${path.resolve(root)} (Edition ${editionLabel(tier)}):`);
+  console.log(`\n${opts.dryRun ? 'Would create' : 'Plan'} in ${file(path.resolve(root))} (edition ${editionLabel(tier)}):`);
   print(described);
   const stale = staleNote(described);
   if (stale) console.log(stale);
-  if (tier === COMMUNITY) console.log('\n  Agenten, Gates mit Code-Reviewer, Plattform-Vorlagen und Prüfungen gibt es in der Edition Enterprise (Die Kette): kette login <key>');
-  else if (!PLATFORM_FILES[profile.platform.id]) console.log(`\n  Für ${profile.platform.id} gibt es noch keine Vorlagen (Status: ${platformStatus(bundleDir, profile.platform.id) || 'unbekannt'}).`);
+  if (tier === COMMUNITY) console.log(`\n  Agents, gates with code reviewer, platform templates and checks come with the Enterprise edition (Die Kette): ${cmd('kette login <key>')}`);
+  else if (!PLATFORM_FILES[profile.platform.id]) console.log(`\n  No templates for ${profile.platform.id} yet (status: ${platformStatus(bundleDir, profile.platform.id) || 'unknown'}).`);
   if (opts.dryRun) return 0;
-  if (!(await confirm('\nSo anlegen?', opts.yes))) { console.log('Abgebrochen, nichts geschrieben.'); return 1; }
+  if (!(await confirm('\nCreate these files?', opts.yes))) { console.log('Cancelled, nothing written.'); return 1; }
 
   if (isNew && !fs.existsSync(path.join(root, '.git'))) spawnSync('git', ['init', '-q', root]);
   apply(described, root);
 
-  let plugins = { ok: false, reason: 'mit --no-plugins übersprungen' };
+  let plugins = { ok: false, reason: 'skipped with --no-plugins' };
   let rulesDir = bundleDir;
   if (!opts.noPlugins) {
     rulesDir = setActiveBundle(bundleDir);
@@ -244,22 +245,23 @@ const otherEditionPlugins = (tier) => retiredPlugins(tier === ENTERPRISE ? COMMU
 // Hinweis, wenn eine vorhandene .kette/README.md keinen Kette-Block hat; sie wird dann nicht angefasst
 function staleNote(described) {
   if (!described.find((d) => d.path === NOTE_PATH)?.unmarked) return null;
-  return `  ${NOTE_PATH} hat keinen Kette-Block und bleibt unverändert. Neu erzeugen: eigene Notizen sichern, Datei löschen und kette add erneut ausführen.`;
+  return `  ${file(NOTE_PATH)} has no kette block and stays unchanged. To regenerate it, save your own notes, delete the file and run ${cmd('kette add')} again.`;
 }
 
 // Kurzer Abschluss: was im Projekt entstand, was auf dem Rechner aktiv ist, wie es weitergeht
 function summary(described, tier, pluginsOk, rulesDir) {
-  const label = { ergänzen: ' (ergänzt)', erneuern: ' (erneuert)' };
-  const changed = described.filter((d) => d.action !== 'vorhanden').map((d) => `${d.path}${label[d.action] || ''}`);
-  const steps = ['kette doctor', 'Claude Code im Projekt öffnen und fragen: "Prüfe diesen Code gegen die Kette-Regeln"'];
-  if (tier === COMMUNITY) steps.push('kette login <key> für Agenten, Gates, Profile und Prüfungen (Enterprise)');
-  else steps.push('Ein ganzes Feature mit allen Rollen und Gates: /feature-loop start <Feature>');
+  const label = { append: ' (appended)', update: ' (updated)' };
+  const changed = described.filter((d) => d.action !== 'keep').map((d) => `${file(d.path)}${label[d.action] || ''}`);
+  const steps = [cmd('kette doctor'), 'Open Claude Code in the project and ask: "Check this code against the Die Kette rules"'];
+  if (tier === COMMUNITY) steps.push(`${cmd('kette login <key>')} for agents, gates, profiles and checks (Enterprise)`);
+  else steps.push(`A whole feature with all roles and gates: ${cmd('/feature-loop start <feature>')}`);
+  const plugins = pluginSummary(tier, MARKETPLACE, rulesDir);
   return [
     '',
-    `Fertig. Im Projekt: ${changed.length ? changed.join(', ') : 'nichts geändert, alles schon vorhanden'}`,
-    pluginsOk ? `Aktiv in Claude Code: ${pluginSummary(tier, MARKETPLACE, rulesDir)}` : `In Claude Code noch nicht aktiv (Plugins: ${pluginSummary(tier, MARKETPLACE, rulesDir)})`,
-    `Regelwerk auf diesem Rechner: ${tilde(rulesDir)}, ansehen mit: kette rules`,
-    'Nächste Schritte:',
+    `Done. In the project: ${changed.length ? changed.join(', ') : 'nothing changed, everything already in place'}`,
+    pluginsOk ? `Active in Claude Code: ${plugins}` : `Not active in Claude Code yet (plugins: ${plugins})`,
+    `Rulebook on this machine: ${file(tilde(rulesDir))}, browse with: ${cmd('kette rules')}`,
+    'Next steps:',
     ...steps.map((s, i) => `  ${i + 1}. ${s}`),
   ].join('\n');
 }
@@ -270,72 +272,75 @@ function readProfile(root) {
   return JSON.parse(fs.readFileSync(f, 'utf8'));
 }
 
-function tool(cmd, args = ['--version']) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8' });
+function tool(bin, args = ['--version']) {
+  const r = spawnSync(bin, args, { encoding: 'utf8' });
   return r.status === 0 ? (r.stdout || r.stderr).trim().split('\n')[0] : null;
 }
 
 async function doctor(root, opts) {
   let problems = 0;
-  const line = (ok, msg) => { console.log(`${ok ? 'OK   ' : 'FEHLT'} ${msg}`); if (!ok) problems++; };
-  const warn = (msg) => console.log(`HINW  ${msg}`);
-  line(Number(process.versions.node.split('.')[0]) >= 20, `Node ${process.versions.node} (mindestens 20)`);
-  line(Boolean(tool('git')), 'git vorhanden');
+  const line = (ok, msg) => { console.log(`${ok ? status('ok', 'OK  ') : status('fail', 'FAIL')} ${msg}`); if (!ok) problems++; };
+  const warn = (msg) => console.log(`${status('warn', 'WARN')} ${msg}`);
+  const info = (msg) => console.log(`${status('info', 'INFO')} ${msg}`);
+  line(Number(process.versions.node.split('.')[0]) >= 20, `Node ${process.versions.node} (20 or newer)`);
+  line(Boolean(tool('git')), 'git found');
   if (!opts.ci) {
     const claude = hasClaude();
-    if (claude) line(true, 'Claude Code vorhanden');
-    else warn('Claude Code nicht gefunden, Agenten und Plugins brauchen es');
+    if (claude) line(true, 'Claude Code found');
+    else warn('Claude Code not found, agents and plugins need it');
   }
   const tier = tierOf();
   const bundle = installedBundle(tier);
   edition(tier, { line, warn });
-  line(Boolean(bundle), `Regelwerk installiert (${editionLabel(tier)}${bundle ? `, Version ${bundle.version}` : ''})`);
-  if (bundle) console.log(`INFO  Regelwerk und Plugins liegen in ${tilde(fs.existsSync(activeBundleLink()) ? activeBundleLink() : bundle.dir)}`);
+  line(Boolean(bundle), `Rulebook installed (${editionLabel(tier)}${bundle ? `, version ${bundle.version}` : ''})`);
+  if (bundle) info(`Rulebook and plugins live in ${file(tilde(fs.existsSync(activeBundleLink()) ? activeBundleLink() : bundle.dir))}`);
   const raw = readProfile(root);
   const profile = normalizeProfile(raw);
-  line(Boolean(profile), '.kette/profile.json vorhanden');
-  if (raw && isLegacyTier(raw.tier)) warn(`Profil nutzt den alten Wert tier "${raw.tier}", gelesen als "${profile.tier}". In .kette/profile.json auf "${profile.tier}" ändern.`);
+  line(Boolean(profile), '.kette/profile.json present');
+  if (raw && isLegacyTier(raw.tier)) warn(`Profile uses the old value tier "${raw.tier}", read as "${profile.tier}". Change it to "${profile.tier}" in .kette/profile.json.`);
   if (profile && bundle) {
     const errs = validate(loadSchema(bundle.dir), profile);
-    line(errs.length === 0, `Profil gültig${errs.length ? `: ${errs.join('; ')}` : ''}`);
-    const status = platformStatus(bundle.dir, profile.platform?.id);
-    if (status === 'vorschau') warn(`Plattform ${profile.platform.id} ist noch Vorschau (ohne belegtes Referenzprojekt)`);
-    if (profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn('Profil verlangt die Edition Enterprise (Die Kette), hier ist nur Community installiert. Agenten, Gates, /feature-loop, Plattform-Profile und Prüfungen aus .kette/README.md fehlen. Freischalten mit: kette login <key>');
-    if (profile.tier !== ENTERPRISE && tier === ENTERPRISE) warn('Hier ist Enterprise (Die Kette) installiert, das Projekt steht auf Community. Ablauf mit Agenten und Gates übernehmen: kette add');
-    for (const o of profile.overlays || []) warn(`Overlay ${o.source} wird von Agenten geladen, hier nicht geprüft`);
+    line(errs.length === 0, `Profile valid${errs.length ? `: ${errs.join('; ')}` : ''}`);
+    if (PREVIEW.includes(platformStatus(bundle.dir, profile.platform?.id))) warn(`Platform ${profile.platform.id} is still a preview (no verified reference project)`);
+    if (profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn(`Profile requires the Enterprise edition (Die Kette), only Community is installed here. Agents, gates, /feature-loop, platform profiles and checks from .kette/README.md are missing. Unlock with: ${cmd('kette login <key>')}`);
+    if (profile.tier !== ENTERPRISE && tier === ENTERPRISE) warn(`Enterprise (Die Kette) is installed here, the project is on Community. Switch to the flow with agents and gates: ${cmd('kette add')}`);
+    for (const o of profile.overlays || []) warn(`Overlay ${o.source} is loaded by the agents, not checked here`);
   }
   if (!opts.ci && bundle && hasClaude()) {
     const list = installedPlugins();
-    if (list === null) line(false, 'Plugin-Liste von Claude Code nicht lesbar (claude plugin list scheitert)');
-    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installiert`);
+    if (list === null) line(false, 'Claude Code plugin list not readable (claude plugin list fails)');
+    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installed`);
   }
-  if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir);
+  if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir, info);
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
   const md = path.join(root, 'CLAUDE.md');
-  if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md verweist auf die Kette-Regeln');
-  console.log(problems ? `\n${problems} Punkt(e) offen` : '\nalles in Ordnung');
+  if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules');
+  console.log(problems ? `\n${problems} open issue(s)` : '\nall good');
   return problems ? 1 : 0;
 }
 
-// Was jedes Plugin der Edition mitbringt, aus dem installierten Paket gezählt
-function printPluginDetails(tier, bundleDir) {
-  console.log('INFO  Inhalt der Plugins:');
+// Platform status from the bundle index; older bundles use the German word
+const PREVIEW = ['preview', 'vorschau'];
+
+// What each plugin of the edition brings, counted from the installed bundle
+function printPluginDetails(tier, bundleDir, info) {
+  info('Plugin contents:');
   for (const { id, lines } of pluginDetails(tier, MARKETPLACE, bundleDir)) {
-    console.log(`        ${id}`);
-    for (const l of lines) console.log(`          ${l}`);
+    console.log(`       ${id}`);
+    for (const l of lines) console.log(`         ${l}`);
   }
 }
 
-// Erneuert den Kette-Block in .kette/README.md, wenn kette update in einem Projekt läuft
+// Renews the kette block in .kette/README.md when kette update runs inside a project
 function renewProjectNote(root) {
   const profile = existingProfile(root);
   if (!profile) return;
   const tier = profile.tier in RANK ? profile.tier : COMMUNITY;
   const [d] = describe([noteItem(tier)], root);
   if (d.unmarked) { console.log(staleNote([d])); return; }
-  if (d.action === 'vorhanden') return;
+  if (d.action === 'keep') return;
   apply([d], root);
-  console.log(`${NOTE_PATH} ${d.action === 'neu' ? 'angelegt' : 'erneuert'} (Ablauf für ${editionLabel(tier)}).`);
+  console.log(`${file(NOTE_PATH)} ${d.action === 'create' ? 'created' : 'updated'} (flow for ${editionLabel(tier)}).`);
 }
 
 async function update(opts) {
@@ -349,8 +354,8 @@ async function updateBundle(opts) {
   const manifest = await fetchManifest();
   const tier = COMMUNITY;
   const have = installedBundle(tier);
-  if (have?.version === manifest.version) { console.log(`Aktuell (Version ${manifest.version}).`); return 0; }
-  console.log(`Neue Version ${manifest.version}${have ? ` (installiert: ${have.version})` : ''}.`);
+  if (have?.version === manifest.version) { console.log(`Up to date (version ${manifest.version}).`); return 0; }
+  console.log(`New version ${manifest.version}${have ? ` (installed: ${have.version})` : ''}.`);
   if (manifest.changelog) console.log(manifest.changelog);
   if (opts.dryRun) return 0;
   const dir = await installBundle(manifest, tier);
@@ -358,55 +363,55 @@ async function updateBundle(opts) {
     const link = setActiveBundle(dir);
     for (const l of editionHints(installEdition(link, tier, otherEditionPlugins(tier)), link)) console.log(l);
   }
-  if (manifest.cli && isNewer(manifest.cli.version, VERSION)) console.log(`Neue CLI ${manifest.cli.version} verfügbar: curl -fsSL https://kette.itdone.de/install | sh`);
-  console.log(`Regelwerk ${manifest.version} installiert.`);
+  if (manifest.cli && isNewer(manifest.cli.version, VERSION)) console.log(newCliHint(manifest.cli.version));
+  console.log(`Rulebook ${manifest.version} installed.`);
   return 0;
 }
 
-// Edition ohne Netz aus Zugangsdaten und gespeichertem Login-Stand, damit doctor --ci offline bleibt
+// Edition without network, from credentials and the saved login state, so doctor --ci stays offline
 function edition(tier, { line, warn }) {
   const creds = credentialsStatus();
-  if (creds === 'broken') line(false, `Zugangsdaten in ${credentialsFile()} beschädigt. Neu anmelden: kette logout && kette login <key>`);
+  if (creds === 'broken') line(false, `Credentials in ${file(credentialsFile())} are damaged. Sign in again: ${cmd('kette logout && kette login <key>')}`);
   if (tier === COMMUNITY) {
-    if (creds === 'valid') line(false, 'Lizenz hinterlegt, aber das Enterprise-Paket fehlt. Nachladen mit: kette update');
+    if (creds === 'valid') line(false, `License stored, but the Enterprise bundle is missing. Load it with: ${cmd('kette update')}`);
     else line(true, `Edition ${editionLabel(COMMUNITY)}`);
     return;
   }
   const state = loginState() || {};
-  line(true, `Edition ${editionLabel(ENTERPRISE)}, Version ${installedBundle(ENTERPRISE).version}, Updates bis ${formatDate(state.updates_until)}`);
-  if (state.updates_until && new Date(state.updates_until) < new Date()) warn(`Update-Zeitraum endete am ${formatDate(state.updates_until)}. Die installierte Version bleibt nutzbar, neue Versionen gibt es mit einer Verlängerung.`);
-  if (process.platform !== 'win32' && (fs.statSync(credentialsFile()).mode & 0o077)) warn(`${credentialsFile()} ist für andere lesbar. Beheben mit: chmod 600 ${credentialsFile()}`);
+  line(true, `Edition ${editionLabel(ENTERPRISE)}, version ${installedBundle(ENTERPRISE).version}, updates until ${formatDate(state.updates_until)}`);
+  if (state.updates_until && new Date(state.updates_until) < new Date()) warn(`Update period ended on ${formatDate(state.updates_until)}. The installed version keeps working, new versions come with a renewal.`);
+  if (process.platform !== 'win32' && (fs.statSync(credentialsFile()).mode & 0o077)) warn(`${file(credentialsFile())} is readable by others. Fix with: ${cmd(`chmod 600 ${credentialsFile()}`)}`);
 }
 
 export async function main(argv) {
   const opts = parse(argv);
-  const [cmd, arg] = opts._;
+  const [command, arg] = opts._;
   try {
-    if (!cmd || opts.help || cmd === 'help') { console.log(HELP); return 0; }
-    if (cmd === 'version' || cmd === '--version') { console.log(VERSION); return 0; }
-    if (cmd === 'init') {
-      const root = arg || (opts.yes ? '.' : await ask('Ordner für das neue Projekt', '.'));
-      if (fs.existsSync(path.join(root, '.kette', 'profile.json'))) throw new Error(`${root} hat schon ein Kette-Profil, dafür kette add oder kette doctor nutzen`);
+    if (!command || opts.help || command === 'help') { console.log(HELP); return 0; }
+    if (command === 'version' || command === '--version') { console.log(VERSION); return 0; }
+    if (command === 'init') {
+      const root = arg || (opts.yes ? '.' : await ask('Folder for the new project', '.'));
+      if (fs.existsSync(path.join(root, '.kette', 'profile.json'))) throw new Error(`${root} already has a kette profile, use kette add or kette doctor`);
       return await setup(root, opts, !fs.existsSync(root) || fs.readdirSync(root).length === 0);
     }
-    if (cmd === 'add') return await setup('.', opts, false);
-    if (cmd === 'doctor') return await doctor('.', opts);
-    if (cmd === 'update') return await update(opts);
-    if (cmd === 'rules') {
+    if (command === 'add') return await setup('.', opts, false);
+    if (command === 'doctor') return await doctor('.', opts);
+    if (command === 'update') return await update(opts);
+    if (command === 'rules') {
       const tier = tierOf();
       return rules(arg, opts, { bundle: installedBundle(tier), tier, stackIds: STACKS.map((x) => x.value) });
     }
-    if (cmd === 'profile') { const p = readProfile('.'); console.log(p ? JSON.stringify(p, null, 2) : 'Kein .kette/profile.json in diesem Ordner.'); return p ? 0 : 1; }
-    if (cmd === 'login') return await login(arg, opts, VERSION);
-    if (cmd === 'logout') return await logout(opts);
-    if (cmd === 'token') {
+    if (command === 'profile') { const p = readProfile('.'); console.log(p ? JSON.stringify(p, null, 2) : 'No .kette/profile.json in this folder.'); return p ? 0 : 1; }
+    if (command === 'login') return await login(arg, opts, VERSION);
+    if (command === 'logout') return await logout(opts);
+    if (command === 'token') {
       const [, kind, action, value] = opts._;
-      if (kind !== 'ci') throw new Error('Aufruf: kette token ci create <bezeichnung> | list | revoke <id>');
+      if (kind !== 'ci') throw new Error('Usage: kette token ci create <label> | list | revoke <id>');
       return await ciToken(action, value);
     }
-    if (cmd === 'figma') return await figma(opts);
-    if (cmd === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...readState() }, null, 2)); return 0; }
-    console.error(`Unbekannter Befehl: ${cmd}\n`);
+    if (command === 'figma') return await figma(opts);
+    if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...readState() }, null, 2)); return 0; }
+    console.error(`Unknown command: ${command}\n`);
     console.log(HELP);
     return 1;
   } finally {

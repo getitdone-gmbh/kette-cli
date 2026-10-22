@@ -5,26 +5,26 @@ import { credentialsFile, delivery, deviceIdFile } from './paths.mjs';
 
 export const KEY_PATTERN = /^CDP(-[A-Z0-9]{5}){4}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const SUPPORT = 'an info@itdone.de schreiben';
-// Antwort des Lieferdienstes, solange Registry oder Figma-Lieferung noch nicht eingerichtet sind
-export const NPM_PENDING = 'npm-Paketzugang folgt mit dem Update bis 30.11.2026';
-export const FIGMA_PENDING = 'Figma-Dateien folgen mit dem Update bis 30.11.2026';
+const SUPPORT = 'write to info@itdone.de';
+// Reply of the delivery service while the registry or the Figma delivery is not set up yet
+export const NPM_PENDING = 'npm access is not available right now. Try again later with kette update.';
+export const FIGMA_PENDING = 'Figma files are not available right now. Try again later with kette figma.';
 
-const seatsText = (seats) => (seats?.max ? ` (${seats.used} von ${seats.max} Geräten belegt)` : '');
+const seatsText = (seats) => (seats?.max ? ` (${seats.used} of ${seats.max} devices in use)` : '');
 
-// Fehlertexte je Code aus docs/install-api.md, jeweils mit nächstem Schritt
+// Message per error code from docs/install-api.md, each with the next step
 const MESSAGES = {
-  bad_request: () => 'Lizenzschlüssel oder Geräte-ID haben ein ungültiges Format. Den Schlüssel genau wie in der Kaufbestätigung angeben (CDP-XXXXX-XXXXX-XXXXX-XXXXX) und kette login erneut ausführen.',
-  invalid_key: () => 'Diesen Lizenzschlüssel kennen wir nicht. Bitte auf Tippfehler prüfen und den Schlüssel aus der Kaufbestätigung kopieren. Passt er trotzdem nicht, ' + SUPPORT + '.',
-  revoked: () => `Dieser Lizenzschlüssel wurde widerrufen oder erstattet und schaltet Enterprise nicht mehr frei. Für einen neuen Schlüssel ${SUPPORT}. Die Community-Edition bleibt nutzbar.`,
-  wrong_offer: () => 'Dieser Schlüssel gehört zu einem anderen Angebot, nicht zur Kette. Den Schlüssel aus der Kaufbestätigung der Kette (Solo oder Team) verwenden.',
-  device_limit: (body) => `Die Gerätegrenze dieser Lizenz ist erreicht${seatsText(body.seats)}. Ein altes Gerät gibt der Support frei, dafür ${SUPPORT}. Für mehr Geräte gibt es die Team-Lizenz.`,
-  rate_limited: () => 'Zu viele Anfragen in kurzer Zeit. Eine Minute warten und dann erneut versuchen.',
-  unavailable: () => `Der Lieferdienst kann das Enterprise-Paket gerade nicht bereitstellen. In ein paar Minuten erneut versuchen, bleibt es dabei, ${SUPPORT}. Die Community-Edition bleibt nutzbar.`,
-  device_unknown: () => 'Dieses Gerät ist bei der Lizenz noch nicht angemeldet. Zuerst kette login <key> ausführen.',
-  ci_token_limit: (body) => `Die Lizenz hat schon ${body.used} von ${body.max} CI-Tokens. Ein altes mit kette token ci revoke <id> widerrufen (Liste: kette token ci list).`,
-  expired: () => 'Der Download-Link ist abgelaufen (gültig 15 Minuten). Den Befehl einfach erneut ausführen.',
-  not_found: () => `Nicht gefunden. Den Befehl erneut ausführen, bleibt es dabei, ${SUPPORT}.`,
+  bad_request: () => 'License key or device ID has an invalid format. Enter the key exactly as in the purchase confirmation (CDP-XXXXX-XXXXX-XXXXX-XXXXX) and run kette login again.',
+  invalid_key: () => `We do not know this license key. Check for typos and copy the key from the purchase confirmation. If it still does not work, ${SUPPORT}.`,
+  revoked: () => `This license key was revoked or refunded and no longer unlocks Enterprise. For a new key, ${SUPPORT}. The Community edition keeps working.`,
+  wrong_offer: () => 'This key belongs to a different offer, not to Die Kette. Use the key from the Die Kette purchase confirmation (Solo or Team).',
+  device_limit: (body) => `The device limit of this license is reached${seatsText(body.seats)}. Support can release an old device, ${SUPPORT}. The Team license allows more devices.`,
+  rate_limited: () => 'Too many requests in a short time. Wait a minute and try again.',
+  unavailable: () => `The delivery service cannot provide the Enterprise bundle right now. Try again in a few minutes, if it persists ${SUPPORT}. The Community edition keeps working.`,
+  device_unknown: () => 'This device is not registered with the license yet. Run kette login <key> first.',
+  ci_token_limit: (body) => `The license already has ${body.used} of ${body.max} CI tokens. Revoke an old one with kette token ci revoke <id> (list: kette token ci list).`,
+  expired: () => 'The download link expired (valid for 15 minutes). Just run the command again.',
+  not_found: () => `Not found. Run the command again, if it persists ${SUPPORT}.`,
   registry_not_configured: () => NPM_PENDING,
   figma_not_configured: () => FIGMA_PENDING,
 };
@@ -38,15 +38,15 @@ export class DeliveryError extends Error {
 
 export function errorFor(status, body = {}) {
   const code = body.error || `http_${status}`;
-  const text = MESSAGES[code]?.(body) || `Unerwartete Antwort vom Lieferdienst (${status}${body.error ? `, ${body.error}` : ''}). Später erneut versuchen, bleibt es dabei, ${SUPPORT}.`;
+  const text = MESSAGES[code]?.(body) || `Unexpected response from the delivery service (${status}${body.error ? `, ${body.error}` : ''}). Try again later, if it persists ${SUPPORT}.`;
   return new DeliveryError(code, text);
 }
 
 export function downloadErrorText(err) {
-  if (err.checksum) return 'Die Prüfsumme des Enterprise-Pakets stimmt nicht, es wurde nichts installiert. Erneut versuchen, tritt es wieder auf, ' + SUPPORT + '.';
-  if (err.status === 410) return 'Der Download-Link ist abgelaufen (gültig 15 Minuten). Den Befehl einfach erneut ausführen, dann gibt es einen neuen Link.';
-  if (err.status === 404) return 'Der Download-Link ist ungültig. Den Befehl erneut ausführen, bleibt es dabei, ' + SUPPORT + '.';
-  return `Das Enterprise-Paket konnte nicht geladen werden (${err.status || err.message}). Internetverbindung prüfen und erneut versuchen.`;
+  if (err.checksum) return `The checksum of the Enterprise bundle does not match, nothing was installed. Try again, if it happens again ${SUPPORT}.`;
+  if (err.status === 410) return 'The download link expired (valid for 15 minutes). Just run the command again to get a new link.';
+  if (err.status === 404) return `The download link is invalid. Run the command again, if it persists ${SUPPORT}.`;
+  return `The Enterprise bundle could not be downloaded (${err.status || err.message}). Check your internet connection and try again.`;
 }
 
 async function call(url, init) {
@@ -54,7 +54,7 @@ async function call(url, init) {
   try {
     res = await fetch(url, init);
   } catch (err) {
-    throw new DeliveryError('network', `Lieferdienst nicht erreichbar (${delivery()}: ${err.cause?.code || err.cause?.message || err.message}). Internetverbindung prüfen, hinter einem Proxy oder Spiegel KETTE_DELIVERY setzen.`);
+    throw new DeliveryError('network', `Delivery service not reachable (${delivery()}: ${err.cause?.code || err.cause?.message || err.message}). Check your internet connection, behind a proxy or mirror set KETTE_DELIVERY.`);
   }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw errorFor(res.status, body);
@@ -97,7 +97,7 @@ export function deviceId() {
   const file = deviceIdFile();
   if (fs.existsSync(file)) {
     const id = fs.readFileSync(file, 'utf8').trim();
-    if (!UUID_PATTERN.test(id)) throw new Error(`Geräte-ID in ${file} ist beschädigt. Datei löschen und erneut anmelden, das Gerät zählt dann neu.`);
+    if (!UUID_PATTERN.test(id)) throw new Error(`Device ID in ${file} is damaged. Delete the file and sign in again, the device then counts as new.`);
     return id;
   }
   const id = crypto.randomUUID();
@@ -111,7 +111,7 @@ export function readCredentials() {
   if (!fs.existsSync(file)) return null;
   let key = null;
   try { ({ key } = JSON.parse(fs.readFileSync(file, 'utf8'))); } catch { key = null; }
-  if (!KEY_PATTERN.test(key || '')) throw new Error(`Zugangsdaten in ${file} sind beschädigt. Mit kette logout entfernen und mit kette login <key> neu anmelden.`);
+  if (!KEY_PATTERN.test(key || '')) throw new Error(`Credentials in ${file} are damaged. Remove them with kette logout and sign in again with kette login <key>.`);
   return { key };
 }
 

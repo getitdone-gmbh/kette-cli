@@ -45,10 +45,10 @@ test('Inhalt der Plugins wird aus den Ordnern im Paket gezählt', () => {
   assert.deepEqual(pluginContents(d, 'design-system-agents').commands, ['/feature-loop']);
   assert.equal(pluginContents(d, 'design-review-pack'), null);
   assert.equal(pluginContents(null, 'kette-engineering'), null);
-  assert.equal(pluginSummary(ENTERPRISE, 'kette', d), 'kette-engineering-core@kette (Agent kette-check, Skills architecture-patterns, engineering-rules), kette-engineering@kette (Agent code-reviewer, Skill platform-profile), design-system-agents@kette (4 Agenten, Skill loop-contract, Befehl /feature-loop), design-review-pack@kette');
+  assert.equal(pluginSummary(ENTERPRISE, 'kette', d), 'kette-engineering-core@kette (Agent kette-check, Skills architecture-patterns, engineering-rules), kette-engineering@kette (Agent code-reviewer, Skill platform-profile), design-system-agents@kette (4 Agents, Skill loop-contract, Command /feature-loop), design-review-pack@kette');
   const details = pluginDetails(ENTERPRISE, 'kette', d);
-  assert.deepEqual(details[2], { id: 'design-system-agents@kette', lines: ['Agenten (4): a, b, c, d', 'Skills (1): loop-contract', 'Befehle (1): /feature-loop'] });
-  assert.deepEqual(details[3].lines, ['nicht im Paket enthalten']);
+  assert.deepEqual(details[2], { id: 'design-system-agents@kette', lines: ['Agents (4): a, b, c, d', 'Skills (1): loop-contract', 'Commands (1): /feature-loop'] });
+  assert.deepEqual(details[3].lines, ['not in the bundle']);
 });
 
 test('Profil aus 0.1.0 wird gelesen, ohne das Original zu ändern', () => {

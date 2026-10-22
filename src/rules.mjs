@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ENTERPRISE, editionLabel } from './editions.mjs';
+import { bold, cmd, file } from './out.mjs';
 
 const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
@@ -89,27 +90,25 @@ export function suggest(input, ids) {
 const pad = (s, n) => s + ' '.repeat(Math.max(1, n - s.length));
 
 function overview(bundle, tier, cat) {
-  const out = [`Regelwerk der Kette · Edition ${editionLabel(tier)}, Version ${bundle.version}`, `Ort: ${tilde(bundle.dir)}`, ''];
+  const out = [`Die Kette rulebook · edition ${editionLabel(tier)}, version ${bundle.version}`, `Location: ${file(tilde(bundle.dir))}`, ''];
   const width = Math.max(...[...cat.core, ...cat.patterns, ...cat.stacks, ...cat.platforms].map((t) => t.id.length)) + 2;
   // Eine Zeile je Thema, gekürzt auf die Breite des Terminals
   const row = (id, text) => `  ${pad(id, width)}${short(text, Math.max(40, (process.stdout.columns || 100) - width - 3))}`;
-  out.push('Kern-Regeln (gelten immer)');
+  out.push('Core rules (always apply)');
   for (const t of cat.core) out.push(row(t.id, t.summary || t.title));
-  out.push('', 'Architektur-Muster (Auswahl in .kette/profile.json)');
+  out.push('', 'Architecture patterns (chosen in .kette/profile.json)');
   for (const t of cat.patterns) out.push(row(t.id, `${t.title}: ${t.summary}`));
   if (tier === ENTERPRISE) {
-    out.push('', 'Stack-Profile');
+    out.push('', 'Stack profiles');
     for (const t of cat.stacks) out.push(row(t.id, t.summary));
-    out.push('', 'Plattform-Profile');
+    out.push('', 'Platform profiles');
     for (const t of cat.platforms) out.push(row(t.id, t.summary));
   } else {
-    out.push('', 'Stack- und Plattform-Profile gibt es in Enterprise (Die Kette): kette login <key>');
+    out.push('', `Stack and platform profiles come with Enterprise (Die Kette): ${cmd('kette login <key>')}`);
   }
-  out.push('', 'Thema lesen: kette rules <thema>, z. B. kette rules fehler · Dateipfade: --path');
+  out.push('', `Read a topic: ${cmd('kette rules <topic>')}${cat.core[0] ? `, e.g. ${cmd(`kette rules ${cat.core[0].id}`)}` : ''} · file paths: --path`);
   return out.join('\n');
 }
-
-const bold = (s) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[1m${s}\x1b[22m` : s);
 
 // Markdown leicht entschlacken: Überschriften ohne #, Hervorhebungen und Links als Text, Code eingerückt, Tabellen als Spalten
 export function render(md) {
@@ -150,7 +149,7 @@ function find(cat, topic) {
 
 // kette rules [thema] [--path]; liest nur das installierte Paket, ohne Netz
 export function rules(topic, opts, { bundle, tier, stackIds = [] }) {
-  if (!bundle) throw new Error('Kein Regelwerk auf diesem Rechner. Laden mit: kette init (neues Projekt), kette add (bestehendes Repo) oder kette update.');
+  if (!bundle) throw new Error('No rulebook on this machine. Load it with kette init (new project), kette add (existing repo) or kette update.');
   const cat = catalog(bundle.dir);
   if (!topic) {
     if (opts.path) {
@@ -162,12 +161,12 @@ export function rules(topic, opts, { bundle, tier, stackIds = [] }) {
   const { hit, ids } = find(cat, topic);
   const missing = !hit || !fs.existsSync(hit.file);
   if (missing && tier !== ENTERPRISE && (cat.platforms.includes(hit) || stackIds.includes(topic.toLowerCase()))) {
-    throw new Error(`${topic} ist ein Profil aus Enterprise (Die Kette), freischalten mit: kette login <key>`);
+    throw new Error(`${topic} is an Enterprise profile (Die Kette), unlock with: kette login <key>`);
   }
-  if (hit && missing) throw new Error(`${tilde(hit.file)} fehlt im Paket. Neu laden mit: kette update`);
+  if (hit && missing) throw new Error(`${tilde(hit.file)} is missing from the bundle. Reload with: kette update`);
   if (!hit) {
     const close = suggest(topic, [...ids, ...stackIds.filter((s) => !ids.includes(s))]);
-    throw new Error(`Unbekanntes Thema "${topic}".${close.length ? ` Meinten Sie: ${close.join(', ')}?` : ''} Alle Themen: kette rules`);
+    throw new Error(`Unknown topic "${topic}".${close.length ? ` Did you mean: ${close.join(', ')}?` : ''} All topics: kette rules`);
   }
   console.log(opts.path ? hit.file : render(read(hit.file)));
   return 0;

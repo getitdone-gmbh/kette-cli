@@ -6,10 +6,12 @@ import { DownloadError, fetchManifest, installEntry, installedBundle, readState,
 import { editionHints, hasClaude, installEdition, pluginId, uninstallPlugin } from './claude.mjs';
 import { bundlesDir, credentialsFile, delivery } from './paths.mjs';
 import { ensureNpm, setupNpm, teardownNpm } from './npm-access.mjs';
+import { cmd, isoDate, status } from './out.mjs';
 
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
 
-export const formatDate = (iso) => (iso ? new Date(iso).toLocaleDateString('de-DE', { timeZone: 'UTC' }) : 'unbekannt');
+export const formatDate = (iso) => isoDate(iso, 'unknown');
+export const newCliHint = (version) => `New CLI ${version} available: ${cmd('curl -fsSL https://kette.itdone.de/install | sh')}`;
 
 // none, valid oder broken; eine beschädigte Datei schaltet nichts frei, doctor meldet sie
 export function credentialsStatus() {
@@ -23,7 +25,7 @@ export const loginState = () => readState().login || null;
 async function grant(key, cli) {
   const g = await requestToken({ key, device: deviceId(), cli });
   if (!g.url || !g.sha256 || !VERSION_PATTERN.test(g.version || '')) {
-    throw new DeliveryError('bad_response', 'Der Lieferdienst hat eine unvollständige Antwort geschickt. Später erneut versuchen, bleibt es dabei, den Support kontaktieren.');
+    throw new DeliveryError('bad_response', 'The delivery service sent an incomplete response. Try again later, if it persists contact support.');
   }
   return g;
 }
@@ -44,31 +46,31 @@ function plugins(dir, opts) {
   if (opts.noPlugins) return;
   const link = setActiveBundle(dir);
   const r = installEdition(link, ENTERPRISE, retiredPlugins(COMMUNITY, ENTERPRISE));
-  if (r.ok) console.log(`Claude-Code-Plugins installiert: ${r.present.join(', ')}`);
+  if (r.ok) console.log(`Claude Code plugins installed: ${r.present.join(', ')}`);
   for (const l of editionHints(r, link)) console.log(l);
 }
 
 export async function login(rawKey, opts, cli) {
   const key = (rawKey || '').trim().toUpperCase();
-  if (!KEY_PATTERN.test(key)) throw new Error('Lizenzschlüssel im Format CDP-XXXXX-XXXXX-XXXXX-XXXXX angeben, z. B. kette login CDP-AB12C-...');
-  console.log(`Prüfe Lizenz bei ${delivery()} ...`);
+  if (!KEY_PATTERN.test(key)) throw new Error('Enter the license key in the format CDP-XXXXX-XXXXX-XXXXX-XXXXX, e.g. kette login CDP-AB12C-...');
+  console.log(`Checking license with ${delivery()} ...`);
   const g = await grant(key, cli);
   // Erst nach erfolgreicher Prüfung speichern; scheitert der Download, holt kette update das Paket nach
   writeCredentials(key);
-  console.log(`Lade ${editionLabel(ENTERPRISE)} ${g.version} ...`);
+  console.log(`Loading ${editionLabel(ENTERPRISE)} ${g.version} ...`);
   const dir = await install(g);
   plugins(dir, opts);
   // nach /install/token, denn erst dort wird das Gerät registriert
   await setupNpm(key, opts);
-  const seats = g.seats?.max ? `, Geräte ${g.seats.used} von ${g.seats.max}` : '';
-  console.log(`\nAngemeldet: ${editionLabel(ENTERPRISE)}, Version ${g.version}, Updates bis ${formatDate(g.updates_until)}${seats}.`);
-  console.log('Bestehende Projekte bekommen die Enterprise-Vorlagen und den Ablauf mit Agenten und Gates mit: kette add');
+  const seats = g.seats?.max ? `, devices ${g.seats.used} of ${g.seats.max}` : '';
+  console.log(`\nSigned in: ${editionLabel(ENTERPRISE)}, version ${g.version}, updates until ${formatDate(g.updates_until)}${seats}.`);
+  console.log(`Existing projects get the Enterprise templates and the flow with agents and gates with: ${cmd('kette add')}`);
   return 0;
 }
 
 export async function logout(opts) {
   if (credentialsStatus() === 'none' && !installedBundle(ENTERPRISE)) {
-    if (!(await teardownNpm(null))) console.log('Nicht angemeldet, nichts zu tun.');
+    if (!(await teardownNpm(null))) console.log('Not signed in, nothing to do.');
     return 0;
   }
   // solange der Schlüssel noch da ist: npm-Token widerrufen, dann nur den Kette-Block entfernen
@@ -78,7 +80,7 @@ export async function logout(opts) {
   if (claude) {
     for (const name of retiredPlugins(ENTERPRISE, COMMUNITY)) {
       const r = uninstallPlugin(name);
-      if (!r.ok) console.log(`Plugin ${name} nicht entfernt (${r.reason}). Von Hand: claude plugin uninstall ${pluginId(name)}`);
+      if (!r.ok) console.log(`Plugin ${name} not removed (${r.reason}). By hand: ${cmd(`claude plugin uninstall ${pluginId(name)}`)}`);
     }
   }
   removeCredentials();
@@ -87,18 +89,18 @@ export async function logout(opts) {
   const community = installedBundle(COMMUNITY);
   const link = setActiveBundle(community?.dir || null);
   if (claude && link) for (const l of editionHints(installEdition(link, COMMUNITY), link)) console.log(l);
-  console.log('Abgemeldet. Lizenzschlüssel und Enterprise-Paket sind von diesem Rechner entfernt.');
-  console.log('Das Gerät bleibt bei der Lizenz registriert, freigeben kann es der Support. Ein erneuter kette login auf diesem Rechner belegt kein weiteres Gerät.');
-  if (!community) console.log('Die Community-Edition lädt: kette update');
+  console.log('Signed out. License key and Enterprise bundle are removed from this machine.');
+  console.log('The device stays registered with the license, support can release it. Signing in again on this machine does not take another device seat.');
+  if (!community) console.log(`Load the Community edition with: ${cmd('kette update')}`);
   return 0;
 }
 
 async function cliHint(cli) {
   try {
     const m = await fetchManifest();
-    if (m.cli && isNewer(m.cli.version, cli)) console.log(`Neue CLI ${m.cli.version} verfügbar: curl -fsSL https://kette.itdone.de/install | sh`);
+    if (m.cli && isNewer(m.cli.version, cli)) console.log(newCliHint(m.cli.version));
   } catch (err) {
-    console.log(`HINW  CLI-Version nicht geprüft (${err.message})`);
+    console.log(`${status('warn', 'WARN')} CLI version not checked (${err.message})`);
   }
 }
 
@@ -109,21 +111,21 @@ export async function updateEnterprise(opts, cli) {
   const state = loginState() || { edition: ENTERPRISE };
   writeState({ login: { ...state, updates_until: info.updates_until || state.updates_until || null, checked_at: new Date().toISOString() } });
   if (info.version && info.available && info.version !== info.available) {
-    console.log(`Version ${info.version} ist erschienen, der Update-Zeitraum dieser Lizenz endete am ${formatDate(info.updates_until)}. Installierbar bleibt ${info.available}, für neuere Versionen die Lizenz verlängern.`);
+    console.log(`Version ${info.version} is out, the update period of this license ended on ${formatDate(info.updates_until)}. ${info.available} stays installable, renew the license for newer versions.`);
   }
   if (have && have.version === info.available) {
-    console.log(`Aktuell (${editionLabel(ENTERPRISE)} ${have.version}).`);
+    console.log(`Up to date (${editionLabel(ENTERPRISE)} ${have.version}).`);
     if (!opts.dryRun) await ensureNpm(key, opts);
     await cliHint(cli);
     return 0;
   }
-  console.log(`Neue ${editionLabel(ENTERPRISE)}-Version ${info.available}${have ? ` (installiert: ${have.version})` : ''}.`);
+  console.log(`New ${editionLabel(ENTERPRISE)} version ${info.available}${have ? ` (installed: ${have.version})` : ''}.`);
   if (info.changelog) console.log(info.changelog);
   if (opts.dryRun) return 0;
   const dir = await install(await grant(key, cli));
   plugins(dir, opts);
   await ensureNpm(key, opts);
   await cliHint(cli);
-  console.log(`${editionLabel(ENTERPRISE)} ${readState().login.version} installiert.`);
+  console.log(`${editionLabel(ENTERPRISE)} ${readState().login.version} installed.`);
   return 0;
 }

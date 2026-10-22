@@ -5,8 +5,9 @@ import path from 'node:path';
 export const SCOPE = '@getitdone-gmbh';
 export const BLOCK_START = '# >>> kette: managed by kette login, removed by kette logout';
 export const BLOCK_END = '# <<< kette';
-// Fremde Scope-Zeilen, die kette login --npm-replace auskommentiert hat; kette logout stellt sie wieder her
-const DISABLED = '# kette login hat deaktiviert: ';
+// Foreign scope lines that kette login --npm-replace commented out; kette logout restores them, also with the German prefix up to 0.5
+const DISABLED = '# disabled by kette login: ';
+const DISABLED_PREFIXES = [DISABLED, '# kette login hat deaktiviert: '];
 const SCOPE_LINE = new RegExp(`^\\s*${SCOPE}:registry\\s*=\\s*(\\S+)\\s*$`);
 export const TOKEN_PATTERN = /kt_[A-Za-z0-9_-]{43}/;
 
@@ -60,7 +61,10 @@ export function withBlock(content, registry, token, { replace = false } = {}) {
 // Inhalt ohne Block, auskommentierte Zeilen wieder aktiv
 export function withoutBlock(content) {
   const eol = eolOf(content);
-  return join(split(content).outside.map((l) => (l.startsWith(DISABLED) ? l.slice(DISABLED.length) : l)), eol);
+  return join(split(content).outside.map((l) => {
+    const prefix = DISABLED_PREFIXES.find((p) => l.startsWith(p));
+    return prefix ? l.slice(prefix.length) : l;
+  }), eol);
 }
 
 export function readFile(file) {

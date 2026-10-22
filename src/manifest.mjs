@@ -7,7 +7,7 @@ import { activeBundleLink, bundlesDir, mirror, stateFile } from './paths.mjs';
 export async function fetchManifest() {
   const url = `${mirror()}/manifest.json`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Manifest nicht erreichbar (${res.status}): ${url}`);
+  if (!res.ok) throw new Error(`Manifest not reachable (${res.status}): ${url}`);
   return res.json();
 }
 
@@ -24,10 +24,10 @@ export class DownloadError extends Error {
 
 export async function download(entry, target) {
   const res = await fetch(resolveUrl(entry.url));
-  if (!res.ok) throw new DownloadError(`Download fehlgeschlagen (${res.status}): ${entry.url}`, { status: res.status });
+  if (!res.ok) throw new DownloadError(`Download failed (${res.status}): ${entry.url}`, { status: res.status });
   const buf = Buffer.from(await res.arrayBuffer());
   const sum = crypto.createHash('sha256').update(buf).digest('hex');
-  if (sum !== entry.sha256) throw new DownloadError(`Prüfsumme stimmt nicht für ${entry.url}`, { checksum: true });
+  if (sum !== entry.sha256) throw new DownloadError(`Checksum does not match for ${entry.url}`, { checksum: true });
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, buf);
   return target;
@@ -65,7 +65,7 @@ export async function installEntry(tier, version, entry) {
 
 export async function installBundle(manifest, tier) {
   const entry = manifest.bundles?.[tier];
-  if (!entry) throw new Error(`Paket ${tier} ist im Manifest nicht vorhanden`);
+  if (!entry) throw new Error(`Bundle ${tier} is missing from the manifest`);
   return installEntry(tier, manifest.version, entry);
 }
 

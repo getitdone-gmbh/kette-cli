@@ -43,9 +43,9 @@ test('Plan überschreibt nie und ergänzt nur mit Marker', () => {
     { path: 'docs/adr/0000-vorlage.md', content: 'x' },
   ];
   const described = describePlan(plan, d);
-  assert.deepEqual(described.map((x) => x.action), ['vorhanden', 'ergänzen', 'neu']);
+  assert.deepEqual(described.map((x) => x.action), ['keep', 'append', 'create']);
   apply(described, d);
   assert.equal(fs.readFileSync(path.join(d, '.kette/profile.json'), 'utf8'), '{"alt":true}');
   assert.match(fs.readFileSync(path.join(d, 'CLAUDE.md'), 'utf8'), /# Projekt\n\n@\.kette\/README\.md/);
-  assert.equal(describePlan(plan, d)[1].action, 'vorhanden');
+  assert.equal(describePlan(plan, d)[1].action, 'keep');
 });

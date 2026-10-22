@@ -23,9 +23,9 @@ export const missingPlugins = (bundleDir, tier) => pluginsFor(tier).filter((p) =
 export const retiredPlugins = (from, to) => pluginsFor(from).filter((p) => !pluginsFor(to).includes(p));
 
 const KINDS = [
-  ['agents', 'Agent', 'Agenten'],
+  ['agents', 'Agent', 'Agents'],
   ['skills', 'Skill', 'Skills'],
-  ['commands', 'Befehl', 'Befehle'],
+  ['commands', 'Command', 'Commands'],
 ];
 const names = (dir, pick) => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).map(pick).filter(Boolean).sort() : []);
 
@@ -62,7 +62,7 @@ export function pluginSummary(tier, market, bundleDir) {
 export function pluginDetails(tier, market, bundleDir) {
   return pluginsFor(tier).map((p) => {
     const contents = pluginContents(bundleDir, p);
-    const lines = contents ? KINDS.filter(([kind]) => contents[kind].length).map(([kind, , many]) => `${many} (${contents[kind].length}): ${contents[kind].join(', ')}`) : ['nicht im Paket enthalten'];
+    const lines = contents ? KINDS.filter(([kind]) => contents[kind].length).map(([kind, , many]) => `${many} (${contents[kind].length}): ${contents[kind].join(', ')}`) : ['not in the bundle'];
     return { id: `${p}@${market}`, lines };
   });
 }

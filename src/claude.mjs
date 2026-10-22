@@ -2,6 +2,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { bundlesDir } from './paths.mjs';
 import { missingPlugins, pluginsFor } from './editions.mjs';
+import { cmd, status } from './out.mjs';
 
 // Eigener Name, damit der Entwickler-Marketplace kette-engineering (Repo) nicht getroffen wird
 export const MARKETPLACE = 'kette';
@@ -34,14 +35,14 @@ function uninstall(id) {
   // Antwort von Claude Code, wenn das Plugin schon fehlt: gilt als entfernt
   const absent = /not found in installed plugins/i.test(output(r));
   const gone = list === null ? r.status === 0 || absent : !listed(list, id);
-  return gone ? { ok: true } : { ok: false, reason: output(r) || `${id} ist nach dem Entfernen noch installiert` };
+  return gone ? { ok: true } : { ok: false, reason: output(r) || `${id} is still installed after removal` };
 }
 
 // Hinweis auf Plugins eines fremden Marketplaces, die zusätzlich zu kette aktiv sind und Skills doppelt zeigen
 function duplicateHint(market, ids, list) {
   const active = ids.filter((id) => listed(list, id));
   if (!active.length) return;
-  console.log(`HINW  Marketplace ${market.name} (${market.path || market.source}) bleibt unangetastet. Seine Plugins sind zusätzlich zu ${MARKETPLACE} aktiv, Skills erscheinen doppelt. Deaktivieren mit: ${active.map((id) => `claude plugin disable ${id}`).join(' && ')}`);
+  console.log(`${status('warn', 'WARN')} Marketplace ${market.name} (${market.path || market.source}) stays untouched. Its plugins are active in addition to ${MARKETPLACE}, skills show up twice. Disable with: ${cmd(active.map((id) => `claude plugin disable ${id}`).join(' && '))}`);
 }
 
 // Alten, selbst angelegten Marketplace entfernen; einer auf ein Repo bleibt, dann Hinweis auf doppelte Skills
@@ -72,14 +73,14 @@ export const manualInstall = (source, plugins) => ['', `claude plugin marketplac
 // Bindet das Regelwerk als Plugin-Marketplace in Claude Code ein (Scope user); source ist der feste Link auf das aktive Paket
 // retire: Plugins der anderen Edition, die entfernt werden, solange der Marketplace sie noch kennt
 export function installPlugins(source, plugins, retire = []) {
-  if (!hasClaude()) return { ok: false, reason: 'claude nicht gefunden' };
+  if (!hasClaude()) return { ok: false, reason: 'claude not found' };
   const all = marketplaces();
   const migrated = migrateLegacy(all);
   if (!migrated.ok) return migrated;
   let known = all.find((m) => m.name === MARKETPLACE) || null;
   const moved = known?.path && path.resolve(known.path) !== path.resolve(source);
   // Fremde Marketplaces gleichen Namens bleiben unangetastet, geprüft bevor etwas entfernt wird
-  if (moved && !insideKette(known.path)) return { ok: false, reason: `Marketplace ${MARKETPLACE} zeigt auf ${known.path}. Umstellen mit: claude plugin marketplace remove ${MARKETPLACE} && claude plugin marketplace add "${source}"` };
+  if (moved && !insideKette(known.path)) return { ok: false, reason: `Marketplace ${MARKETPLACE} points to ${known.path}. Switch with: claude plugin marketplace remove ${MARKETPLACE} && claude plugin marketplace add "${source}"` };
   const list = retire.length ? installedPlugins() : '';
   const retired = [];
   // Ohne lesbare Liste jedes Plugin der anderen Edition zu entfernen versuchen, statt es stillschweigend zu überspringen
@@ -89,7 +90,7 @@ export function installPlugins(source, plugins, retire = []) {
     retired.push(pluginId(p));
   }
   // Scheitert ein späterer Schritt, steht im Grund, was schon entfernt wurde
-  const fail = (reason) => ({ ok: false, reason: retired.length ? `${reason}; vorher schon entfernt: ${retired.join(', ')}` : reason });
+  const fail = (reason) => ({ ok: false, reason: retired.length ? `${reason}; already removed before: ${retired.join(', ')}` : reason });
   packDuplicates(all, plugins);
   if (moved) {
     const rm = run(['plugin', 'marketplace', 'remove', MARKETPLACE]);
@@ -116,13 +117,13 @@ export function installEdition(link, tier, retire = []) {
 
 export function editionHints(result, link) {
   const lines = [];
-  if (!result.ok) lines.push(`Plugins nicht installiert (${result.reason}). Von Hand:${manualInstall(link, result.present)}`);
-  if (result.missing.length) lines.push(`HINW  Das Paket auf diesem Rechner enthält ${result.missing.join(', ')} noch nicht. Neu laden mit: kette update`);
+  if (!result.ok) lines.push(`Plugins not installed (${result.reason}). By hand:${manualInstall(link, result.present)}`);
+  if (result.missing.length) lines.push(`${status('warn', 'WARN')} The bundle on this machine does not contain ${result.missing.join(', ')} yet. Reload with: ${cmd('kette update')}`);
   return lines;
 }
 
 export function uninstallPlugin(name) {
-  if (!hasClaude()) return { ok: false, reason: 'claude nicht gefunden' };
+  if (!hasClaude()) return { ok: false, reason: 'claude not found' };
   return uninstall(pluginId(name));
 }
 

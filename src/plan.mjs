@@ -5,21 +5,21 @@ import path from 'node:path';
 export function describe(plan, root) {
   return plan.map((item) => {
     const abs = path.join(root, item.path);
-    if (!fs.existsSync(abs)) return { ...item, action: 'neu' };
+    if (!fs.existsSync(abs)) return { ...item, action: 'create' };
     const current = fs.readFileSync(abs, 'utf8');
-    if (item.mode === 'append') return { ...item, action: current.includes(item.marker) ? 'vorhanden' : 'ergänzen' };
+    if (item.mode === 'append') return { ...item, action: current.includes(item.marker) ? 'keep' : 'append' };
     if (item.mode === 'renew') {
       const next = item.renew(current);
-      if (next === null) return { ...item, action: 'vorhanden', unmarked: true };
-      return { ...item, action: next === current ? 'vorhanden' : 'erneuern', next };
+      if (next === null) return { ...item, action: 'keep', unmarked: true };
+      return { ...item, action: next === current ? 'keep' : 'update', next };
     }
-    return { ...item, action: 'vorhanden' };
+    return { ...item, action: 'keep' };
   });
 }
 
 export function print(described) {
   for (const d of described) {
-    const tag = { neu: '+ neu      ', ergänzen: '~ ergänzen ', erneuern: '~ erneuern ', vorhanden: '= bleibt   ' }[d.action];
+    const tag = { create: '+ create ', append: '~ append ', update: '~ update ', keep: '= keep   ' }[d.action];
     console.log(`  ${tag} ${d.path}${d.note ? `  (${d.note})` : ''}`);
   }
 }
@@ -27,13 +27,13 @@ export function print(described) {
 export function apply(described, root) {
   for (const d of described) {
     const abs = path.join(root, d.path);
-    if (d.action === 'neu') {
+    if (d.action === 'create') {
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, d.content);
-    } else if (d.action === 'ergänzen') {
+    } else if (d.action === 'append') {
       const cur = fs.readFileSync(abs, 'utf8');
       fs.writeFileSync(abs, cur.replace(/\n*$/, '\n\n') + d.content);
-    } else if (d.action === 'erneuern') {
+    } else if (d.action === 'update') {
       fs.writeFileSync(abs, d.next);
     }
   }
