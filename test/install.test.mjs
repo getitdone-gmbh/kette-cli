@@ -37,9 +37,9 @@ for (const shell of shells) {
     const home = tmp();
     write(home, '.zshrc', 'alias ll="ls -l"\n');
     const first = await install(shell, home);
-    assert.match(first.stdout, /PATH ergänzt in .*\.zshrc/);
+    assert.match(first.stdout, /PATH updated in .*\.zshrc/);
     const second = await install(shell, home);
-    assert.doesNotMatch(second.stdout, /PATH ergänzt/);
+    assert.doesNotMatch(second.stdout, /PATH updated/);
     const rc = path.join(home, '.zshrc');
     assert.equal(count(rc), 1);
     assert.match(fs.readFileSync(rc, 'utf8'), /^alias ll="ls -l"\n/);
@@ -62,6 +62,6 @@ test('KETTE_NO_MODIFY_PATH=1 ändert keine Datei und zeigt die Zeile zum Selbste
   const home = tmp();
   const { stdout } = await install('/bin/sh', home, { KETTE_NO_MODIFY_PATH: '1' });
   assert.equal(fs.existsSync(path.join(home, '.zshrc')), false);
-  assert.match(stdout, /PATH nicht geändert \(KETTE_NO_MODIFY_PATH=1\)/);
+  assert.match(stdout, /PATH not changed \(KETTE_NO_MODIFY_PATH=1\)/);
   assert.ok(stdout.includes(LINE));
 });
