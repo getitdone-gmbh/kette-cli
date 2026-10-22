@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { accent, dim, hint } from './out.mjs';
 
 // A plan is a list of files; existing files are never overwritten, only appended to or renewed in their marked block
 // lstat, so a dangling symlink counts as present and is never written through
@@ -22,10 +23,14 @@ export function describe(plan, root) {
   });
 }
 
+// New files in the accent color, changes as a hint, kept files dimmed
+const TAGS = { create: ['+ create ', accent], append: ['~ append ', hint], update: ['~ update ', hint], keep: ['= keep   ', dim] };
+
 export function print(described) {
   for (const d of described) {
-    const tag = { create: '+ create ', append: '~ append ', update: '~ update ', keep: '= keep   ' }[d.action];
-    console.log(`  ${tag} ${d.path}${d.note ? `  (${d.note})` : ''}`);
+    const [tag, style] = TAGS[d.action];
+    const name = d.action === 'keep' ? dim(d.path) : d.path;
+    console.log(`  ${style(tag)} ${name}${d.note ? dim(`  (${d.note})`) : ''}`);
   }
 }
 

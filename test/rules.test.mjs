@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { capture, fakeClaude, tmp, write } from './helpers.mjs';
 import { main } from '../src/cli.mjs';
+import { symbols } from '../src/out.mjs';
 
 const VERSION = '0.20261020.9';
 let kh;
@@ -206,7 +207,11 @@ test('doctor listet je Plugin Agenten, Skills und Befehle aus dem Paket', async 
   try {
     const { out } = await run('doctor');
     assert.match(out, /OK {3}Plugin ui-gesetze@kette installed/);
-    assert.match(out, /INFO Plugin contents:\n {7}kette-engineering-core@kette\n {9}Agents \(1\): kette-check\n {9}Skills \(2\): architecture-patterns, engineering-rules\n {7}ui-gesetze@kette\n {9}Skills \(3\): a11y-standards, interaction-principles, ui-laws\n {9}Commands \(1\): \/check/);
+    // Box characters where Unicode is likely supported, ASCII on a plain Windows console
+    const { tee, end, bar } = symbols();
+    const pad = ' '.repeat(bar.length);
+    assert.ok(out.includes(['INFO Plugin contents:', `      ${tee} kette-engineering-core@kette`, `      ${bar}   Agents (1): kette-check`, `      ${bar}   Skills (2): architecture-patterns, engineering-rules`,
+      `      ${end} ui-gesetze@kette`, `      ${pad}   Skills (3): a11y-standards, interaction-principles, ui-laws`, `      ${pad}   Commands (1): /check`].join('\n')), out);
     assert.doesNotMatch((await run('doctor', '--ci')).out, /Plugin contents/);
   } finally {
     claude.restore();

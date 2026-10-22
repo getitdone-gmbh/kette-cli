@@ -73,7 +73,7 @@ test('unknown options and options without a value stop with exit code 2 and the 
   console.log = (m) => logs.push(m);
   try { assert.equal(await main(['doctor', '--frobnicate']), 2); } finally { [console.error, console.log] = [err, log]; }
   assert.match(errors.join('\n'), /^kette: Unknown option --frobnicate/);
-  assert.match(logs.join('\n'), /^kette \d+\.\d+\.\d+ · set up the rules/);
+  assert.match(logs.join('\n'), /^[●*] DIE KETTE  kette \d+\.\d+\.\d+ [·-] Community\n\nSet up the rules/);
 });
 
 test('plan never writes through a dangling symlink', { skip: process.platform === 'win32' }, () => {

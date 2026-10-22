@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ENTERPRISE, editionLabel } from './editions.mjs';
-import { bold, cmd, file } from './out.mjs';
+import { bold, cmd, file, symbols } from './out.mjs';
 
 const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
@@ -90,23 +90,23 @@ export function suggest(input, ids) {
 const pad = (s, n) => s + ' '.repeat(Math.max(1, n - s.length));
 
 function overview(bundle, tier, cat) {
-  const out = [`Die Kette rulebook · edition ${editionLabel(tier)}, version ${bundle.version}`, `Location: ${file(tilde(bundle.dir))}`, ''];
+  const out = [`Die Kette rulebook ${symbols().sep} edition ${editionLabel(tier)}, version ${bundle.version}`, `Location: ${file(tilde(bundle.dir))}`, ''];
   const width = Math.max(...[...cat.core, ...cat.patterns, ...cat.stacks, ...cat.platforms].map((t) => t.id.length)) + 2;
   // One line per topic, cut to the terminal width
   const row = (id, text) => `  ${pad(id, width)}${short(text, Math.max(40, (process.stdout.columns || 100) - width - 3))}`;
-  out.push('Core rules (always apply)');
+  out.push(bold('Core rules (always apply)'));
   for (const t of cat.core) out.push(row(t.id, t.summary || t.title));
-  out.push('', 'Architecture patterns (chosen in .kette/profile.json)');
+  out.push('', bold('Architecture patterns (chosen in .kette/profile.json)'));
   for (const t of cat.patterns) out.push(row(t.id, `${t.title}: ${t.summary}`));
   if (tier === ENTERPRISE) {
-    out.push('', 'Stack profiles');
+    out.push('', bold('Stack profiles'));
     for (const t of cat.stacks) out.push(row(t.id, t.summary));
-    out.push('', 'Platform profiles');
+    out.push('', bold('Platform profiles'));
     for (const t of cat.platforms) out.push(row(t.id, t.summary));
   } else {
     out.push('', `Stack and platform profiles come with Enterprise (Die Kette): ${cmd('kette login <key>')}`);
   }
-  out.push('', `Read a topic: ${cmd('kette rules <topic>')}${cat.core[0] ? `, e.g. ${cmd(`kette rules ${cat.core[0].id}`)}` : ''} · file paths: --path`);
+  out.push('', `Read a topic: ${cmd('kette rules <topic>')}${cat.core[0] ? `, e.g. ${cmd(`kette rules ${cat.core[0].id}`)}` : ''} ${symbols().sep} file paths: --path`);
   return out.join('\n');
 }
 

@@ -15,7 +15,7 @@ import { rules, tilde } from './rules.mjs';
 import { cliHint, cliUpgradeHint, credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 import { SCOPE } from './npmrc.mjs';
 import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
-import { cmd, file, status } from './out.mjs';
+import { accent, bold, brandLine, cmd, configure, dim, error, file, num, status, symbols } from './out.mjs';
 import { othersCanRead, privateHint } from './files.mjs';
 import { ExitError } from './errors.mjs';
 
@@ -45,7 +45,7 @@ const PATTERNS = [
   { value: 'multi-tenant', label: 'Multi-tenancy' },
 ];
 
-const HELP = `kette ${VERSION} · set up the rules and agents of Die Kette
+const HELP = `Set up the rules and agents of Die Kette.
 
 Commands:
   kette init [folder]   Create a new project with profile, rules and agents
@@ -73,8 +73,14 @@ Options:
   --no-npm              With kette login and update, do not set up npm access
   --npm-replace         Comment out an existing @getitdone-gmbh line in ~/.npmrc and use Die Kette
   --out folder          Target folder for kette figma
+  --color, --no-color   Force colors on or off (default: on in a terminal, off in pipes, CI and with NO_COLOR)
 
 The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.`;
+
+// Brand line with version and edition, only on init and help
+const brand = () => brandLine(`kette ${VERSION} ${symbols().sep} ${editionLabel(tierOf())}`);
+// Commands and options in the accent color; padding stays plain so the columns line up
+const help = () => [brand(), '', HELP.replace(/^ {2}((?:kette|--)\S*(?: \S+)*?)(?= {2,}|$)/gm, (_, usage) => `  ${cmd(usage)}`)].join('\n');
 
 const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
@@ -231,6 +237,15 @@ function platformStatus(bundleDir, id) {
   return JSON.parse(fs.readFileSync(f, 'utf8')).find((p) => p.id === id)?.status || null;
 }
 
+// Why platform templates are missing (Enterprise only); Community gets its Enterprise hint once, as the last next step
+function templateHint(rendered, templates, target, bundleDir) {
+  if (rendered.newer) return `The installed rulebook is newer than this CLI understands (${rendered.newer}), platform templates and checks are skipped. ${cliUpgradeHint()}`;
+  if (!templates) return `The installed rulebook has no profile-aware templates yet, load the current one with: ${cmd('kette update')}`;
+  if (!target.platform?.id) return `The profile has no platform, platform templates are skipped. Add one to .kette/profile.json, e.g. "platform": { "id": "github-docker" }, and run ${cmd('kette add')} again.`;
+  if (!templates.platform) return `No templates for ${target.platform.id} yet (status: ${platformStatus(bundleDir, target.platform.id) || 'unknown'}).`;
+  return null;
+}
+
 async function setup(root, opts, isNew) {
   const tier = tierOf();
   const bundleDir = await ensureBundle(tier);
@@ -257,11 +272,8 @@ async function setup(root, opts, isNew) {
   print(described);
   const stale = staleNote(described);
   if (stale) console.log(stale);
-  if (tier === COMMUNITY) console.log(`\n  Agents, gates with code reviewer, platform templates and checks come with the Enterprise edition (Die Kette): ${cmd('kette login <key>')}`);
-  else if (rendered.newer) console.log(`\n  The installed rulebook is newer than this CLI understands (${rendered.newer}), platform templates and checks are skipped. ${cliUpgradeHint()}`);
-  else if (!templates) console.log(`\n  The installed rulebook has no profile-aware templates yet, load the current one with: ${cmd('kette update')}`);
-  else if (!target.platform?.id) console.log(`\n  The profile has no platform, platform templates are skipped. Add one to .kette/profile.json, e.g. "platform": { "id": "github-docker" }, and run ${cmd('kette add')} again.`);
-  else if (!templates.platform) console.log(`\n  No templates for ${target.platform.id} yet (status: ${platformStatus(bundleDir, target.platform.id) || 'unknown'}).`);
+  const missing = tier === ENTERPRISE ? templateHint(rendered, templates, target, bundleDir) : null;
+  if (missing) console.log(`\n  ${missing}`);
   for (const s of templates?.skipped || []) console.log(`  No templates for ${s.stack}: ${s.reason}`);
   if (opts.dryRun) return 0;
   if (!(await confirm('\nCreate these files?', opts.yes))) { console.log('Cancelled, nothing written.'); return 1; }
@@ -299,16 +311,18 @@ function summary(described, tier, pluginsOk, rulesDir, root) {
   const label = { append: ' (appended)', update: ' (updated)' };
   const changed = described.filter((d) => d.action !== 'keep').map((d) => `${file(d.path)}${label[d.action] || ''}`);
   const steps = [...cdStep(root), cmd('kette doctor'), 'Open Claude Code in the project and ask: "Check this code against the Die Kette rules"'];
-  if (tier === COMMUNITY) steps.push(`${cmd('kette login <key>')} for agents, gates, profiles and checks (Enterprise)`);
-  else steps.push(`A whole feature with all roles and gates: ${cmd('/feature-loop start <feature>')}`);
+  if (tier === ENTERPRISE) steps.push(`A whole feature with all roles and gates: ${cmd('/feature-loop start <feature>')}`);
+  const numbered = steps.map((s, i) => `  ${num(`${i + 1}.`)} ${s}`);
+  // The only Enterprise hint for Community, dimmed as the last step
+  if (tier === COMMUNITY) numbered.push(dim(`  ${steps.length + 1}. kette login <key> for agents, gates, profiles and checks (Enterprise)`));
   const plugins = pluginSummary(tier, MARKETPLACE, rulesDir);
   return [
     '',
-    `Done. In the project: ${changed.length ? changed.join(', ') : 'nothing changed, everything already in place'}`,
-    pluginsOk ? `Active in Claude Code: ${plugins}` : `Not active in Claude Code yet (plugins: ${plugins})`,
-    `Rulebook on this machine: ${file(tilde(rulesDir))}, browse with: ${cmd('kette rules')}`,
-    'Next steps:',
-    ...steps.map((s, i) => `  ${i + 1}. ${s}`),
+    `${bold(accent('Done.'))} In the project: ${changed.length ? changed.join(', ') : 'nothing changed, everything already in place'}`,
+    pluginsOk ? `${bold('Active in Claude Code:')} ${plugins}` : `${bold('Not active in Claude Code yet')} ${dim(`(plugins: ${plugins})`)}`,
+    `${bold('Rulebook on this machine:')} ${file(tilde(rulesDir))}${dim(', browse with:')} ${cmd('kette rules')}`,
+    bold('Next steps:'),
+    ...numbered,
   ].join('\n');
 }
 
@@ -328,7 +342,7 @@ async function doctor(root, opts) {
   const line = (ok, msg) => { console.log(`${ok ? status('ok', 'OK  ') : status('fail', 'FAIL')} ${msg}`); if (!ok) problems++; };
   const warn = (msg) => console.log(`${status('warn', 'WARN')} ${msg}`);
   const info = (msg) => console.log(`${status('info', 'INFO')} ${msg}`);
-  line(Number(process.versions.node.split('.')[0]) >= 20, `Node ${process.versions.node} (20 or newer)`);
+  line(Number(process.versions.node.split('.')[0]) >= 20, `Node ${process.versions.node} ${dim('(20 or newer)')}`);
   line(Boolean(tool('git')), 'git found');
   if (!opts.ci) {
     const claude = hasClaude();
@@ -338,7 +352,7 @@ async function doctor(root, opts) {
   const tier = tierOf();
   const bundle = installedBundle(tier);
   edition(tier, { line, warn });
-  line(Boolean(bundle), `Rulebook installed (${editionLabel(tier)}${bundle ? `, version ${bundle.version}` : ''})`);
+  line(Boolean(bundle), `Rulebook installed ${dim(`(${editionLabel(tier)}${bundle ? `, version ${bundle.version}` : ''})`)}`);
   if (bundle) info(`Rulebook and plugins live in ${file(tilde(fs.existsSync(activeBundleLink()) ? activeBundleLink() : bundle.dir))}`);
   const raw = readProfile(root);
   const profile = normalizeProfile(raw);
@@ -349,7 +363,7 @@ async function doctor(root, opts) {
   if (profile && bundle) {
     const errs = validate(loadSchema(bundle.dir), profile);
     line(errs.length === 0, `Profile valid${errs.length ? `: ${errs.join('; ')}` : ''}`);
-    if (PREVIEW.includes(platformStatus(bundle.dir, profile.platform?.id))) warn(`Platform ${profile.platform.id} is still a preview (no verified reference project)`);
+    if (PREVIEW.includes(platformStatus(bundle.dir, profile.platform?.id))) warn(`Platform ${profile.platform.id} is still a preview ${dim('(no verified reference project)')}`);
     if (profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn(`Profile requires the Enterprise edition (Die Kette), only Community is installed here. Agents, gates, /feature-loop, platform profiles and checks from .kette/README.md are missing. Unlock with: ${cmd('kette login <key>')}`);
     if (profile.tier !== ENTERPRISE && tier === ENTERPRISE) warn(`Enterprise (Die Kette) is installed here, the project is on Community. Switch to the flow with agents and gates: ${cmd('kette add')}`);
     for (const o of profile.overlays || []) warn(`Overlay ${o.source} is loaded by the agents, not checked here`);
@@ -363,7 +377,7 @@ async function doctor(root, opts) {
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules');
-  console.log(problems ? `\n${problems} open issue(s)` : '\nall good');
+  console.log(`\n${problems ? bold(error(`${problems} open issue(s)`)) : bold(accent('all good'))}`);
   return problems ? 1 : 0;
 }
 
@@ -373,10 +387,13 @@ const PREVIEW = ['preview', 'vorschau'];
 // What each plugin of the edition brings, counted from the installed bundle
 function printPluginDetails(tier, bundleDir, info) {
   info('Plugin contents:');
-  for (const { id, lines } of pluginDetails(tier, MARKETPLACE, bundleDir)) {
-    console.log(`       ${id}`);
-    for (const l of lines) console.log(`         ${l}`);
-  }
+  const { tee, end, bar } = symbols();
+  const details = pluginDetails(tier, MARKETPLACE, bundleDir);
+  details.forEach(({ id, lines }, i) => {
+    const last = i === details.length - 1;
+    console.log(`      ${dim(last ? end : tee)} ${id}`);
+    for (const l of lines) console.log(`      ${dim(last ? ' '.repeat(bar.length) : bar)}   ${dim(l)}`);
+  });
 }
 
 // Renews the kette block in .kette/README.md when kette update runs inside a project
@@ -437,17 +454,20 @@ export async function main(argv) {
     opts = parse(argv);
   } catch (err) {
     if (!(err instanceof ExitError)) throw err;
+    configure();
     console.error(`kette: ${err.message}\n`);
-    console.log(HELP);
+    console.log(help());
     return err.exitCode;
   }
+  configure({ color: opts.color, ci: opts.ci });
   const [command, arg] = opts._;
   try {
     if (opts.version || command === 'version') { console.log(VERSION); return 0; }
-    if (!command || opts.help || command === 'help') { console.log(HELP); return 0; }
+    if (!command || opts.help || command === 'help') { console.log(help()); return 0; }
     if (command === 'init') {
       const root = arg || (opts.yes ? '.' : await ask('Folder for the new project', '.'));
       if (fs.existsSync(path.join(root, '.kette', 'profile.json'))) throw new Error(`${root} already has a kette profile, use kette add or kette doctor`);
+      console.log(`${brand()}\n`);
       return await setup(root, opts, !fs.existsSync(root) || fs.readdirSync(root).length === 0);
     }
     if (command === 'add') return await setup('.', opts, false);
@@ -468,7 +488,7 @@ export async function main(argv) {
     if (command === 'figma') return await figma(opts);
     if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...readState() }, null, 2)); return 0; }
     console.error(`Unknown command: ${command}\n`);
-    console.log(HELP);
+    console.log(help());
     return 1;
   } finally {
     close();
