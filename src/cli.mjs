@@ -11,7 +11,7 @@ import { MARKETPLACE, REPAIR_NOTE, editionHints, hasClaude, installEdition, inst
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins } from './editions.mjs';
 import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
-import { coreTopicIds, rules, tilde } from './rules.mjs';
+import { rules, tilde } from './rules.mjs';
 import { cliHint, cliUpgradeHint, credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 import { SCOPE } from './npmrc.mjs';
 import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
@@ -151,9 +151,8 @@ async function buildProfile(root, opts, detected) {
 }
 
 // .kette/README.md as a marked block, so init, add and update renew only that part; tier is the project edition
-// The core topic list comes from the bundle, so a new core rule shows up in the note with the rulebook that brings it
-function noteItem(tier, bundleDir) {
-  const note = agentNote(tier, bundleDir ? coreTopicIds(bundleDir) : undefined);
+function noteItem(tier) {
+  const note = agentNote(tier);
   return { path: NOTE_PATH, mode: 'renew', content: note, renew: (current) => renewNote(current, note) };
 }
 
@@ -211,7 +210,7 @@ function adrItem(root, bundleDir) {
 function planFor(root, profile, bundleDir, tier, noteTier, templates, apps) {
   const plan = [
     { path: '.kette/profile.json', mode: 'renew', content: JSON.stringify(profile, null, 2) + '\n', renew: (current) => renewProfile(current, noteTier, apps) },
-    noteItem(noteTier, bundleDir),
+    noteItem(noteTier),
     { path: 'CLAUDE.md', mode: 'append', marker: '@.kette/README.md', content: '@.kette/README.md\n', note: 'points to the Die Kette rules' },
     adrItem(root, bundleDir),
   ].filter(Boolean);
@@ -282,17 +281,29 @@ function detectedLine(detected, opts) {
   return `Detected: ${stack} · ${platform}${defaulted.length ? ` (change with ${defaulted.join(' / ')})` : ''}`;
 }
 
+// Detected stacks the bundle schema does not list yet (an older rulebook) stay out, so detection never makes an invalid profile
+function detectFor(root, isNew, schema) {
+  if (isNew) return { folders: { apps: {}, unusable: {} }, detected: { stack: [], platform: null, apps: {} }, unknown: [] };
+  const known = schema.properties?.stack?.items?.enum;
+  const keep = (stack) => !known || known.includes(stack);
+  const pick = (map) => Object.fromEntries(Object.entries(map).filter(([stack]) => keep(stack)));
+  const found = detectAppFolders(root);
+  const stacks = detectStack(root);
+  const folders = { apps: pick(found.apps), unusable: pick(found.unusable) };
+  return { folders, detected: { stack: stacks.filter(keep), platform: detectPlatform(root), apps: folders.apps }, unknown: stacks.filter((s) => !keep(s)) };
+}
+
 async function setup(root, opts, isNew) {
   const tier = tierOf();
   const bundleDir = await ensureBundle(tier);
   if (isNew) fs.mkdirSync(root, { recursive: true });
-  const folders = isNew ? { apps: {}, unusable: {} } : detectAppFolders(root);
-  const detected = isNew ? { stack: [], platform: null, apps: {} } : { stack: detectStack(root), platform: detectPlatform(root), apps: folders.apps };
+  const schema = loadSchema(bundleDir);
+  const { folders, detected, unknown } = detectFor(root, isNew, schema);
   if (!isNew) console.log(detectedLine(detected, opts));
+  if (unknown.length) console.log(`${status('warn', 'WARN')} The installed rulebook does not know ${unknown.join(', ')} yet, left out of the profile. Load the current one with: ${cmd('kette update')}`);
   if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
   // apps only matters where templates are rendered, so Community stays quiet
   if (tier === ENTERPRISE) for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} ${unusableFolder(dir, stack)}`);
-  const schema = loadSchema(bundleDir);
   // apps says where the templates go, so only Enterprise writes it; a Community project gets it from detection when it is upgraded
   const appsSchema = tier === ENTERPRISE ? schema : {};
   const profile = withApps(await buildProfile(root, opts, detected), appsSchema, detected.apps, folders.unusable);
@@ -453,7 +464,7 @@ function renewProjectNote(root) {
   const profile = existingProfile(root);
   if (!profile) return;
   const tier = Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
-  const [d] = describe([noteItem(tier, installedBundle(tierOf())?.dir)], root);
+  const [d] = describe([noteItem(tier)], root);
   if (d.unmarked) { console.log(staleNote([d])); return; }
   if (d.action === 'keep') return;
   apply([d], root);
@@ -478,7 +489,7 @@ async function updateBundle(opts) {
   const have = installedBundle(tier);
   if (have?.version === manifest.version) {
     console.log(`Up to date (version ${manifest.version}).`);
-    if (!opts.dryRun && !opts.noPlugins && hasClaude() && pluginsOutdated(tier)) {
+    if (!opts.dryRun && !opts.noPlugins && hasClaude() && pluginsOutdated(have.dir, tier)) {
       console.log(REPAIR_NOTE);
       refreshPlugins(have.dir, tier);
     }

@@ -205,6 +205,27 @@ test('init nennt alle Plugins der Edition zum Einrichten von Hand, wenn Claude C
   assert.match(out, /By hand:\n  claude plugin marketplace add "[^"]+"\n  claude plugin install kette-engineering-core@kette\n  claude plugin install ui-laws@kette\n/);
 });
 
+test('add leaves a detected stack the installed schema does not know out of the profile, with a hint', async () => {
+  const d = rulebook('community');
+  const stacks = ['nextjs-ts-tailwind', 'nestjs-prisma', 'nestjs-mongoose', 'python-fastapi', 'react-native-expo'];
+  write(d, 'schema/profile.schema.json', JSON.stringify({ type: 'object', required: ['version', 'project', 'stack'], properties: { stack: { type: 'array', minItems: 1, items: { enum: stacks } }, tier: { enum: ['community', 'enterprise'] } } }));
+  const root = tmp();
+  write(root, 'apps/web/package.json', JSON.stringify({ dependencies: { next: '16' } }));
+  write(root, 'apps/spa/package.json', JSON.stringify({ dependencies: { react: '19' }, devDependencies: { vite: '7' } }));
+  write(root, 'apps/spa/index.html', '<div id="root"></div>');
+  const cwd = process.cwd();
+  process.chdir(root);
+  try {
+    const { result, out } = await run('add', '--yes', '--no-plugins');
+    assert.equal(result, 0);
+    assert.match(out, /^WARN The installed rulebook does not know react-spa yet, left out of the profile\. Load the current one with: kette update$/m);
+    assert.doesNotMatch(out, /Invalid profile/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.kette', 'profile.json'), 'utf8')).stack, ['nextjs-ts-tailwind']);
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
 test('add erneuert nur den Kette-Block, eigene Notizen bleiben', async () => {
   rulebook('community');
   const root = tmp();

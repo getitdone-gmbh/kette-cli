@@ -27,11 +27,32 @@ test('detects a Vite React app as react-spa with its folder, Next.js and Expo st
   const { detectAppFolders } = await import('../src/detect.mjs');
   const d = tmp();
   write(d, 'apps/spa/package.json', JSON.stringify({ dependencies: { react: '19' }, devDependencies: { vite: '7' } }));
+  write(d, 'apps/spa/index.html', '<div id="root"></div>');
   write(d, 'apps/web/package.json', JSON.stringify({ dependencies: { next: '16', react: '19' }, devDependencies: { vite: '7' } }));
   write(d, 'apps/mobile/package.json', JSON.stringify({ dependencies: { expo: '52', react: '19' }, devDependencies: { vite: '7' } }));
   write(d, 'tools/docs/package.json', JSON.stringify({ devDependencies: { vite: '7' } }));
   assert.deepEqual(detectStack(d).sort(), ['nextjs-ts-tailwind', 'react-native-expo', 'react-spa']);
   assert.equal(detectAppFolders(d).apps['react-spa'], 'apps/spa');
+});
+
+test('react-spa needs Vite, React and an index.html, and no framework, native app or library', () => {
+  const spa = { dependencies: { react: '19' }, devDependencies: { vite: '7' } };
+  const cases = [
+    ['plain Vite React app', spa, true, true],
+    ['no index.html', spa, false, false],
+    ['no vite', { dependencies: { react: '19' } }, true, false],
+    ['react-native', { ...spa, dependencies: { react: '19', 'react-native': '0.80' } }, true, false],
+    ['React Router framework', { ...spa, devDependencies: { vite: '7', '@react-router/dev': '7' } }, true, false],
+    ['Remix', { ...spa, dependencies: { react: '19', '@remix-run/react': '2' } }, true, false],
+    ['TanStack Start', { ...spa, dependencies: { react: '19', '@tanstack/react-start': '1' } }, true, false],
+    ['component library', { ...spa, peerDependencies: { react: '>=18' } }, true, false],
+  ];
+  for (const [name, pkg, html, want] of cases) {
+    const d = tmp();
+    write(d, 'package.json', JSON.stringify(pkg));
+    if (html) write(d, 'index.html', '<div id="root"></div>');
+    assert.equal(detectStack(d).includes('react-spa'), want, name);
+  }
 });
 
 test('erkennt Plattformen an CI- und IaC-Dateien', () => {

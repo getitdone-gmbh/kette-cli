@@ -298,6 +298,23 @@ test('logout installiert ui-laws aus dem lokalen Community-Paket wieder', { skip
   assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'ui-laws@kette']);
 });
 
+test('login then logout with an old Community bundle: ui-gesetze is removed for Enterprise and comes back on logout', { skip: process.platform === 'win32' }, async () => {
+  const old = path.join(kh, 'bundles', 'community', '0.20261020.7');
+  write(old, '.claude-plugin/marketplace.json', '{"name":"kette","plugins":[]}');
+  for (const p of ['kette-engineering-core', 'ui-gesetze']) write(old, `plugins/${p}/.claude-plugin/plugin.json`, '{}');
+  fs.writeFileSync(path.join(kh, 'state.json'), JSON.stringify({ bundle_community: { version: '0.20261020.7', dir: old } }));
+  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: path.join(kh, 'bundles', 'active') }], 'kette-engineering-core@kette\nui-gesetze@kette\n');
+  let out;
+  try {
+    await run('login', KEYS.ok, '--no-npm');
+    assert.ok(!claude.installed().includes('ui-gesetze@kette'), 'Enterprise has the skills in design-review-pack');
+    ({ out } = await run('logout'));
+  } finally { claude.restore(); }
+  assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'ui-gesetze@kette']);
+  assert.ok(!claude.calls().includes('plugin install ui-laws@kette'));
+  assert.doesNotMatch(out, /does not contain/);
+});
+
 test('ein einzeln installiertes Agenten-Pack wird nicht angefasst, doppelte Plugins werden genannt', { skip: process.platform === 'win32' }, async () => {
   const claude = fakeClaude([{ name: 'claude-design-agent-pack', source: 'directory', path: '/zip/agent-pack' }], 'design-system-agents@claude-design-agent-pack\nui-gesetze@claude-design-agent-pack\n');
   let out;

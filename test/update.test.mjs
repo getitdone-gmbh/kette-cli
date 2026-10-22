@@ -7,9 +7,11 @@ import { main } from '../src/cli.mjs';
 // Community bundles before and after the agent pack renamed ui-gesetze to ui-laws
 const OLD = '0.20261020.9';
 const NEW = '0.20261022.40';
+const BARE = '0.20261022.41';
 const bundles = {
   [OLD]: fakeBundle(OLD, ['kette-engineering-core', 'ui-gesetze']),
   [NEW]: fakeBundle(NEW, ['kette-engineering-core', 'ui-laws']),
+  [BARE]: fakeBundle(BARE, ['kette-engineering-core']),
 };
 let current = OLD;
 let server;
@@ -74,4 +76,23 @@ test('Community update that is up to date with matching plugins leaves Claude Co
   try { ({ out } = await run('update')); } finally { claude.restore(); }
   assert.equal(out, 'Up to date (version 0.20261022.40).');
   assert.deepEqual(claude.calls().filter((c) => c !== '--version' && c !== 'plugin list'), []);
+});
+
+test('an up to date bundle without ui-laws does not trigger a repair on every update', { skip: process.platform === 'win32' }, async () => {
+  current = BARE;
+  await run('update', '--no-plugins');
+  const claude = fakeClaude([], 'kette-engineering-core@kette\n');
+  let out;
+  try { ({ out } = await run('update')); } finally { claude.restore(); }
+  assert.equal(out, `Up to date (version ${BARE}).`);
+  assert.ok(!claude.calls().some((c) => /^plugin (install|uninstall|marketplace)/.test(c)));
+});
+
+test('an old bundle that still has ui-gesetze keeps it installed and is not repaired', { skip: process.platform === 'win32' }, async () => {
+  await run('update', '--no-plugins');
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-gesetze@kette\n');
+  let out;
+  try { ({ out } = await run('update')); } finally { claude.restore(); }
+  assert.equal(out, `Up to date (version ${OLD}).`);
+  assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'ui-gesetze@kette']);
 });

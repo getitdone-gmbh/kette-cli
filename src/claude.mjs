@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { bundlesDir } from './paths.mjs';
-import { RENAMED_PLUGINS, missingPlugins, pluginsFor } from './editions.mjs';
+import { RENAMED_PLUGINS, bundlePlugins } from './editions.mjs';
 import { cmd, status } from './out.mjs';
 
 // Own name, so the developer marketplace kette-engineering (repo) is never hit
@@ -127,9 +127,8 @@ export function installPlugins(source, plugins, retire = []) {
 // A renamed plugin is retired once the bundle has its successor or the successor is retired as well:
 // kette update replaces ui-gesetze@kette with ui-laws@kette, kette login removes both
 export function installEdition(link, tier, retire = []) {
-  const missing = missingPlugins(link, tier);
-  const present = pluginsFor(tier).filter((p) => !missing.includes(p));
-  const renamed = Object.keys(RENAMED_PLUGINS).filter((old) => present.includes(RENAMED_PLUGINS[old]) || retire.includes(RENAMED_PLUGINS[old]));
+  const { present, missing } = bundlePlugins(link, tier);
+  const renamed = Object.keys(RENAMED_PLUGINS).filter((old) => !present.includes(old) && (present.includes(RENAMED_PLUGINS[old]) || retire.includes(RENAMED_PLUGINS[old])));
   const retireAll = [...new Set([...retire, ...renamed])];
   return { ...installPlugins(link, present, retireAll), present, missing };
 }
@@ -154,11 +153,14 @@ export function installedPlugins() {
 
 export const pluginInstalled = (name, list = installedPlugins()) => listed(list, pluginId(name));
 
-// An edition plugin is missing in Claude Code or an old name is still installed, e.g. after CLI 0.6.1 loaded a bundle with ui-laws; false when the list is not readable
-export function pluginsOutdated(tier) {
+// A plugin the bundle has is missing in Claude Code, or an old name is still installed that this edition no longer uses
+// (e.g. after CLI 0.6.1 loaded a bundle with ui-laws); plugins the bundle lacks never count, so an update does not repair again and again
+export function pluginsOutdated(bundleDir, tier) {
   const list = installedPlugins();
   if (list === null) return false;
-  return pluginsFor(tier).some((p) => !listed(list, pluginId(p))) || Object.keys(RENAMED_PLUGINS).some((old) => listed(list, pluginId(old)));
+  const { present } = bundlePlugins(bundleDir, tier);
+  const stale = Object.keys(RENAMED_PLUGINS).filter((old) => !present.includes(old));
+  return present.some((p) => !listed(list, pluginId(p))) || stale.some((old) => listed(list, pluginId(old)));
 }
 
 export const REPAIR_NOTE = 'Claude Code plugins do not match the installed bundle, installing them again.';

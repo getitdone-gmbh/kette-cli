@@ -18,8 +18,16 @@ export const normalizeTier = (tier) => (isLegacyTier(tier) ? LEGACY[tier] : tier
 export const editionLabel = (tier) => (Object.hasOwn(EDITIONS, normalizeTier(tier)) ? EDITIONS[normalizeTier(tier)].label : String(tier));
 export const pluginsFor = (tier) => EDITIONS[normalizeTier(tier)].plugins;
 
-// Edition plugins that an older bundle on this machine does not contain yet
-export const missingPlugins = (bundleDir, tier) => pluginsFor(tier).filter((p) => !fs.existsSync(path.join(bundleDir, 'plugins', p)));
+const inBundle = (bundleDir, p) => fs.existsSync(path.join(bundleDir, 'plugins', p));
+// The plugin under its old name when an older bundle only has that one, so ui-gesetze stays usable until kette update
+const nameInBundle = (bundleDir, p) => (inBundle(bundleDir, p) ? p : Object.keys(RENAMED_PLUGINS).find((old) => RENAMED_PLUGINS[old] === p && inBundle(bundleDir, old)) || p);
+
+// Edition plugins as the bundle names them: present ones to install, missing ones an older bundle does not contain yet
+export function bundlePlugins(bundleDir, tier) {
+  const names = pluginsFor(tier).map((p) => nameInBundle(bundleDir, p));
+  return { present: names.filter((p) => inBundle(bundleDir, p)), missing: names.filter((p) => !inBundle(bundleDir, p)) };
+}
+export const missingPlugins = (bundleDir, tier) => bundlePlugins(bundleDir, tier).missing;
 
 // Plugins of edition from that edition to lacks; they are removed when the edition changes
 export const retiredPlugins = (from, to) => pluginsFor(from).filter((p) => !pluginsFor(to).includes(p));

@@ -28,9 +28,6 @@ function tableRows(md) {
   return md.split('\n').filter((l) => l.trim().startsWith('|')).slice(2).map(cells);
 }
 
-// Ids of the core rules in the bundle, in file order, e.g. readability ... comments
-export const coreTopicIds = (dir) => coreTopics(dir).map((t) => t.id);
-
 function coreTopics(dir) {
   const core = path.join(dir, 'rules', 'core');
   if (!fs.existsSync(core)) return [];

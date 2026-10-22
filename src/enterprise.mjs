@@ -118,7 +118,7 @@ export async function updateEnterprise(opts, cli) {
   }
   if (have && have.version === info.available) {
     console.log(`Up to date (${editionLabel(ENTERPRISE)} ${have.version}).`);
-    if (!opts.dryRun && !opts.noPlugins && hasClaude() && pluginsOutdated(ENTERPRISE)) {
+    if (!opts.dryRun && !opts.noPlugins && hasClaude() && pluginsOutdated(have.dir, ENTERPRISE)) {
       console.log(REPAIR_NOTE);
       plugins(have.dir, opts);
     }

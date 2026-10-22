@@ -7,10 +7,8 @@ const note = agentNote('community');
 const BEGIN = '<!-- kette:begin alt -->';
 const END = '<!-- kette:end -->';
 
-test('the Community flow names the core topics, from the bundle when given', () => {
+test('the Community flow names the fixed core topics, comments included', () => {
   assert.match(note, /follow it \(readability, structure, errors, tests, security, dependencies, logging-operations, changes, comments\)\./);
-  assert.match(agentNote('community', ['readability', 'naming']), /follow it \(readability, naming\)\./);
-  assert.match(agentNote('community', []), /changes, comments\)\./);
 });
 
 test('genau ein Block wird ersetzt, Text davor und danach bleibt', () => {

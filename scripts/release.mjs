@@ -27,9 +27,9 @@ const count = execFileSync('git', ['-C', eng, 'rev-list', '--count', 'HEAD'], { 
 // Plugins from claude-design-agent-pack per edition, taken from src/editions.mjs: every edition plugin that kette-engineering does not ship
 const { COMMUNITY, ENTERPRISE, RENAMED_PLUGINS, pluginsFor } = await import('../src/editions.mjs');
 const engPlugins = JSON.parse(fs.readFileSync(path.join(eng, '.claude-plugin/marketplace.json'), 'utf8')).plugins.map((p) => p.name);
-const packPluginsFor = (tier) => pluginsFor(tier).filter((p) => !engPlugins.includes(p));
-const COMMUNITY_PACK_PLUGINS = packPluginsFor(COMMUNITY);
-const ENTERPRISE_PACK_PLUGINS = packPluginsFor(ENTERPRISE);
+const { packMismatch, packPluginsFor } = await import('./pack-plugins.mjs');
+const COMMUNITY_PACK_PLUGINS = packPluginsFor(pluginsFor(COMMUNITY), engPlugins);
+const ENTERPRISE_PACK_PLUGINS = packPluginsFor(pluginsFor(ENTERPRISE), engPlugins);
 const agentPack = path.resolve(process.env.KETTE_AGENT_PACK || path.join(root, '..', 'claude-design-agent-pack'));
 const newestTag = () => execFileSync('git', ['-C', agentPack, 'tag', '--list', 'v*', '--sort=-v:refname'], { encoding: 'utf8' }).split('\n').find((tag) => /^v\d+\.\d+\.\d+$/.test(tag)) || '';
 const agentPackRef = process.env.KETTE_AGENT_PACK_REF || newestTag();
@@ -40,18 +40,8 @@ const packCount = execFileSync('git', ['-C', agentPack, 'rev-list', '--count', a
 // The pack state must have every plugin the editions install, otherwise a bundle would ship without it (e.g. tag v1.2.2 still has ui-gesetze, the editions need ui-laws)
 const packPlugins = JSON.parse(execFileSync('git', ['-C', agentPack, 'show', `${agentPackCommit}:.claude-plugin/marketplace.json`], { encoding: 'utf8' })).plugins.map((p) => p.name);
 const packDirs = execFileSync('git', ['-C', agentPack, 'ls-tree', '--name-only', agentPackCommit, 'plugins/'], { encoding: 'utf8' }).split('\n').filter(Boolean).map((d) => d.replace(/^plugins\//, ''));
-const neededPack = [...new Set([...COMMUNITY_PACK_PLUGINS, ...ENTERPRISE_PACK_PLUGINS])];
-const lackingPack = neededPack.filter((p) => !packPlugins.includes(p) || !packDirs.includes(p));
-if (lackingPack.length) {
-  const oldNames = lackingPack.flatMap((p) => Object.keys(RENAMED_PLUGINS).filter((old) => RENAMED_PLUGINS[old] === p && packPlugins.includes(old)).map((old) => `${old} (renamed to ${p})`));
-  throw new Error([
-    `claude-design-agent-pack ${agentPackRef} (${agentPackCommit.slice(0, 7)}) does not match the editions in src/editions.mjs, no bundle built.`,
-    `  The pack has: ${packPlugins.join(', ')}`,
-    `  The editions need: ${neededPack.join(', ')}`,
-    `  Missing: ${lackingPack.join(', ')}${oldNames.length ? `; the pack still has the old name ${oldNames.join(', ')}` : ''}`,
-    '  Tag a pack release that has these plugins, or set KETTE_AGENT_PACK_REF to such a state for a local test build.',
-  ].join('\n'));
-}
+const mismatch = packMismatch({ ref: agentPackRef, commit: agentPackCommit, packPlugins, packDirs, needed: [...new Set([...COMMUNITY_PACK_PLUGINS, ...ENTERPRISE_PACK_PLUGINS])], renamed: RENAMED_PLUGINS });
+if (mismatch) throw new Error(mismatch);
 // Semver, damit Claude Code neue Plugin-Versionen erkennt: 0.<Datum>.<Commits kette-engineering plus Commits Agenten-Pack>; ein neuer Stand in einem der beiden Repos ergibt eine neue Version
 const version = `0.${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${Number(count) + Number(packCount)}`;
 // Feste Zeit für alle Dateien im Paket (jüngerer der beiden Commits), damit gleicher Inhalt dieselbe Prüfsumme ergibt

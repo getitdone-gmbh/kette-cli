@@ -12,6 +12,16 @@ const listFiles = (dir, depth = 2) => {
   });
 };
 
+// Full-stack and native React frameworks that also use Vite or React but are no single page app
+const NOT_SPA = ['next', 'expo', 'react-native', '@react-router/dev', '@tanstack/react-start'];
+
+// A Vite React app with its own index.html; a library (React as peer dependency) or a framework app does not count
+function isReactSpa(file, pkg, deps) {
+  if (!deps.vite || !deps.react || pkg.peerDependencies?.react) return false;
+  if (NOT_SPA.some((d) => deps[d]) || Object.keys(deps).some((d) => d.startsWith('@remix-run/'))) return false;
+  return exists(path.dirname(file), 'index.html');
+}
+
 // Stacks of one manifest: package.json, pyproject.toml or requirements.txt
 function stacksOf(file) {
   if (path.basename(file) !== 'package.json') return /fastapi/i.test(fs.readFileSync(file, 'utf8')) ? ['python-fastapi'] : [];
@@ -23,8 +33,7 @@ function stacksOf(file) {
   else if (deps['@nestjs/core'] && (deps.mongoose || deps['@nestjs/mongoose'])) stacks.push('nestjs-mongoose');
   else if (deps['@nestjs/core']) stacks.push('nestjs-prisma');
   if (deps.expo) stacks.push('react-native-expo');
-  // A Vite React app; Next.js and Expo bring React too and are their own stacks
-  else if (deps.vite && deps.react && !deps.next) stacks.push('react-spa');
+  else if (isReactSpa(file, p, deps)) stacks.push('react-spa');
   return stacks;
 }
 
