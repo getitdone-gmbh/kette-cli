@@ -6,14 +6,16 @@ export const COMMUNITY = 'community';
 export const ENTERPRISE = 'enterprise';
 
 const EDITIONS = {
-  [COMMUNITY]: { label: 'Community', plugins: ['kette-engineering-core', 'ui-gesetze'] },
-  [ENTERPRISE]: { label: 'Enterprise (Die Kette)', plugins: ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack'] },
+  [COMMUNITY]: { label: 'Community', plugins: ['kette-engineering-core', 'ui-laws'] },
+  [ENTERPRISE]: { label: 'Enterprise (Die Kette)', plugins: ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack', 'ui-laws'] },
 };
+// Plugins renamed in a newer bundle, old name to new name; installs in both editions remove the old one once the bundle has the new one
+export const RENAMED_PLUGINS = { 'ui-gesetze': 'ui-laws' };
 const LEGACY = { free: COMMUNITY, kette: ENTERPRISE };
 
-export const normalizeTier = (tier) => LEGACY[tier] || tier;
-export const isLegacyTier = (tier) => tier in LEGACY;
-export const editionLabel = (tier) => EDITIONS[normalizeTier(tier)]?.label || String(tier);
+export const isLegacyTier = (tier) => Object.hasOwn(LEGACY, tier);
+export const normalizeTier = (tier) => (isLegacyTier(tier) ? LEGACY[tier] : tier);
+export const editionLabel = (tier) => (Object.hasOwn(EDITIONS, normalizeTier(tier)) ? EDITIONS[normalizeTier(tier)].label : String(tier));
 export const pluginsFor = (tier) => EDITIONS[normalizeTier(tier)].plugins;
 
 // Edition plugins that an older bundle on this machine does not contain yet

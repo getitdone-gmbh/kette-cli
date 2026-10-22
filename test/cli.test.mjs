@@ -60,6 +60,13 @@ test('without a terminal a question stops with exit code 2 and a hint instead of
   assert.equal(r.stderr.trim(), 'kette: No terminal. Use --yes with --stack/--platform/--patterns.');
 });
 
+test('arguments named like Object prototype keys stay positional, never a flag', async () => {
+  const { parse } = await import('../src/cli.mjs');
+  for (const key of ['toString', '__proto__', 'constructor', 'hasOwnProperty']) {
+    assert.deepEqual(parse(['rules', key]), { _: ['rules', key] }, key);
+  }
+});
+
 test('unknown options and options without a value stop with exit code 2 and the help', async () => {
   const { main, parse } = await import('../src/cli.mjs');
   assert.throws(() => parse(['init', '--stak', 'x']), /Unknown option --stak/);

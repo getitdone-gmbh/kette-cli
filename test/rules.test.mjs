@@ -23,7 +23,7 @@ function rulebook(tier, { profiles = false } = {}) {
   write(d, 'plugins/kette-engineering-core/skills/engineering-rules/SKILL.md', 'x');
   write(d, 'plugins/kette-engineering-core/skills/architecture-patterns/SKILL.md', 'x');
   write(d, 'plugins/kette-engineering-core/agents/kette-check.md', 'x');
-  for (const s of ['ui-laws', 'interaction-principles', 'a11y-standards']) write(d, `plugins/ui-gesetze/skills/${s}/SKILL.md`, 'x');
+  for (const s of ['ui-laws', 'interaction-principles', 'a11y-standards']) write(d, `plugins/ui-laws/skills/${s}/SKILL.md`, 'x');
   if (profiles) {
     write(d, 'profiles/stack/README.md', '| ID | Datei | Einsatz |\n|---|---|---|\n| `nestjs-prisma` | [nestjs-prisma.md](nestjs-prisma.md) | Backend mit relationalen Daten |\n');
     write(d, 'profiles/stack/nestjs-prisma.md', '# Stack: NestJS + Prisma\n');
@@ -90,7 +90,34 @@ test('rules resolves the German topic names of older rulebooks through rules/ali
   assert.equal((await run('rules', 'readability', '--path')).out, file);
   assert.equal((await run('rules', 'Lesbarkeit', '--path')).out, file);
   assert.equal((await run('rules', '01-lesbarkeit', '--path')).out, file);
-  await assert.rejects(run('rules', 'lesbarkei'), /Unknown topic "lesbarkei"/);
+  await assert.rejects(run('rules', 'lesbarkei'), /Unknown topic "lesbarkei"\. Did you mean: readability\? All topics/);
+});
+
+test('a typo of an old German name suggests the topic it points to', async () => {
+  const d = rulebook('community');
+  fs.renameSync(path.join(d, 'rules', 'core', '03-fehler.md'), path.join(d, 'rules', 'core', '03-errors.md'));
+  write(d, 'rules/aliases.json', JSON.stringify({ format: 1, topics: { fehler: 'errors', '03-fehler': 'errors', weg: 'gone' } }));
+  await assert.rejects(run('rules', 'fehlr'), /Unknown topic "fehlr"\. Did you mean: errors\? All topics: kette rules/);
+  // An alias whose target is not in the bundle is a clean unknown topic and never a suggestion
+  await assert.rejects(run('rules', 'weg'), /^Error: Unknown topic "weg"\. All topics: kette rules$/);
+});
+
+test('a missing or broken rules/aliases.json means no aliases, not a crash', async () => {
+  const d = rulebook('community');
+  for (const broken of [null, '{not json', '[]', '{"topics":"x"}', '{"topics":["readability"]}', '{"topics":{"lesbarkeit":7}}']) {
+    if (broken === null) fs.rmSync(path.join(d, 'rules', 'aliases.json'), { force: true });
+    else write(d, 'rules/aliases.json', broken);
+    await assert.rejects(run('rules', 'lesbarkeit-alt'), /Unknown topic "lesbarkeit-alt"/, String(broken));
+    assert.match((await run('rules', 'lesbarkeit', '--path')).out, /01-lesbarkeit\.md$/, String(broken));
+  }
+});
+
+test('topics named like Object prototype keys are unknown topics, not the overview', async () => {
+  const d = rulebook('community');
+  write(d, 'rules/aliases.json', JSON.stringify({ topics: { lesbarkeit: 'lesbarkeit' } }));
+  for (const key of ['toString', '__proto__', 'constructor', 'hasOwnProperty']) {
+    await assert.rejects(run('rules', key), new RegExp(`Unknown topic "${key}"`), key);
+  }
 });
 
 test('rules mit unbekanntem Thema nennt ähnliche Themen', async () => {
@@ -122,7 +149,7 @@ test('init endet mit Zusammenfassung, .kette/README.md beschreibt den Ablauf der
   assert.equal(result, 0);
   const tail = out.slice(out.indexOf('Done.'));
   assert.match(tail, /^Done\. In the project: \.kette\/profile\.json, \.kette\/README\.md, CLAUDE\.md, docs\/adr\/0000-vorlage\.md\n/);
-  assert.match(tail, /Not active in Claude Code yet \(plugins: kette-engineering-core@kette \(Agent kette-check, Skills architecture-patterns, engineering-rules\), ui-gesetze@kette \(Skills a11y-standards, interaction-principles, ui-laws\)\)/);
+  assert.match(tail, /Not active in Claude Code yet \(plugins: kette-engineering-core@kette \(Agent kette-check, Skills architecture-patterns, engineering-rules\), ui-laws@kette \(Skills a11y-standards, interaction-principles, ui-laws\)\)/);
   assert.match(tail, /browse with: kette rules/);
   assert.match(tail, /Next steps:\n  1\. cd "?\S+neu"?\n  2\. kette doctor\n  3\. Open Claude Code in the project .*\n  4\. kette login <key>/);
   assert.ok(tail.split('\n').length <= 10);
@@ -137,7 +164,7 @@ test('init endet mit Zusammenfassung, .kette/README.md beschreibt den Ablauf der
   assert.doesNotMatch(note, /design-system-agents:/);
   assert.match(note, /## Where the rules live/);
   assert.match(note, /~\/\.kette\/bundles\/active\//);
-  assert.match(note, /In Claude Code the plugins `kette-engineering-core@kette`, `ui-gesetze@kette`\./);
+  assert.match(note, /In Claude Code the plugins `kette-engineering-core@kette`, `ui-laws@kette`\./);
   assert.doesNotMatch(note, /[\u2013\u2014]/);
 });
 
@@ -154,7 +181,7 @@ test('Enterprise: .kette/README.md schreibt Rollen, Pflicht-Gates und /feature-l
   assert.match(note, /\/feature-loop start <feature>/);
   assert.match(note, /A human runs apply, deploys and destructive migrations/);
   assert.match(note, /The agents, gates and `\/feature-loop` need Die Kette on the machine \(`kette login <key>`\)/);
-  assert.match(note, /`design-system-agents@kette`, `design-review-pack@kette`\./);
+  assert.match(note, /`design-system-agents@kette`, `design-review-pack@kette`, `ui-laws@kette`\./);
   assert.doesNotMatch(note, /\d+ (Agents|Skills|Commands)/);
   assert.doesNotMatch(note, /[\u2013\u2014]/);
 });
@@ -164,7 +191,7 @@ test('init nennt alle Plugins der Edition zum Einrichten von Hand, wenn Claude C
   const claude = fakeClaude([{ name: 'kette', source: 'directory', path: '/repos/kette' }]);
   let out;
   try { ({ out } = await run('init', path.join(tmp(), 'neu'), '--yes')); } finally { claude.restore(); }
-  assert.match(out, /By hand:\n  claude plugin marketplace add "[^"]+"\n  claude plugin install kette-engineering-core@kette\n  claude plugin install ui-gesetze@kette\n/);
+  assert.match(out, /By hand:\n  claude plugin marketplace add "[^"]+"\n  claude plugin install kette-engineering-core@kette\n  claude plugin install ui-laws@kette\n/);
 });
 
 test('add erneuert nur den Kette-Block, eigene Notizen bleiben', async () => {
@@ -210,19 +237,19 @@ test('add ersetzt eine unveränderte .kette/README.md aus 0.3.1, eine selbst ge�
 
 test('doctor listet je Plugin Agenten, Skills und Befehle aus dem Paket', async () => {
   const d = rulebook('community');
-  write(d, 'plugins/ui-gesetze/commands/check.md', 'x');
+  write(d, 'plugins/ui-laws/commands/check.md', 'x');
   const project = tmp();
   const cwd = process.cwd();
-  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-gesetze@kette\n');
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-laws@kette\n');
   process.chdir(project);
   try {
     const { out } = await run('doctor');
-    assert.match(out, /OK {3}Plugin ui-gesetze@kette installed/);
+    assert.match(out, /OK {3}Plugin ui-laws@kette installed/);
     // Box characters where Unicode is likely supported, ASCII on a plain Windows console
     const { tee, end, bar } = symbols();
     const pad = ' '.repeat(bar.length);
     assert.ok(out.includes(['INFO Plugin contents:', `      ${tee} kette-engineering-core@kette`, `      ${bar}   Agents (1): kette-check`, `      ${bar}   Skills (2): architecture-patterns, engineering-rules`,
-      `      ${end} ui-gesetze@kette`, `      ${pad}   Skills (3): a11y-standards, interaction-principles, ui-laws`, `      ${pad}   Commands (1): /check`].join('\n')), out);
+      `      ${end} ui-laws@kette`, `      ${pad}   Skills (3): a11y-standards, interaction-principles, ui-laws`, `      ${pad}   Commands (1): /check`].join('\n')), out);
     assert.doesNotMatch((await run('doctor', '--ci')).out, /Plugin contents/);
   } finally {
     claude.restore();
@@ -295,7 +322,7 @@ test('init in another folder starts the next steps with cd, init in the current 
 
 test('doctor outside a project gives a hint instead of an open issue, --ci stays strict', { skip: process.platform === 'win32' }, async () => {
   rulebook('community');
-  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-gesetze@kette\n');
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-laws@kette\n');
   const cwd = process.cwd();
   process.chdir(tmp());
   try {
@@ -344,7 +371,7 @@ test('doctor names a missing plugin as not installed', async () => {
   try {
     const { out } = await run('doctor');
     assert.match(out, /^OK {3}Plugin kette-engineering-core@kette installed$/m);
-    assert.match(out, /^FAIL Plugin ui-gesetze@kette not installed$/m);
+    assert.match(out, /^FAIL Plugin ui-laws@kette not installed$/m);
   } finally {
     claude.restore();
     process.chdir(cwd);

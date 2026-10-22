@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { bundlesDir } from './paths.mjs';
-import { missingPlugins, pluginsFor } from './editions.mjs';
+import { RENAMED_PLUGINS, missingPlugins, pluginsFor } from './editions.mjs';
 import { cmd, status } from './out.mjs';
 
 // Own name, so the developer marketplace kette-engineering (repo) is never hit
@@ -11,7 +11,9 @@ const LEGACY_MARKETPLACE = 'kette-engineering';
 const ALL_PLUGINS = ['kette-engineering-core', 'kette-engineering'];
 // Marketplace of the separately sold agent pack, whose plugins are also in the Die Kette bundle
 const PACK_MARKETPLACE = 'claude-design-agent-pack';
-const PACK_PLUGINS = ['ui-gesetze', 'design-system-agents', 'design-review-pack'];
+const PACK_PLUGINS = ['ui-laws', 'design-system-agents', 'design-review-pack'];
+// A plugin and its names before a rename, so an older pack install is found too
+const withOldNames = (p) => [p, ...Object.keys(RENAMED_PLUGINS).filter((old) => RENAMED_PLUGINS[old] === p)];
 export const pluginId = (name, market = MARKETPLACE) => `${name}@${market}`;
 
 // npm installs Claude Code on Windows as claude.cmd, which only starts through cmd.exe; the command line is built here from fixed values,
@@ -77,7 +79,7 @@ function migrateLegacy(all) {
 // Agent pack installed on its own (ZIP from the purchase): its plugins that kette now installs too show up twice
 function packDuplicates(all, plugins) {
   const pack = all.find((m) => m.name === PACK_MARKETPLACE);
-  if (pack) duplicateHint(pack, plugins.filter((p) => PACK_PLUGINS.includes(p)).map((p) => pluginId(p, PACK_MARKETPLACE)), installedPlugins());
+  if (pack) duplicateHint(pack, plugins.filter((p) => PACK_PLUGINS.includes(p)).flatMap(withOldNames).map((p) => pluginId(p, PACK_MARKETPLACE)), installedPlugins());
 }
 
 // Commands for a manual setup when the CLI cannot drive Claude Code
@@ -122,10 +124,13 @@ export function installPlugins(source, plugins, retire = []) {
 }
 
 // Installs the edition plugins the bundle contains; editionHints reports missing ones instead of failing
+// A renamed plugin is retired once the bundle has its successor, so kette update replaces ui-gesetze@kette with ui-laws@kette
 export function installEdition(link, tier, retire = []) {
   const missing = missingPlugins(link, tier);
   const present = pluginsFor(tier).filter((p) => !missing.includes(p));
-  return { ...installPlugins(link, present, retire), present, missing };
+  const renamed = Object.keys(RENAMED_PLUGINS).filter((old) => present.includes(RENAMED_PLUGINS[old]));
+  const retireAll = [...new Set([...retire, ...renamed])];
+  return { ...installPlugins(link, present, retireAll), present, missing };
 }
 
 export function editionHints(result, link) {

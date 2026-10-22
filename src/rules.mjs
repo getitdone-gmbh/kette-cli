@@ -66,8 +66,15 @@ export function catalog(dir) {
     patterns: patternTopics(dir),
     stacks: stackTopics(dir),
     platforms: platformTopics(dir),
-    renamed: readJson(path.join(dir, 'rules', 'aliases.json'))?.topics || {},
+    renamed: aliasTopics(dir),
   };
+}
+
+// Only string to string entries count, so a missing or damaged aliases.json just means no aliases
+function aliasTopics(dir) {
+  const topics = readJson(path.join(dir, 'rules', 'aliases.json'))?.topics;
+  if (!topics || typeof topics !== 'object' || Array.isArray(topics)) return {};
+  return Object.fromEntries(Object.entries(topics).filter(([from, to]) => typeof to === 'string' && from).map(([from, to]) => [from.toLowerCase(), to.toLowerCase()]));
 }
 
 function distance(a, b) {
@@ -84,10 +91,7 @@ function distance(a, b) {
   return row[b.length];
 }
 
-export function suggest(input, ids) {
-  const q = input.toLowerCase();
-  return ids.filter((id) => id.includes(q) || q.includes(id) || distance(q, id) <= Math.max(2, Math.floor(id.length / 3))).slice(0, 3);
-}
+const isClose = (q, id) => id.includes(q) || q.includes(id) || distance(q, id) <= Math.max(2, Math.floor(id.length / 3));
 
 const pad = (s, n) => s + ' '.repeat(Math.max(1, n - s.length));
 
@@ -150,6 +154,14 @@ function find(cat, topic) {
   return { hit: match(q) || (Object.hasOwn(cat.renamed, q) ? match(cat.renamed[q]) : undefined), ids: all.map((t) => t.id) };
 }
 
+// Suggestions over topic ids and old names; an old name is suggested as the topic it points to, unknown targets are dropped
+function suggestTopics(topic, cat, ids) {
+  const targets = (id) => (Object.hasOwn(cat.renamed, id) ? cat.renamed[id] : id);
+  const q = topic.toLowerCase();
+  const close = [...ids, ...Object.keys(cat.renamed)].filter((id) => isClose(q, id)).map(targets).filter((id) => ids.includes(id));
+  return [...new Set(close)].slice(0, 3);
+}
+
 // kette rules [topic] [--path]; reads only the installed bundle, no network
 export function rules(topic, opts, { bundle, tier, stackIds = [] }) {
   if (!bundle) throw new Error('No rulebook on this machine. Load it with kette init (new project), kette add (existing repo) or kette update.');
@@ -168,7 +180,7 @@ export function rules(topic, opts, { bundle, tier, stackIds = [] }) {
   }
   if (hit && missing) throw new Error(`${tilde(hit.file)} is missing from the bundle. Reload with: kette update`);
   if (!hit) {
-    const close = suggest(topic, [...ids, ...stackIds.filter((s) => !ids.includes(s))]);
+    const close = suggestTopics(topic, cat, [...ids, ...stackIds.filter((s) => !ids.includes(s))]);
     throw new Error(`Unknown topic "${topic}".${close.length ? ` Did you mean: ${close.join(', ')}?` : ''} All topics: kette rules`);
   }
   console.log(opts.path ? hit.file : render(read(hit.file)));

@@ -183,13 +183,15 @@ test('login installiert beide Plugins über den festen Pfad des aktiven Pakets',
   assert.ok(!calls.some((c) => c.startsWith('plugin uninstall')));
 });
 
-test('login entfernt ui-gesetze aus Community, bevor der Marketplace auf Enterprise wechselt', { skip: process.platform === 'win32' }, async () => {
+test('login entfernt das umbenannte ui-gesetze, bevor der Marketplace auf Enterprise wechselt, und installiert ui-laws', { skip: process.platform === 'win32' }, async () => {
   const claude = fakeClaude([], 'kette-engineering-core@kette\nui-gesetze@kette\n');
   try { await run('login', KEYS.ok); } finally { claude.restore(); }
   const calls = claude.calls();
   const rm = calls.indexOf('plugin uninstall ui-gesetze@kette');
   assert.ok(rm >= 0 && rm < calls.indexOf(`plugin marketplace add ${path.join(kh, 'bundles', 'active')}`));
   assert.ok(calls.includes('plugin install design-system-agents@kette'));
+  assert.ok(calls.includes('plugin install ui-laws@kette'));
+  assert.ok(!claude.installed().includes('ui-gesetze@kette'));
 });
 
 test('logout entfernt die Enterprise-Plugins', { skip: process.platform === 'win32' }, async () => {
@@ -260,31 +262,32 @@ test('ohne lesbare Plugin-Liste gilt "not found in installed plugins" als schon 
   assert.ok(!claude.installed().includes('kette-engineering@kette'));
 });
 
-test('logout installiert Community aus dem lokalen Paket und nennt kette update, wenn ui-gesetze darin fehlt', { skip: process.platform === 'win32' }, async () => {
+test('logout installiert Community aus dem lokalen Paket und nennt kette update, wenn ui-laws darin fehlt; ui-gesetze bleibt bis dahin', { skip: process.platform === 'win32' }, async () => {
   const old = path.join(kh, 'bundles', 'community', '0.20261020.7');
   write(old, '.claude-plugin/marketplace.json', '{"name":"kette","plugins":[]}');
   write(old, 'plugins/kette-engineering-core/.claude-plugin/plugin.json', '{}');
   await run('login', KEYS.ok, '--no-plugins');
   const state = path.join(kh, 'state.json');
   fs.writeFileSync(state, JSON.stringify({ ...JSON.parse(fs.readFileSync(state, 'utf8')), bundle_community: { version: '0.20261020.7', dir: old } }));
-  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: path.join(kh, 'bundles', 'active') }], ['kette-engineering-core@kette', ...ENTERPRISE_IDS].join('\n'));
+  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: path.join(kh, 'bundles', 'active') }], ['kette-engineering-core@kette', 'ui-gesetze@kette', ...ENTERPRISE_IDS].join('\n'));
   let out;
   try { ({ out } = await run('logout')); } finally { claude.restore(); }
   const calls = claude.calls();
   const lastUninstall = Math.max(...ENTERPRISE_IDS.map((id) => calls.indexOf(`plugin uninstall ${id}`)));
   assert.ok(lastUninstall >= 0 && lastUninstall < calls.indexOf('plugin marketplace update kette'));
   assert.ok(calls.includes('plugin install kette-engineering-core@kette'));
-  assert.ok(!calls.includes('plugin install ui-gesetze@kette'));
-  assert.match(out, /WARN The bundle on this machine does not contain ui-gesetze yet\. Reload with: kette update/);
+  assert.ok(!calls.includes('plugin install ui-laws@kette'));
+  assert.ok(!calls.includes('plugin uninstall ui-gesetze@kette'), 'the old plugin stays until the bundle has its successor');
+  assert.match(out, /WARN The bundle on this machine does not contain ui-laws yet\. Reload with: kette update/);
   assert.equal(fs.realpathSync(path.join(kh, 'bundles', 'active')), fs.realpathSync(old));
-  assert.deepEqual(claude.installed(), ['kette-engineering-core@kette']);
+  assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'ui-gesetze@kette']);
 });
 
 test('ein einzeln installiertes Agenten-Pack wird nicht angefasst, doppelte Plugins werden genannt', { skip: process.platform === 'win32' }, async () => {
   const claude = fakeClaude([{ name: 'claude-design-agent-pack', source: 'directory', path: '/zip/agent-pack' }], 'design-system-agents@claude-design-agent-pack\nui-gesetze@claude-design-agent-pack\n');
   let out;
   try { ({ out } = await run('login', KEYS.ok)); } finally { claude.restore(); }
-  assert.match(out, /WARN Marketplace claude-design-agent-pack \(\/zip\/agent-pack\) stays untouched\. .*Disable with: claude plugin disable design-system-agents@claude-design-agent-pack$/m);
+  assert.match(out, /WARN Marketplace claude-design-agent-pack \(\/zip\/agent-pack\) stays untouched\. .*Disable with: claude plugin disable design-system-agents@claude-design-agent-pack && claude plugin disable ui-gesetze@claude-design-agent-pack$/m);
   assert.ok(!claude.calls().some((c) => /claude-design-agent-pack/.test(c) && /uninstall|remove/.test(c)));
 });
 

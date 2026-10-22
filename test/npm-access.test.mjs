@@ -266,7 +266,7 @@ test('doctor prüft Block und Token und findet einen Token in einer Datei im Git
   execFileSync('git', ['-C', project, 'init', '-q']);
   execFileSync('git', ['-C', project, 'add', '.']);
   // All Enterprise plugins installed, so a valid token leaves nothing to warn about
-  const claude = fakeClaude([], 'kette-engineering-core@kette\nkette-engineering@kette\ndesign-system-agents@kette\ndesign-review-pack@kette\n');
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nkette-engineering@kette\ndesign-system-agents@kette\ndesign-review-pack@kette\nui-laws@kette\n');
   let out;
   try { ({ out } = await inDir(project, () => run('doctor'))); } finally { claude.restore(); }
   assert.match(out, /OK {3}npm access in /);

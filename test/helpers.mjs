@@ -24,7 +24,7 @@ export function tarball(srcDir, entries = ['.']) {
 }
 
 // Minimales Regelwerk-Paket mit Marketplace und Schema, reicht für init und doctor; extra sind weitere Dateien (Pfad: Inhalt)
-export function fakeBundle(version, plugins = ['kette-engineering-core', 'ui-gesetze', 'kette-engineering', 'design-system-agents', 'design-review-pack'], extra = {}) {
+export function fakeBundle(version, plugins = ['kette-engineering-core', 'ui-laws', 'kette-engineering', 'design-system-agents', 'design-review-pack'], extra = {}) {
   const d = tmp();
   for (const [f, c] of Object.entries(extra)) write(d, f, c);
   write(d, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'kette', version, plugins: [] }));

@@ -97,7 +97,7 @@ export function parse(argv) {
   const opts = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a in FLAGS) opts[FLAGS[a]] = true;
+    if (Object.hasOwn(FLAGS, a)) opts[FLAGS[a]] = true;
     else if (a === '--color' || a === '--no-color') opts.color = a === '--color';
     else if (VALUES.includes(a)) {
       const value = argv[++i];
@@ -165,7 +165,7 @@ function existingProfile(root) {
 // Project edition after init or add: from the profile, raised to the edition of this machine, never lowered (docs/adr/0001)
 function projectTier(root, machineTier) {
   const tier = existingProfile(root)?.tier;
-  return tier in RANK && RANK[tier] >= RANK[machineTier] ? tier : machineTier;
+  return Object.hasOwn(RANK, tier) && RANK[tier] >= RANK[machineTier] ? tier : machineTier;
 }
 
 // Existing profile: only raise tier and add apps when the field is missing, every other field stays as the user wrote it
@@ -450,7 +450,7 @@ function printPluginDetails(tier, bundleDir, info) {
 function renewProjectNote(root) {
   const profile = existingProfile(root);
   if (!profile) return;
-  const tier = profile.tier in RANK ? profile.tier : COMMUNITY;
+  const tier = Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
   const [d] = describe([noteItem(tier)], root);
   if (d.unmarked) { console.log(staleNote([d])); return; }
   if (d.action === 'keep') return;
