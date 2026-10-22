@@ -264,21 +264,19 @@ function templateHint(rendered, templates, target, bundleDir) {
 
 const unusableFolder = (dir, stack) => `Folder "${dir}" (${stack}) can't be used as an app folder. Rename it (letters, digits, . _ - only) or point apps to another folder in .kette/profile.json.`;
 
-// Without a detected stack the profile gets --stack or the default; only an interactive run still asks
-function stackNote(detected, opts) {
-  if (detected.length) return `stack ${detected.join(', ')}`;
-  const given = listArg(opts.stack);
-  if (given) return `stack none detected, using ${given.join(', ')}`;
-  if (opts.yes) return `stack none detected, using ${DEFAULT_STACK.join(', ')} (change with --stack)`;
-  return 'stack none detected';
+// One part of the Detected line: a flag wins over detection, without either the profile gets the default
+function detectedNote(kind, detected, given, fallback) {
+  if (given && detected && given !== detected) return `using ${kind} ${given} (detected ${detected})`;
+  if (detected) return `${kind} ${detected}`;
+  return `no ${kind}${given || fallback ? `, using ${given || fallback}` : ''}`;
 }
 
-// Without a detected platform the profile gets --platform or the default; only an interactive run still asks
-function platformNote(detected, opts) {
-  if (detected) return `platform ${detected}`;
-  if (opts.platform) return `platform none detected, using ${opts.platform}`;
-  if (opts.yes) return `platform none detected, using ${DEFAULT_PLATFORM} (change with --platform)`;
-  return 'platform none detected';
+// Interactive runs still ask, so they only get the default named when nothing else decides
+function detectedLine(detected, opts) {
+  const fallback = (value) => (opts.yes ? value : null);
+  const stack = detectedNote('stack', detected.stack.join(', '), listArg(opts.stack)?.join(', '), fallback(DEFAULT_STACK.join(', ')));
+  const platform = detectedNote('platform', detected.platform, opts.platform, fallback(DEFAULT_PLATFORM));
+  return `Detected: ${stack} · ${platform}`;
 }
 
 async function setup(root, opts, isNew) {
@@ -287,7 +285,7 @@ async function setup(root, opts, isNew) {
   if (isNew) fs.mkdirSync(root, { recursive: true });
   const folders = isNew ? { apps: {}, unusable: {} } : detectAppFolders(root);
   const detected = isNew ? { stack: [], platform: null, apps: {} } : { stack: detectStack(root), platform: detectPlatform(root), apps: folders.apps };
-  if (!isNew) console.log(`Detected: ${stackNote(detected.stack, opts)}, ${platformNote(detected.platform, opts)}`);
+  if (!isNew) console.log(detectedLine(detected, opts));
   if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
   // apps only matters where templates are rendered, so Community stays quiet
   if (tier === ENTERPRISE) for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} ${unusableFolder(dir, stack)}`);
