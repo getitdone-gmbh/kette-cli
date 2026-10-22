@@ -35,6 +35,10 @@ const PLATFORMS = [
   { value: 'gitlab', label: 'GitLab' },
   { value: 'oss-selfhosted', label: 'Open source on your own servers' },
 ];
+// Also the preselected answer of the platform question
+const DEFAULT_PLATFORM = PLATFORMS[0].value;
+// Also the preselected answer (1,2) of the stack question
+const DEFAULT_STACK = STACKS.slice(0, 2).map((s) => s.value);
 const PATTERNS = [
   { value: 'modular-monolith', label: 'Modular monolith (default)' },
   { value: 'layered', label: 'Layered' },
@@ -125,7 +129,7 @@ async function buildProfile(root, opts, detected) {
   let patterns = listArg(opts.patterns);
   if (!opts.yes) {
     if (!listArg(opts.stack)) {
-      const def = stack.length ? stack.map((s) => STACKS.findIndex((x) => x.value === s) + 1).join(',') : '1,2';
+      const def = (stack.length ? stack : DEFAULT_STACK).map((s) => STACKS.findIndex((x) => x.value === s) + 1).join(',');
       stack = await choose('Which stacks does the project use?', STACKS, def);
     }
     if (!opts.platform) {
@@ -138,8 +142,8 @@ async function buildProfile(root, opts, detected) {
     $schema: 'https://kette.itdone.de/schema/profile.schema.json',
     version: 1,
     project: { name },
-    stack: stack.length ? stack : ['nextjs-ts-tailwind', 'nestjs-prisma'],
-    platform: { id: platform || 'github-docker' },
+    stack: stack.length ? stack : DEFAULT_STACK,
+    platform: { id: platform || DEFAULT_PLATFORM },
     patterns: patterns?.length ? patterns : ['modular-monolith'],
     tier: tierOf(),
   };
@@ -260,13 +264,29 @@ function templateHint(rendered, templates, target, bundleDir) {
 
 const unusableFolder = (dir, stack) => `Folder "${dir}" (${stack}) can't be used as an app folder. Rename it (letters, digits, . _ - only) or point apps to another folder in .kette/profile.json.`;
 
+// One part of the Detected line: a flag wins over detection, without either the profile gets the default
+function detectedNote(kind, detected, given, fallback) {
+  if (given && detected && given !== detected) return `using ${kind} ${given} (detected ${detected})`;
+  if (detected) return `${kind} ${detected}`;
+  return `no ${kind}${given || fallback ? `, using ${given || fallback}` : ''}`;
+}
+
+// Interactive runs still ask, so they only get the default named when nothing else decides
+function detectedLine(detected, opts) {
+  const fallback = (value) => (opts.yes ? value : null);
+  const stack = detectedNote('stack', detected.stack.join(', '), listArg(opts.stack)?.join(', '), fallback(DEFAULT_STACK.join(', ')));
+  const platform = detectedNote('platform', detected.platform, opts.platform, fallback(DEFAULT_PLATFORM));
+  const defaulted = opts.yes ? [!detected.stack.length && !opts.stack && '--stack', !detected.platform && !opts.platform && '--platform'].filter(Boolean) : [];
+  return `Detected: ${stack} · ${platform}${defaulted.length ? ` (change with ${defaulted.join(' / ')})` : ''}`;
+}
+
 async function setup(root, opts, isNew) {
   const tier = tierOf();
   const bundleDir = await ensureBundle(tier);
   if (isNew) fs.mkdirSync(root, { recursive: true });
   const folders = isNew ? { apps: {}, unusable: {} } : detectAppFolders(root);
   const detected = isNew ? { stack: [], platform: null, apps: {} } : { stack: detectStack(root), platform: detectPlatform(root), apps: folders.apps };
-  if (!isNew) console.log(`Detected: stack ${detected.stack.join(', ') || 'none'}, platform ${detected.platform || 'none'}`);
+  if (!isNew) console.log(detectedLine(detected, opts));
   if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
   // apps only matters where templates are rendered, so Community stays quiet
   if (tier === ENTERPRISE) for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} ${unusableFolder(dir, stack)}`);
@@ -364,7 +384,8 @@ async function doctor(root, opts) {
   let problems = 0;
   // failMsg states the actual condition when the check fails, msg when it holds
   const line = (ok, msg, failMsg = msg) => { console.log(`${ok ? status('ok', 'OK  ') : status('fail', 'FAIL')} ${ok ? msg : failMsg}`); if (!ok) problems++; };
-  const warn = (msg) => console.log(`${status('warn', 'WARN')} ${msg}`);
+  let warnings = 0;
+  const warn = (msg) => { console.log(`${status('warn', 'WARN')} ${msg}`); warnings++; };
   const info = (msg) => console.log(`${status('info', 'INFO')} ${msg}`);
   line(Number(process.versions.node.split('.')[0]) >= 20, `Node ${process.versions.node} ${dim('(20 or newer)')}`, `Node ${process.versions.node} is too old, 20 or newer is required`);
   line(Boolean(tool('git')), 'git found', 'git not found');
@@ -404,7 +425,9 @@ async function doctor(root, opts) {
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules', `CLAUDE.md does not point to the Die Kette rules (line @.kette/README.md missing), add it with: ${cmd('kette add')}`);
-  console.log(`\n${problems ? bold(error(`${problems} open issue(s)`)) : bold(accent('all good'))}`);
+  // Warnings never fail doctor, but the closing line counts them so "all good" does not hide them
+  const warned = warnings ? `, ${warnings} warning${warnings === 1 ? '' : 's'}` : '';
+  console.log(`\n${problems ? bold(error(`${problems} open issue(s)${warned}`)) : bold(accent(`all good${warned}`))}`);
   return problems ? 1 : 0;
 }
 

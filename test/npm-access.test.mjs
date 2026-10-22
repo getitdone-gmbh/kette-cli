@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { capture, fakeBundle, json, serve, sha256, tmp, write } from './helpers.mjs';
+import { capture, fakeBundle, fakeClaude, json, serve, sha256, tmp, write } from './helpers.mjs';
 import { main } from '../src/cli.mjs';
 import { BLOCK_START } from '../src/npmrc.mjs';
 
@@ -265,8 +265,13 @@ test('doctor prüft Block und Token und findet einen Token in einer Datei im Git
   await inDir(project, () => run('add', '--yes', '--no-plugins', '--stack', 'nextjs-ts-tailwind', '--platform', 'github-docker', '--patterns', 'modular-monolith'));
   execFileSync('git', ['-C', project, 'init', '-q']);
   execFileSync('git', ['-C', project, 'add', '.']);
-  let { out } = await inDir(project, () => run('doctor'));
+  // All Enterprise plugins installed, so a valid token leaves nothing to warn about
+  const claude = fakeClaude([], 'kette-engineering-core@kette\nkette-engineering@kette\ndesign-system-agents@kette\ndesign-review-pack@kette\n');
+  let out;
+  try { ({ out } = await inDir(project, () => run('doctor'))); } finally { claude.restore(); }
   assert.match(out, /OK {3}npm access in /);
+  assert.doesNotMatch(out, /WARN/, 'a valid token never also reports missing access');
+  assert.match(out, /\nall good$/);
   assert.match(out, /OK {3}npm token valid/);
   assert.match(out, /OK {3}no npm token in files tracked by git/);
 

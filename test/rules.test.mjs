@@ -315,6 +315,7 @@ test('doctor: a profile with apps and an installed schema without apps is a WARN
     const { out, result } = await run('doctor', '--ci');
     assert.match(out, /^WARN The profile names app folders \(apps\), the installed rulebook does not know them yet\. Load the current one with: kette update$/m);
     assert.doesNotMatch(out, /FAIL/);
+    assert.match(out, /\nall good, 1 warning$/, 'a warning keeps exit code 0 but is counted in the closing line');
     assert.equal(result, 0);
     write(project, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], apps: {}, platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community', extra: 1 }));
     assert.match((await run('doctor', '--ci')).out, /^FAIL Profile not valid: \$: unknown field apps; \$: unknown field extra$/m);
@@ -335,6 +336,38 @@ test('doctor names a missing plugin as not installed', async () => {
     assert.match(out, /^FAIL Plugin ui-gesetze@kette not installed$/m);
   } finally {
     claude.restore();
+    process.chdir(cwd);
+  }
+});
+
+test('add names the stack and platform it writes: detected, from a flag, or the default', async () => {
+  rulebook('community');
+  const cwd = process.cwd();
+  const profileOf = (dir) => JSON.parse(fs.readFileSync(path.join(dir, '.kette', 'profile.json'), 'utf8'));
+  try {
+    const plain = tmp();
+    process.chdir(plain);
+    let { out } = await run('add', '--yes', '--no-plugins');
+    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · no platform, using github-docker \(change with --stack \/ --platform\)$/m);
+    assert.deepEqual(profileOf(plain).stack, ['nextjs-ts-tailwind', 'nestjs-prisma']);
+    assert.equal(profileOf(plain).platform.id, 'github-docker');
+    const chosen = tmp();
+    process.chdir(chosen);
+    ({ out } = await run('add', '--yes', '--no-plugins', '--platform', 'gitlab', '--stack', 'python-fastapi'));
+    assert.match(out, /^Detected: no stack, using python-fastapi · no platform, using gitlab$/m);
+    assert.equal(profileOf(chosen).platform.id, 'gitlab');
+    const docker = tmp();
+    write(docker, 'Dockerfile', 'FROM node:22\n');
+    process.chdir(docker);
+    ({ out } = await run('add', '--yes', '--no-plugins'));
+    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · platform github-docker \(change with --stack\)$/m);
+    const overridden = tmp();
+    write(overridden, 'Dockerfile', 'FROM node:22\n');
+    process.chdir(overridden);
+    ({ out } = await run('add', '--yes', '--no-plugins', '--platform', 'gitlab'));
+    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · using platform gitlab \(detected github-docker\) \(change with --stack\)$/m);
+    assert.equal(profileOf(overridden).platform.id, 'gitlab');
+  } finally {
     process.chdir(cwd);
   }
 });
