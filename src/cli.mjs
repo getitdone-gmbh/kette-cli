@@ -18,6 +18,7 @@ import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.m
 import { accent, bold, brandLine, cmd, configure, dim, error, file, num, status, symbols } from './out.mjs';
 import { othersCanRead, privateHint } from './files.mjs';
 import { ExitError } from './errors.mjs';
+import { cloud, doctorLine } from './cloud.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -65,6 +66,9 @@ Commands:
   kette token ci create <name> | list | revoke <id>
                         CI tokens for npm ci in pipelines (Solo 2, Team 5, no device seat)
   kette figma           Download the current Figma release of Die Kette (--out folder)
+  kette cloud setup     Live deploy to itdone.cloud: account link and the itdone MCP server in Claude Code
+                        (--have-account skips the link, --dry-run changes nothing)
+  kette cloud status    Show whether the itdone MCP server is registered in Claude Code
   kette version
 
 Options:
@@ -78,9 +82,11 @@ Options:
   --no-npm              With kette login and update, do not set up npm access
   --npm-replace         Comment out an existing @getitdone-gmbh line in ~/.npmrc and use Die Kette
   --out folder          Target folder for kette figma
+  --have-account        With kette cloud setup, do not open the itdone.cloud registration
   --color, --no-color   Force colors on or off (default: on in a terminal, off in pipes, CI and with NO_COLOR)
 
-The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.`;
+The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.
+kette cloud setup only registers the itdone MCP server; Claude Code deploys after you confirm, and kette never handles a password or token.`;
 
 // Brand line with version and edition, only on init and help
 const brand = () => brandLine(`kette ${VERSION} ${symbols().sep} ${editionLabel(tierOf())}`);
@@ -89,7 +95,7 @@ const help = () => [brand(), '', HELP.replace(/^ {2}((?:kette|--)\S*(?: \S+)*?)(
 
 const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
-  '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--help': 'help', '-h': 'help', '--version': 'version',
+  '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--help': 'help', '-h': 'help', '--version': 'version',
 };
 const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out'];
 
@@ -435,6 +441,7 @@ async function doctor(root, opts) {
     else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installed`, `Plugin ${pluginId(p)} not installed. Install with: ${cmd('kette update')}`);
   }
   if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir, info);
+  if (!opts.ci && hasClaude()) doctorLine(line, info);
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules', `CLAUDE.md does not point to the Die Kette rules (line @.kette/README.md missing), add it with: ${cmd('kette add')}`);
@@ -558,6 +565,7 @@ export async function main(argv) {
       return await ciToken(action, value);
     }
     if (command === 'figma') return await figma(opts);
+    if (command === 'cloud') return await cloud(arg, opts);
     if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...readState() }, null, 2)); return 0; }
     console.error(`Unknown command: ${command}\n`);
     console.log(help());

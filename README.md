@@ -38,8 +38,9 @@ Im Projektprofil steht die Edition im Feld `tier`: `community` oder `enterprise`
 | `kette logout` | Schlüssel, Enterprise-Paket und npm-Zugang von diesem Rechner entfernen, den npm-Token widerrufen (das Gerät gibt der Support frei) |
 | `kette token ci create <name>` / `list` / `revoke <id>` | CI-Tokens für `npm ci` in Pipelines: Solo 2, Team 5, belegen kein Gerät, werden nur beim Erstellen angezeigt |
 | `kette figma` | aktuelles Figma-Release der Kette laden, Prüfsummen prüfen, Import-Reihenfolge zeigen; `--out ordner` |
+| `kette cloud setup` / `status` | Live deploy to itdone.cloud: account link, itdone MCP server in Claude Code, see below (Community and Enterprise) |
 
-Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out ordner`.
+Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out ordner`, `--have-account`.
 
 ## Vorlagen nach Profil (Enterprise)
 CI-, Docker- und Prüfvorlagen folgen dem Projektprofil: nur die gewählten Stacks, jeweils in ihrem App-Ordner (`apps` im Profil, sonst `apps/web`, `apps/api`, `apps/mobile`). `kette add` erkennt App-Ordner wie `backend/`, `frontend/` oder `apps/*`. `apps` schreibt nur Enterprise; ein Community-Projekt bekommt die Ordner beim Wechsel auf Enterprise aus der Erkennung. Ein vorhandenes Profil wird nie neu geschrieben: `kette add` hebt höchstens `tier` an und ergänzt `apps`, wenn das Feld fehlt und das installierte Schema es kennt; alle anderen Felder bleiben. Vorhandene Dateien bleiben unverändert (`= keep`).
@@ -68,6 +69,15 @@ Pipelines bekommen einen CI-Token (`kette token ci create "GitHub Actions"`) als
 ```
 
 GitLab und andere: `npm config set //npm.kette.itdone.de/:_authToken "$KETTE_NPM_TOKEN"` im Job. yarn berry: in `.yarnrc.yml` `npmScopes: { getitdone-gmbh: { npmRegistryServer: "https://npm.kette.itdone.de/", npmAuthToken: "${KETTE_NPM_TOKEN}" } }` (schreibt die CLI nicht).
+
+## Live deploy to itdone.cloud
+Available in Community and Enterprise. `kette cloud setup` prepares Claude Code for deploys to [itdone.cloud](https://itdone.cloud):
+
+1. Opens `https://dashboard.itdone.cloud/login?register=1` to create an account. Without a terminal, in CI, over SSH or when no browser opens, it prints the link. `--have-account` skips this step.
+2. Registers the itdone MCP server for all projects: `claude mcp add --transport http -s user itdone https://api.itdone.cloud/mcp`, without any auth header. An existing `itdone` entry is never overwritten, the command shows its URL and continues.
+3. Shows the next steps: in Claude Code run `/mcp`, choose `itdone`, then `Authenticate`. Claude Code signs in through the browser (OAuth), the account is created on the first login. Then ask Claude to deploy; the live-deploy skill deploys only after you confirm.
+
+`--dry-run` shows the steps without opening the browser or calling `claude mcp add`. `kette cloud status` shows whether the server is registered (exit code 0 either way), and `kette doctor` names it as an info line. kette never asks for, stores or prints a password or token. Without Claude Code, `kette cloud setup` stops with exit code 1.
 
 ## Wo die Regeln liegen
 Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`, die Verweiszeile in `CLAUDE.md` und die ADR-Vorlage. Das Regelwerk selbst liegt auf dem Rechner unter `~/.kette/bundles/active/` und ist in Claude Code als Plugins aktiv: in Community `kette-engineering-core@kette` (Skills `engineering-rules`, `architecture-patterns`) und `ui-laws@kette`, in Enterprise `kette-engineering-core@kette`, `kette-engineering@kette` (`platform-profile`, `code-reviewer`), `design-system-agents@kette` und `design-review-pack@kette`. Ansehen mit `kette rules`, was jedes Plugin mitbringt zeigt `kette doctor`.

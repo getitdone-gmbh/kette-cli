@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+- New `kette cloud setup` (Community and Enterprise): opens the itdone.cloud registration (`--have-account` skips it, headless prints the link), registers the itdone MCP server in Claude Code with `claude mcp add --transport http -s user itdone https://api.itdone.cloud/mcp` without any auth header, and shows the next steps (`/mcp`, itdone, Authenticate; deploy only after confirming). An existing `itdone` entry is never overwritten. `--dry-run` changes nothing. kette never handles a password or token.
+- New `kette cloud status`: shows whether the itdone MCP server is registered, exit code 0 either way.
+- `kette doctor` adds an info line: `itdone MCP registered` or `Live deploy: kette cloud setup`, never counted as a problem.
+
 ## 0.6.2
 - The agent pack plugin `ui-gesetze` is now `ui-laws` (skills `ui-laws`, `interaction-principles`, `a11y-standards`). Community installs `ui-laws@kette`, and `kette update` and `kette add` remove `ui-gesetze@kette` once the bundle has `ui-laws`. Enterprise does not install it (the skills ship in `design-review-pack` and `design-system-agents`): `kette login` removes `ui-laws@kette` and `ui-gesetze@kette`, `kette logout` installs `ui-laws@kette` again, or `ui-gesetze@kette` when the local Community bundle is older.
 - `kette rules` finds the German topic names of older rulebooks (`kette rules lesbarkeit`) through `rules/aliases.json`, and a typo of an old name suggests the new topic.

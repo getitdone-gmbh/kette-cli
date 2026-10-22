@@ -62,11 +62,12 @@ export async function capture(fn) {
 
 // Ersetzt claude im PATH durch ein Node-Skript mit Zustand: list ist die Antwort auf marketplace list --json, plugins die installierten Plugin-IDs (Text, IDs werden herausgelesen)
 // install und uninstall ändern den Zustand; responses legt je Aufruf (z. B. 'plugin install a@kette') { code, out } fest, ohne den Zustand zu ändern
-export function fakeClaude(list = [], plugins = '', responses = {}) {
+// mcp maps MCP server names to URLs; mcp get shows a header with a secret, like Claude Code does for servers added with --header
+export function fakeClaude(list = [], plugins = '', responses = {}, mcp = {}) {
   const bin = tmp();
   const log = path.join(bin, 'calls.log');
   const state = path.join(bin, 'state.json');
-  fs.writeFileSync(state, JSON.stringify({ list, plugins: plugins.match(/\S+@\S+/g) || [], responses }));
+  fs.writeFileSync(state, JSON.stringify({ list, plugins: plugins.match(/\S+@\S+/g) || [], responses, mcp }));
   write(bin, 'claude', `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2).join(' ');
@@ -79,6 +80,16 @@ const [a, b, c] = process.argv.slice(2);
 if (args === '--version') console.log('9.9.9 (Claude Code)');
 else if (args === 'plugin marketplace list --json') console.log(JSON.stringify(s.list));
 else if (args === 'plugin list') console.log(s.plugins.length ? 'Installed plugins:\\n\\n' + s.plugins.map((id) => '  ❯ ' + id + '\\n    Status: enabled').join('\\n') : 'No plugins installed.');
+else if (a === 'mcp' && b === 'get') {
+  if (!s.mcp[c]) { console.error('No MCP server named "' + c + '". Configured servers: ' + Object.keys(s.mcp).join(', ')); process.exit(1); }
+  console.log(c + ':\\n  Scope: User config (available in all your projects)\\n  Status: ✔ Connected\\n  Type: http\\n  URL: ' + s.mcp[c] + '\\n  Headers:\\n    Authorization: Bearer fake-secret-value\\n');
+}
+else if (args === 'mcp list') console.log('Checking MCP server health…\\n\\n' + Object.entries(s.mcp).map(([n, u]) => n + ': ' + u + ' (HTTP) - ✔ Connected').join('\\n'));
+else if (a === 'mcp' && b === 'add') {
+  const [name, url] = process.argv.slice(-2);
+  if (s.mcp[name]) { console.error('MCP server ' + name + ' already exists in user config'); process.exit(1); }
+  s.mcp[name] = url; save();
+}
 else if (a === 'plugin' && b === 'install') { if (!s.plugins.includes(c)) s.plugins.push(c); save(); }
 else if (a === 'plugin' && b === 'uninstall') {
   if (!s.plugins.includes(c)) { console.log('Plugin ' + c + ' is not installed'); process.exit(1); }
@@ -93,6 +104,7 @@ else if (a === 'plugin' && b === 'uninstall') {
   return {
     calls: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : []),
     installed: () => JSON.parse(fs.readFileSync(state, 'utf8')).plugins,
+    mcp: () => JSON.parse(fs.readFileSync(state, 'utf8')).mcp,
     restore: () => { process.env.PATH = orig; },
   };
 }

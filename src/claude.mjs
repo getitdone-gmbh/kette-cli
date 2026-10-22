@@ -22,7 +22,7 @@ export function cmdLine(args) {
   if (args.some((a) => /["%\r\n]|\\$/.test(a))) return null;
   return ['claude.cmd', ...args.map((a) => (/[\s&|<>^()]/.test(a) ? `"${a}"` : a))].join(' ');
 }
-function run(args) {
+export function runClaude(args) {
   if (process.platform !== 'win32') return spawnSync('claude', args, { encoding: 'utf8' });
   const exe = spawnSync('claude.exe', args, { encoding: 'utf8' });
   if (exe.error?.code !== 'ENOENT') return exe;
@@ -30,11 +30,11 @@ function run(args) {
   if (!line) return { status: 1, stdout: '', stderr: `Argument not safe for claude.cmd: ${args.join(' ')}` };
   return spawnSync(line, { encoding: 'utf8', shell: true });
 }
-const output = (r) => ((r.stdout || '') + (r.stderr || '')).trim();
-export const hasClaude = () => run(['--version']).status === 0;
+export const output = (r) => ((r.stdout || '') + (r.stderr || '')).trim();
+export const hasClaude = () => runClaude(['--version']).status === 0;
 
 function marketplaces() {
-  const r = run(['plugin', 'marketplace', 'list', '--json']);
+  const r = runClaude(['plugin', 'marketplace', 'list', '--json']);
   if (r.status !== 0) return [];
   try { return JSON.parse(r.stdout); } catch { return []; }
 }
@@ -45,7 +45,7 @@ const listed = (list, id) => list !== null && new RegExp(`(^|\\s)${id.replace(/[
 
 // Success is decided by the plugin list afterwards, not the reply text; if the list is not readable, the exit status decides
 function uninstall(id) {
-  const r = run(['plugin', 'uninstall', id]);
+  const r = runClaude(['plugin', 'uninstall', id]);
   const list = installedPlugins();
   // Reply of Claude Code when the plugin is already gone: counts as removed
   const absent = /not found in installed plugins/i.test(output(r));
@@ -69,7 +69,7 @@ function migrateLegacy(all) {
       const r = uninstall(pluginId(p, LEGACY_MARKETPLACE));
       if (!r.ok) return r;
     }
-    const rm = run(['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE]);
+    const rm = runClaude(['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE]);
     return rm.status === 0 ? { ok: true } : { ok: false, reason: output(rm) };
   }
   duplicateHint(legacy, ALL_PLUGINS.map((p) => pluginId(p, LEGACY_MARKETPLACE)), installedPlugins());
@@ -108,16 +108,16 @@ export function installPlugins(source, plugins, retire = []) {
   const fail = (reason) => ({ ok: false, reason: retired.length ? `${reason}; already removed before: ${retired.join(', ')}` : reason });
   packDuplicates(all, plugins);
   if (moved) {
-    const rm = run(['plugin', 'marketplace', 'remove', MARKETPLACE]);
+    const rm = runClaude(['plugin', 'marketplace', 'remove', MARKETPLACE]);
     if (rm.status !== 0) return fail(output(rm));
     known = null;
   }
-  const step = known ? run(['plugin', 'marketplace', 'update', MARKETPLACE]) : run(['plugin', 'marketplace', 'add', source]);
+  const step = known ? runClaude(['plugin', 'marketplace', 'update', MARKETPLACE]) : runClaude(['plugin', 'marketplace', 'add', source]);
   if (step.status !== 0 && !/already/i.test(output(step))) return fail(output(step));
   for (const p of plugins) {
     const id = pluginId(p);
-    let r = run(['plugin', 'install', id]);
-    if (r.status !== 0 && /already/i.test(output(r))) r = run(['plugin', 'update', id]);
+    let r = runClaude(['plugin', 'install', id]);
+    if (r.status !== 0 && /already/i.test(output(r))) r = runClaude(['plugin', 'update', id]);
     if (r.status !== 0) return fail(`${id}: ${output(r)}`);
   }
   return { ok: true };
@@ -147,7 +147,7 @@ export function uninstallPlugin(name) {
 
 // Output of claude plugin list, null when the call fails
 export function installedPlugins() {
-  const r = run(['plugin', 'list']);
+  const r = runClaude(['plugin', 'list']);
   return r.status === 0 ? r.stdout : null;
 }
 
