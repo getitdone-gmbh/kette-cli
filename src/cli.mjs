@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fetchManifest, installBundle, installedBundle, readState, setActiveBundle } from './manifest.mjs';
-import { detectPlatform, detectStack } from './detect.mjs';
+import { detectApps, detectPlatform, detectStack, detectWorkspace } from './detect.mjs';
 import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
+import { renderTemplates } from './templates.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
 import { MARKETPLACE, editionHints, hasClaude, installEdition, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
@@ -40,26 +41,6 @@ const PATTERNS = [
   { value: 'cqrs', label: 'CQRS' },
   { value: 'bff', label: 'Backend for Frontend' },
   { value: 'multi-tenant', label: 'Multi-tenancy' },
-];
-
-// github-docker: template in the bundle -> target in the project
-const PLATFORM_FILES = {
-  'github-docker': [
-    ['ci.yml', '.github/workflows/ci.yml'],
-    ['deploy.yml', '.github/workflows/deploy.yml'],
-    ['Dockerfile.api', 'apps/api/Dockerfile'],
-    ['prune-runtime.mjs', 'apps/api/scripts/prune-runtime.mjs'],
-    ['Dockerfile.web', 'apps/web/Dockerfile'],
-    ['playwright.config.ts', 'apps/web/playwright.config.ts'],
-    ['compose.yaml', 'compose.yaml'],
-    ['DEPLOY.md', 'DEPLOY.md'],
-  ],
-};
-const CHECK_FILES = [
-  ['tsconfig.strict.json', 'tsconfig.base.json'],
-  ['eslint.config.mjs', 'eslint.config.mjs'],
-  ['dependency-cruiser.cjs', '.dependency-cruiser.cjs'],
-  ['gitleaks.toml', '.gitleaks.toml'],
 ];
 
 const HELP = `kette ${VERSION} · set up the rules and agents of Die Kette
@@ -177,7 +158,15 @@ function raiseTier(current, tier) {
   return JSON.stringify({ ...profile, tier }, null, 2) + '\n';
 }
 
-function planFor(root, profile, bundleDir, tier, noteTier) {
+// App folders in the profile only when the installed schema knows the field, older bundles reject unknown fields; folders already in the profile stay
+function withApps(profile, schema, detected) {
+  const known = schema.properties?.apps?.properties;
+  if (!known) return profile;
+  const apps = Object.fromEntries(profile.stack.filter((s) => known[s]).map((s) => [s, detected[s] || known[s].default]).filter(([, dir]) => dir));
+  return { ...profile, apps: { ...apps, ...profile.apps } };
+}
+
+function planFor(root, profile, bundleDir, tier, noteTier, templates) {
   const plan = [
     { path: '.kette/profile.json', mode: 'renew', content: JSON.stringify(profile, null, 2) + '\n', renew: (current) => raiseTier(current, noteTier) },
     noteItem(noteTier),
@@ -188,14 +177,7 @@ function planFor(root, profile, bundleDir, tier, noteTier) {
     // Only the scope line, never a token: the file may be committed, the token comes from ~/.npmrc or the CI secret
     // No line without npm access, otherwise the project points to a registry that does not answer yet
     if (npmGranted()) plan.push({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'design system packages via Die Kette, no token' });
-    const tpl = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'templates');
-    for (const [from, to] of PLATFORM_FILES[profile.platform.id] || []) {
-      const src = path.join(tpl, from);
-      if (fs.existsSync(src)) plan.push({ path: to, content: fs.readFileSync(src, 'utf8'), note: 'template, adjust placeholders OWNER/REPO and app' });
-    }
-    for (const [from, to] of CHECK_FILES) {
-      plan.push({ path: to, content: fs.readFileSync(path.join(bundleDir, 'checks', from), 'utf8'), note: 'check' });
-    }
+    for (const f of templates?.files || []) plan.push({ path: f.path, content: f.content, note: f.note });
   }
   return plan;
 }
@@ -210,19 +192,27 @@ async function setup(root, opts, isNew) {
   const tier = tierOf();
   const bundleDir = await ensureBundle(tier);
   if (isNew) fs.mkdirSync(root, { recursive: true });
-  const detected = isNew ? { stack: [], platform: null } : { stack: detectStack(root), platform: detectPlatform(root) };
+  const detected = isNew ? { stack: [], platform: null, apps: {} } : { stack: detectStack(root), platform: detectPlatform(root), apps: detectApps(root) };
   if (!isNew) console.log(`Detected: stack ${detected.stack.join(', ') || 'none'}, platform ${detected.platform || 'none'}`);
-  const profile = await buildProfile(root, opts, detected);
-  const errors = validate(loadSchema(bundleDir), profile);
+  if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
+  const schema = loadSchema(bundleDir);
+  const profile = withApps(await buildProfile(root, opts, detected), schema, detected.apps);
+  const errors = validate(schema, profile);
   if (errors.length) throw new Error(`Invalid profile: ${errors.join('; ')}`);
 
-  const described = describe(planFor(root, profile, bundleDir, tier, projectTier(root, tier)), root);
+  // Templates follow the profile in the project if there is one, it is never replaced
+  const current = existingProfile(root);
+  const target = current ? withApps(current, schema, detected.apps) : profile;
+  const templates = tier === ENTERPRISE ? renderTemplates(bundleDir, target, { workspace: isNew || detectWorkspace(root) }) : null;
+  const described = describe(planFor(root, profile, bundleDir, tier, projectTier(root, tier), templates), root);
   console.log(`\n${opts.dryRun ? 'Would create' : 'Plan'} in ${file(path.resolve(root))} (edition ${editionLabel(tier)}):`);
   print(described);
   const stale = staleNote(described);
   if (stale) console.log(stale);
   if (tier === COMMUNITY) console.log(`\n  Agents, gates with code reviewer, platform templates and checks come with the Enterprise edition (Die Kette): ${cmd('kette login <key>')}`);
-  else if (!PLATFORM_FILES[profile.platform.id]) console.log(`\n  No templates for ${profile.platform.id} yet (status: ${platformStatus(bundleDir, profile.platform.id) || 'unknown'}).`);
+  else if (!templates) console.log(`\n  The installed rulebook has no profile-aware templates yet, load the current one with: ${cmd('kette update')}`);
+  else if (!templates.platform) console.log(`\n  No templates for ${target.platform.id} yet (status: ${platformStatus(bundleDir, target.platform.id) || 'unknown'}).`);
+  for (const s of templates?.skipped || []) console.log(`  No templates for ${s.stack}: ${s.reason}`);
   if (opts.dryRun) return 0;
   if (!(await confirm('\nCreate these files?', opts.yes))) { console.log('Cancelled, nothing written.'); return 1; }
 
