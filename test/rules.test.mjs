@@ -340,25 +340,27 @@ test('doctor names a missing plugin as not installed', async () => {
   }
 });
 
-test('add without a detected platform names the platform it writes', async () => {
+test('add without a detected stack or platform names what it writes', async () => {
   rulebook('community');
   const cwd = process.cwd();
   try {
     const plain = tmp();
     process.chdir(plain);
     let { out } = await run('add', '--yes', '--no-plugins');
-    assert.match(out, /^Detected: stack none, platform none detected, using github-docker \(change with --platform\)$/m);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(plain, '.kette', 'profile.json'), 'utf8')).platform.id, 'github-docker');
+    assert.match(out, /^Detected: stack none detected, using nextjs-ts-tailwind, nestjs-prisma \(change with --stack\), platform none detected, using github-docker \(change with --platform\)$/m);
+    const written = JSON.parse(fs.readFileSync(path.join(plain, '.kette', 'profile.json'), 'utf8'));
+    assert.equal(written.platform.id, 'github-docker');
+    assert.deepEqual(written.stack, ['nextjs-ts-tailwind', 'nestjs-prisma']);
     const chosen = tmp();
     process.chdir(chosen);
-    ({ out } = await run('add', '--yes', '--no-plugins', '--platform', 'gitlab'));
-    assert.match(out, /^Detected: stack none, platform none detected, using gitlab$/m);
+    ({ out } = await run('add', '--yes', '--no-plugins', '--platform', 'gitlab', '--stack', 'python-fastapi'));
+    assert.match(out, /^Detected: stack none detected, using python-fastapi, platform none detected, using gitlab$/m);
     assert.equal(JSON.parse(fs.readFileSync(path.join(chosen, '.kette', 'profile.json'), 'utf8')).platform.id, 'gitlab');
     const docker = tmp();
     write(docker, 'Dockerfile', 'FROM node:22\n');
     process.chdir(docker);
     ({ out } = await run('add', '--yes', '--no-plugins'));
-    assert.match(out, /^Detected: stack none, platform github-docker$/m);
+    assert.match(out, /^Detected: stack none detected, using nextjs-ts-tailwind, nestjs-prisma \(change with --stack\), platform github-docker$/m);
   } finally {
     process.chdir(cwd);
   }
