@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fakeBundle, serve, tmp, write } from './helpers.mjs';
-import { installBundle, validVersion } from '../src/manifest.mjs';
+import { installBundle, setActiveBundle, validVersion } from '../src/manifest.mjs';
 import { isSecureUrl, mirror } from '../src/paths.mjs';
 
 let server;
@@ -62,4 +62,19 @@ test('https required, plain http only for local hosts or KETTE_INSECURE=1', () =
   try { assert.equal(isSecureUrl('http://kette.example/dl'), true); } finally { delete process.env.KETTE_INSECURE; }
   process.env.KETTE_MIRROR = 'http://kette.example/dl';
   try { assert.throws(() => mirror(), /KETTE_MIRROR must be an https URL/); } finally { process.env.KETTE_MIRROR = server.url; }
+});
+
+test('setActiveBundle moves the active link and leaves the old bundle folder intact', () => {
+  const kh = home();
+  const first = path.join(kh, 'bundles', 'community', '1.0.0');
+  const second = path.join(kh, 'bundles', 'community', '1.1.0');
+  write(first, 'VERSION', '1.0.0\n');
+  write(second, 'VERSION', '1.1.0\n');
+  const link = setActiveBundle(first);
+  assert.equal(setActiveBundle(second), link);
+  assert.equal(fs.realpathSync(link), fs.realpathSync(second));
+  assert.equal(fs.readFileSync(path.join(first, 'VERSION'), 'utf8'), '1.0.0\n');
+  assert.equal(setActiveBundle(null), null);
+  assert.equal(fs.existsSync(link), false);
+  assert.equal(fs.existsSync(second), true);
 });

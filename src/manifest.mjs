@@ -101,9 +101,17 @@ export function installedBundle(tier) {
 }
 
 // Fixed path for the Claude Code marketplace, points to the last active bundle (Windows: junction, no admin rights)
+// unlink for the link itself: rmSync in Node 23 follows a link to a folder and fails with "Path is a directory"
+function removeLink(link) {
+  let stat;
+  try { stat = fs.lstatSync(link); } catch (err) { if (err.code === 'ENOENT') return; throw err; }
+  if (stat.isSymbolicLink()) fs.unlinkSync(link);
+  else fs.rmSync(link, { force: true });
+}
+
 export function setActiveBundle(dir) {
   const link = activeBundleLink();
-  fs.rmSync(link, { force: true });
+  removeLink(link);
   if (!dir) return null;
   fs.symlinkSync(path.resolve(dir), link, 'junction');
   return link;
