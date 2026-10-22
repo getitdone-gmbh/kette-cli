@@ -51,7 +51,7 @@ Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`
 # <<< kette
 ```
 
-`kette logout` widerruft den Token und entfernt nur diesen Block. Steht in der npmrc schon eine eigene `@getitdone-gmbh:registry`-Zeile, bleibt sie unangetastet und der Schritt entfällt; `--npm-replace` kommentiert sie aus, `kette logout` stellt sie wieder her. `kette init` und `kette add` schreiben in Enterprise-Projekten nur die Scope-Zeile in die Projekt-`.npmrc` (ohne Token, darf ins Repo). `kette update` stellt einen neuen Token aus, wenn der Block fehlt oder die Registry den Token ablehnt. `kette doctor` prüft Block, Token und ob ein Token in einer Datei im Git steht.
+`kette logout` widerruft den Token und entfernt nur diesen Block. Steht in der npmrc schon eine eigene `@getitdone-gmbh:registry`-Zeile, bleibt sie unangetastet und der Schritt entfällt; `--npm-replace` kommentiert sie aus, `kette logout` stellt sie wieder her. `kette init` und `kette add` schreiben in Enterprise-Projekten nur die Scope-Zeile in die Projekt-`.npmrc` (ohne Token, darf ins Repo). `kette update` stellt einen neuen Token aus, wenn der Block fehlt oder die Registry den Token ablehnt. `kette doctor` prüft Block, Token und ob ein Token in einer Datei im Git steht. Bis das Update am 30.11.2026 den npm-Paketzugang freischaltet, meldet `kette login` nur "npm-Paketzugang folgt mit dem Update bis 30.11.2026" und schreibt nichts in die npmrc; `kette update` holt den Zugang danach nach, `kette init` und `kette add` schreiben die Scope-Zeile erst dann.
 
 Pipelines bekommen einen CI-Token (`kette token ci create "GitHub Actions"`) als Secret `KETTE_NPM_TOKEN`:
 

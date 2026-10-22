@@ -44,6 +44,8 @@ Lesender npm-Proxy im Lieferdienst für genau vier Pakete aus GitHub Packages: `
 
 Basis: `https://npm.kette.itdone.de/` (eigener Host, steht in Lockfiles und Projekt-.npmrc, ändert sich nie). Dieselbe Registry antwortet unter `<Lieferdienst>/npm/` für Vorschau und Tests.
 
+Ruhend bis eingerichtet: Solange der Lieferdienst ohne Registry-Adresse oder Upstream-Token läuft, antworten alle Registry-Pfade (auch `/-/ping`) und alle `/registry/*`-Endpunkte `503 { "error": "registry_not_configured", "message": "registry not configured" }`. Solange die Figma-Quelle fehlt, antworten `/figma/links` und `/figma/download/*` `503 { "error": "figma_not_configured", "message": "figma not configured" }`. Die CLI zeigt dann eine Zeile ("npm-Paketzugang folgt mit dem Update bis 30.11.2026" bzw. "Figma-Dateien folgen ..."), `kette login` gelingt trotzdem und schreibt keinen npmrc-Block, `kette init`/`add` schreiben keine Scope-Zeile.
+
 Auth: `Authorization: Bearer kt_...` (so senden npm, pnpm, yarn `_authToken` bzw. `npmAuthToken`). Basic Auth und Tokens im Query-String werden ignoriert. Token-Format `kt_` plus 43 Zeichen base64url.
 
 | Methode und Pfad | Antwort |
@@ -58,7 +60,7 @@ Fehler (JSON `{ "error": ... }`):
 - `401 unauthorized`: Token fehlt, unbekannt, widerrufen oder Gerät freigegeben.
 - `403 licence_ended`: Lizenz erstattet oder widerrufen.
 - `403 outside_update_window`: Tarball einer Version nach `updates_until`; zusätzlich `message`, `updates_until`, `newest_allowed`, und die Statuszeile nennt Datum und neueste erlaubte Version (npm zeigt sie an).
-- `404 not_found`, `429 rate_limited` mit `Retry-After`, `502 upstream_error`, `503 unavailable`.
+- `404 not_found`, `429 rate_limited` mit `Retry-After`, `502 upstream_error`, `503 unavailable`, `503 registry_not_configured`.
 
 Limits: 300 Anfragen pro Minute je Token, 60 fehlgeschlagene Anmeldungen pro Minute je Adresse. Ende einer Lizenz oder eines Geräts wirkt nach höchstens 60 Sekunden, Widerruf über die Token-API sofort.
 
@@ -68,7 +70,7 @@ Alle Aufrufe laufen durch dieselbe Prüfung wie `/install/*` (Fehler `bad_reques
 
 | Endpunkt | Anfrage | Antwort |
 |---|---|---|
-| `POST /registry/token` | `{ key, device }` | `200 { token, registry, scope: "@getitdone-gmbh", kind: "device" }`. Das Gerät muss über `/install/token` registriert sein, sonst `409 device_unknown`. Ersetzt das bisherige Token dieses Geräts. `503 unavailable`, wenn die Registry nicht eingerichtet ist. |
+| `POST /registry/token` | `{ key, device }` | `200 { token, registry, scope: "@getitdone-gmbh", kind: "device" }`. Das Gerät muss über `/install/token` registriert sein, sonst `409 device_unknown`. Ersetzt das bisherige Token dieses Geräts. `503 registry_not_configured`, solange die Registry nicht eingerichtet ist (gilt für alle `/registry/*`). |
 | `POST /registry/token/revoke` | `{ key, device }` | `200 { revoked: true \| false }` (idempotent, `false` wenn keins aktiv war). |
 | `POST /registry/ci-tokens/create` | `{ key, device, label }` | `200 { id, token, label, registry, kind: "ci" }`; `label` `[A-Za-z0-9 ._-]{1,48}`, sonst `400 bad_request`; über dem Limit `429 { error: "ci_token_limit", used, max }`. Gerät muss angemeldet sein (`409 device_unknown`). |
 | `POST /registry/ci-tokens/list` | `{ key, device }` | `200 { tokens: [{ id, label, prefix, created_at, last_used_at }], max }`, nur aktive, nie der Token selbst. |
@@ -82,7 +84,7 @@ Speicherung: nur SHA-256 des Tokens mit Lizenz-ID, Geräte-ID (Gerätetoken), Be
 
 | Endpunkt | Anfrage | Antwort |
 |---|---|---|
-| `POST /figma/links` | `{ key }` (JSON oder Formular) | `200 { version, updates_until, guide_url, files: [{ name, title, size, sha256, url, expires_at }] }`: neuestes Figma-Release vor `updates_until`. Links 15 Minuten, je Lizenz, Version und Datei. Kein Gerät. Fehler wie `/install/*`, ohne Release im Zeitraum `503 unavailable`. |
+| `POST /figma/links` | `{ key }` (JSON oder Formular) | `200 { version, updates_until, guide_url, files: [{ name, title, size, sha256, url, expires_at }] }`: neuestes Figma-Release vor `updates_until`. Links 15 Minuten, je Lizenz, Version und Datei. Kein Gerät. Fehler wie `/install/*`, ohne Release im Zeitraum `503 unavailable`, ohne Figma-Quelle `503 figma_not_configured`. |
 | `GET /figma/download/:token` | | Datei (`application/octet-stream`, `Content-Disposition: attachment`). `410 expired`, `404 not_found` (auch nach Ende der Lizenz). |
 | `GET /figma` | | Formular ohne Skript für alle ohne Terminal. |
 
@@ -95,7 +97,7 @@ type RegistryToken = { token: `kt_${string}`; registry: string; scope: '@getitdo
 type CiToken = { id: string; token: `kt_${string}`; label: string; registry: string; kind: 'ci' };
 type CiTokenInfo = { id: string; label: string; prefix: string; created_at: string; last_used_at: string | null };
 type FigmaLinks = { version: string; updates_until: string; guide_url: string | null; files: { name: string; title: string; size: number; sha256: string; url: string; expires_at: string }[] };
-type RegistryError = { error: 'unauthorized' | 'licence_ended' | 'outside_update_window' | 'rate_limited' | 'not_found' | 'read_only' | 'upstream_error' | 'unavailable' | 'device_unknown' | 'ci_token_limit' | 'bad_request' };
+type RegistryError = { error: 'unauthorized' | 'licence_ended' | 'outside_update_window' | 'rate_limited' | 'not_found' | 'read_only' | 'upstream_error' | 'unavailable' | 'registry_not_configured' | 'figma_not_configured' | 'device_unknown' | 'ci_token_limit' | 'bad_request' };
 ```
 
 ## Woher die Pakete kommen

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { DeliveryError, createCiToken, deviceId, figmaLinks, listCiTokens, readCredentials, registryToken, revokeCiToken, revokeRegistryToken } from './delivery.mjs';
+import { DeliveryError, FIGMA_PENDING, NPM_PENDING, createCiToken, deviceId, figmaLinks, listCiTokens, readCredentials, registryToken, revokeCiToken, revokeRegistryToken } from './delivery.mjs';
 import { readState, writeState } from './manifest.mjs';
 import { npmUserConfig, registryDefault } from './paths.mjs';
 import { SCOPE, TOKEN_PATTERN, authKey, blockToken, foreignScopeLines, hasBlock, projectScope, readFile, withBlock, withoutBlock, writePrivate } from './npmrc.mjs';
@@ -12,6 +12,8 @@ const GITHUB_PACKAGES = 'npm.pkg.github.com';
 // Registry aus dem letzten Login, sonst der Standard
 export const registryUrl = () => readState().npm?.registry || registryDefault();
 export const scopeLine = (registry = registryUrl()) => `${SCOPE}:registry=${registry}\n`;
+// erst nach einem erfolgreichen Login mit npm-Zugang zeigt die Projekt-.npmrc auf die Registry der Kette
+export const npmGranted = () => Boolean(readState().npm?.registry);
 
 function requireLogin() {
   const creds = readCredentials();
@@ -35,6 +37,12 @@ export async function setupNpm(key, opts) {
     grant = await registryToken({ key, device: deviceId() });
   } catch (err) {
     if (!(err instanceof DeliveryError)) throw err;
+    // Registry noch nicht eingerichtet: eine Zeile, kein npmrc-Block, kette update holt es später nach
+    if (err.code === 'registry_not_configured') {
+      console.log(NPM_PENDING);
+      writeState({ npm: { pending: true } });
+      return false;
+    }
     console.log(`HINW  npm-Zugang nicht eingerichtet: ${err.message}`);
     console.log('      Später nachholen mit: kette update');
     return false;
@@ -55,7 +63,7 @@ export async function teardownNpm(creds) {
   if (creds) {
     try { await revokeRegistryToken({ key: creds.key, device: deviceId() }); } catch (err) {
       if (!(err instanceof DeliveryError)) throw err;
-      console.log(`HINW  npm-Token nicht widerrufen (${err.message}). Der Block wird trotzdem entfernt, das Token verfällt spätestens mit der Lizenz.`);
+      if (err.code !== 'registry_not_configured') console.log(`HINW  npm-Token nicht widerrufen (${err.message}). Der Block wird trotzdem entfernt, das Token verfällt spätestens mit der Lizenz.`);
     }
   }
   const current = readFile(file);
@@ -81,7 +89,8 @@ export async function ensureNpm(key, opts) {
   if (opts.noNpm) return;
   const token = blockToken(readFile(readState().npm?.file || npmUserConfig()));
   if (token && (await whoami(registryUrl(), token)) !== 401) return;
-  console.log(token ? 'npm-Token wird nicht mehr angenommen, stelle ein neues aus ...' : 'npm-Zugang fehlt, richte ihn ein ...');
+  if (token) console.log('npm-Token wird nicht mehr angenommen, stelle ein neues aus ...');
+  else if (!readState().npm?.pending) console.log('npm-Zugang fehlt, richte ihn ein ...');
   await setupNpm(key, opts);
 }
 
@@ -90,6 +99,7 @@ export async function npmChecks(root, { line, warn }, opts) {
   const file = readState().npm?.file || npmUserConfig();
   const token = blockToken(readFile(file));
   if (token) line(true, `npm-Zugang in ${file}`);
+  else if (readState().npm?.pending) line(true, NPM_PENDING);
   else warn(`Kein npm-Zugang in ${file}. Für die Design-System-Pakete: kette update (oder kette login <key> --npm-replace bei eigener ${SCOPE}-Zeile)`);
   if (token && !opts.ci) {
     const status = await whoami(registryUrl(), token);
@@ -160,7 +170,14 @@ async function downloadChecked(file, target) {
 // kette figma [--out ordner]: aktuelles Figma-Release laden, Prüfsummen prüfen, Import-Reihenfolge zeigen
 export async function figma(opts) {
   const { key } = requireLogin();
-  const release = await figmaLinks({ key });
+  let release;
+  try {
+    release = await figmaLinks({ key });
+  } catch (err) {
+    if (err.code !== 'figma_not_configured') throw err;
+    console.log(FIGMA_PENDING);
+    return 0;
+  }
   const dir = path.resolve(opts.out || `kette-figma-${release.version}`);
   fs.mkdirSync(dir, { recursive: true });
   console.log(`Figma-Release ${release.version} (Updates bis ${dateOf(release.updates_until)}), ${release.files.length} Dateien nach ${dir}`);

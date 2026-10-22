@@ -13,7 +13,7 @@ import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
 import { credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 import { SCOPE } from './npmrc.mjs';
-import { ciToken, figma, npmChecks, scopeLine } from './npm-access.mjs';
+import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -184,8 +184,9 @@ function planFor(root, profile, bundleDir, tier, noteTier) {
     { path: 'docs/adr/0000-vorlage.md', content: fs.readFileSync(path.join(bundleDir, 'rules', 'architecture', 'adr-vorlage.md'), 'utf8') },
   ];
   if (tier === ENTERPRISE) {
-    // nur die Scope-Zeile, nie ein Token: die Datei darf ins Repo, der Token kommt aus ~/.npmrc oder dem CI-Secret
-    plan.push({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'Design-System-Pakete über die Kette, ohne Token' });
+    // nur die Scope-Zeile, nie ein Token: die Datei darf ins Repo, der Token kommt aus ~/.npmrc oder dem CI-Secret;
+    // ohne npm-Zugang keine Zeile, sonst zeigt das Projekt auf eine Registry, die noch nicht antwortet
+    if (npmGranted()) plan.push({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'Design-System-Pakete über die Kette, ohne Token' });
     const tpl = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'templates');
     for (const [from, to] of PLATFORM_FILES[profile.platform.id] || []) {
       const src = path.join(tpl, from);

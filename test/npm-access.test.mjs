@@ -15,7 +15,7 @@ const bundle = fakeBundle(V, undefined, checks);
 const token = (c) => `kt_${c.repeat(43)}`;
 const figmaFiles = { 'Design-Tokens.fig': 'tokens-fig', 'zero.fig': 'zero-fig', 'IMPORT.md': '# Import\n' };
 const calls = [];
-const state = { minted: 0, valid: new Set(), ci: [], badFigma: false, registryDown: false };
+const state = { minted: 0, valid: new Set(), ci: [], badFigma: false, registryDown: false, dormant: false };
 let server;
 let registry;
 
@@ -24,6 +24,9 @@ before(async () => {
     const url = new URL(req.url, server.url);
     const b = body ? JSON.parse(body) : {};
     calls.push({ method: req.method, path: url.pathname, body: b });
+    // Lieferdienst vor dem Go-live der Registry und der Figma-Lieferung
+    if (state.dormant && url.pathname.startsWith('/registry/')) return json(res, 503, { error: 'registry_not_configured', message: 'registry not configured' });
+    if (state.dormant && url.pathname.startsWith('/figma/')) return json(res, 503, { error: 'figma_not_configured', message: 'figma not configured' });
     if (url.pathname === '/install/token') return json(res, 200, { edition: 'enterprise', version: V, url: `${server.url}/install/download/x`, sha256: bundle.sha256, expires_at: '2027-10-20T00:00:00Z', updates_until: '2027-10-20T00:00:00Z', seats: { used: 1, max: 3 } });
     if (url.pathname === '/install/latest') return json(res, 200, { version: V, available: V, updates_until: '2027-10-20T00:00:00Z' });
     if (url.pathname === '/install/download/x') { res.writeHead(200); return res.end(bundle.buf); }
@@ -72,7 +75,7 @@ beforeEach(() => {
   userrc = path.join(tmp(), 'user.npmrc');
   process.env.NPM_CONFIG_USERCONFIG = userrc;
   calls.length = 0;
-  Object.assign(state, { minted: 0, valid: new Set(), ci: [], badFigma: false, registryDown: false });
+  Object.assign(state, { minted: 0, valid: new Set(), ci: [], badFigma: false, registryDown: false, dormant: false });
 });
 
 const run = (...argv) => capture(() => main(argv));
@@ -236,4 +239,53 @@ test('doctor prüft Block und Token und findet einen Token in einer Datei im Git
   ({ out } = await inDir(project, () => run('doctor')));
   assert.match(out, /FEHLT npm-Token gültig \(Antwort 401, neu ausstellen mit: kette update\)/);
   assert.match(out, /FEHLT npm-Token in Dateien im Git: ci\/\.npmrc/);
+});
+
+test('Registry noch nicht eingerichtet: login gelingt mit einer Zeile, kein npmrc-Block, keine Projekt-Zeile, update und logout bleiben still', async () => {
+  state.dormant = true;
+  write(path.dirname(userrc), 'user.npmrc', 'save-exact=true\n');
+  const { result, out } = await run('login', KEY, '--no-plugins');
+  assert.equal(result, 0);
+  assert.equal(out.split('\n').filter((l) => /npm/i.test(l)).join('\n'), 'npm-Paketzugang folgt mit dem Update bis 30.11.2026');
+  assert.match(out, /Angemeldet: .*Updates bis/);
+  assert.equal(rc(), 'save-exact=true\n', 'kein Block in der Benutzer-npmrc');
+
+  const project = tmp();
+  write(project, 'package.json', '{}');
+  await inDir(project, () => run('add', '--yes', '--no-plugins', '--stack', 'nextjs-ts-tailwind', '--platform', 'github-docker', '--patterns', 'modular-monolith'));
+  assert.equal(fs.existsSync(path.join(project, '.npmrc')), false, 'keine Scope-Zeile auf eine Registry, die noch nicht antwortet');
+  const doctor = await inDir(project, () => run('doctor', '--ci'));
+  assert.match(doctor.out, /OK {4}npm-Paketzugang folgt mit dem Update bis 30\.11\.2026/);
+
+  const update = await run('update', '--no-plugins');
+  assert.equal(update.result, 0);
+  assert.equal(update.out.split('\n').filter((l) => /npm/i.test(l)).join('\n'), 'npm-Paketzugang folgt mit dem Update bis 30.11.2026');
+  assert.equal(rc(), 'save-exact=true\n');
+
+  const logout = await run('logout', '--no-plugins');
+  assert.doesNotMatch(logout.out, /npm/);
+  assert.equal(rc(), 'save-exact=true\n');
+});
+
+test('Registry später eingerichtet: update richtet den Block ein, add schreibt dann die Scope-Zeile', async () => {
+  state.dormant = true;
+  await run('login', KEY, '--no-plugins');
+  state.dormant = false;
+  assert.match((await run('update', '--no-plugins')).out, /npm-Zugang eingerichtet/);
+  assert.match(rc(), new RegExp(token('a')));
+  const project = tmp();
+  write(project, 'package.json', '{}');
+  await inDir(project, () => run('add', '--yes', '--no-plugins', '--stack', 'nextjs-ts-tailwind', '--platform', 'github-docker', '--patterns', 'modular-monolith'));
+  assert.equal(fs.readFileSync(path.join(project, '.npmrc'), 'utf8'), `@getitdone-gmbh:registry=${registry}\n`);
+});
+
+test('Figma noch nicht eingerichtet: kette figma nennt das Update und lädt nichts', async () => {
+  await run('login', KEY, '--no-plugins');
+  state.dormant = true;
+  const out = path.join(tmp(), 'figma');
+  const r = await run('figma', '--out', out);
+  assert.equal(r.result, 0);
+  assert.equal(r.out, 'Figma-Dateien folgen mit dem Update bis 30.11.2026');
+  assert.equal(fs.existsSync(out), false);
+  await assert.rejects(run('token', 'ci', 'list'), /npm-Paketzugang folgt mit dem Update bis 30\.11\.2026/);
 });

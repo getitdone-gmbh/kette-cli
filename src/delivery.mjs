@@ -6,6 +6,9 @@ import { credentialsFile, delivery, deviceIdFile } from './paths.mjs';
 export const KEY_PATTERN = /^CDP(-[A-Z0-9]{5}){4}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SUPPORT = 'an info@itdone.de schreiben';
+// Antwort des Lieferdienstes, solange Registry oder Figma-Lieferung noch nicht eingerichtet sind
+export const NPM_PENDING = 'npm-Paketzugang folgt mit dem Update bis 30.11.2026';
+export const FIGMA_PENDING = 'Figma-Dateien folgen mit dem Update bis 30.11.2026';
 
 const seatsText = (seats) => (seats?.max ? ` (${seats.used} von ${seats.max} Geräten belegt)` : '');
 
@@ -22,6 +25,8 @@ const MESSAGES = {
   ci_token_limit: (body) => `Die Lizenz hat schon ${body.used} von ${body.max} CI-Tokens. Ein altes mit kette token ci revoke <id> widerrufen (Liste: kette token ci list).`,
   expired: () => 'Der Download-Link ist abgelaufen (gültig 15 Minuten). Den Befehl einfach erneut ausführen.',
   not_found: () => `Nicht gefunden. Den Befehl erneut ausführen, bleibt es dabei, ${SUPPORT}.`,
+  registry_not_configured: () => NPM_PENDING,
+  figma_not_configured: () => FIGMA_PENDING,
 };
 
 export class DeliveryError extends Error {
