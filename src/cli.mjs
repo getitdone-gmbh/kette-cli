@@ -172,7 +172,8 @@ function withApps(profile, schema, detected) {
   const known = schema.properties?.apps?.properties;
   if (!known) return profile;
   const apps = Object.fromEntries((profile.stack || []).filter((s) => known[s]).map((s) => [s, detected[s] || known[s].default]).filter(([, dir]) => dir));
-  return { ...profile, apps: { ...apps, ...profile.apps } };
+  const merged = { ...apps, ...profile.apps };
+  return 'apps' in profile ? { ...profile, apps: merged } : insertAfter(profile, 'stack', 'apps', merged);
 }
 
 function planFor(root, profile, bundleDir, tier, noteTier, templates, apps) {
