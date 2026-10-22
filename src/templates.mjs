@@ -73,7 +73,7 @@ function resolveApps(bundleDir, profile) {
   const defaults = readJson(path.join(bundleDir, 'schema', 'profile.schema.json'))?.properties?.apps?.properties || {};
   const apps = [];
   const skipped = [];
-  for (const stack of profile.stack) {
+  for (const stack of profile.stack || []) {
     const meta = stacks[stack];
     const dir = (profile.apps?.[stack] || defaults[stack]?.default || '').replace(/\/+$/, '') || '.';
     const taken = apps.find((app) => app.role === meta?.role);
@@ -95,6 +95,8 @@ export function renderTemplates(bundleDir, profile, { workspace = false } = {}) 
   const vars = Object.assign({}, ...apps.map((app) => folderVars(app.role, app.dir)));
   const files = checks.files.filter(applies(flags)).map((entry) => render(path.join(bundleDir, 'checks'), entry, flags, vars));
 
+  // A profile without platform (hand written or older) gets the checks, platform templates need the platform id
+  if (!profile.platform?.id) return { files, skipped, platform: false };
   const tplDir = path.join(bundleDir, 'profiles', 'platform', profile.platform.id, 'templates');
   const platform = readIndex(path.join(tplDir, 'index.json'));
   if (!platform) return { files, skipped, platform: false };

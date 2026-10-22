@@ -210,6 +210,21 @@ function templatesFor(bundleDir, profile, workspace) {
   }
 }
 
+// A new monorepo: the templates assume npm workspaces, so init adds the root package.json they need; never on add, never over an existing file
+function workspaceManifest(bundleDir, profile, templates) {
+  const f = path.join(bundleDir, 'profiles', 'stack', 'index.json');
+  const stacks = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {};
+  const apps = Object.entries(profile.apps || {}).filter(([stack]) => stacks[stack]?.flags?.includes('node')).map(([, dir]) => dir);
+  const isManifest = (p) => p !== 'package.json' && path.posix.basename(p) === 'package.json';
+  const tools = templates.files.filter((t) => isManifest(t.path)).map((t) => path.posix.dirname(t.path));
+  const workspaces = [...new Set([...apps, ...tools])];
+  if (!workspaces.length) return null;
+  return {
+    item: { path: 'package.json', content: JSON.stringify({ private: true, workspaces }, null, 2) + '\n', note: 'npm workspaces for the apps' },
+    templates: { ...templates, files: templates.files.map((t) => (isManifest(t.path) ? { ...t, note: 'template, listed in the root workspaces' } : t)) },
+  };
+}
+
 function platformStatus(bundleDir, id) {
   const f = path.join(bundleDir, 'profiles', 'platform', 'index.json');
   if (!fs.existsSync(f)) return null;
@@ -234,8 +249,10 @@ async function setup(root, opts, isNew) {
   const current = existingProfile(root);
   const target = current ? withApps(current, appsSchema, detected.apps) : profile;
   const rendered = tier === ENTERPRISE ? templatesFor(bundleDir, target, isNew || detectWorkspace(root)) : {};
-  const templates = rendered.templates || null;
-  const described = describe(planFor(root, profile, bundleDir, tier, projectTier(root, tier), templates, target.apps), root);
+  const workspace = isNew && rendered.templates ? workspaceManifest(bundleDir, target, rendered.templates) : null;
+  const templates = workspace?.templates || rendered.templates || null;
+  const plan = planFor(root, profile, bundleDir, tier, projectTier(root, tier), templates, target.apps);
+  const described = describe(workspace ? [...plan, workspace.item] : plan, root);
   console.log(`\n${opts.dryRun ? 'Would create' : 'Plan'} in ${file(path.resolve(root))} (edition ${editionLabel(tier)}):`);
   print(described);
   const stale = staleNote(described);
@@ -243,6 +260,7 @@ async function setup(root, opts, isNew) {
   if (tier === COMMUNITY) console.log(`\n  Agents, gates with code reviewer, platform templates and checks come with the Enterprise edition (Die Kette): ${cmd('kette login <key>')}`);
   else if (rendered.newer) console.log(`\n  The installed rulebook is newer than this CLI understands (${rendered.newer}), platform templates and checks are skipped. ${cliUpgradeHint()}`);
   else if (!templates) console.log(`\n  The installed rulebook has no profile-aware templates yet, load the current one with: ${cmd('kette update')}`);
+  else if (!target.platform?.id) console.log(`\n  The profile has no platform, platform templates are skipped. Add one to .kette/profile.json, e.g. "platform": { "id": "github-docker" }, and run ${cmd('kette add')} again.`);
   else if (!templates.platform) console.log(`\n  No templates for ${target.platform.id} yet (status: ${platformStatus(bundleDir, target.platform.id) || 'unknown'}).`);
   for (const s of templates?.skipped || []) console.log(`  No templates for ${s.stack}: ${s.reason}`);
   if (opts.dryRun) return 0;

@@ -45,7 +45,7 @@ function bundle({ apps = true } = {}) {
   write(d, `${tpl}/index.json`, JSON.stringify({
     apps: {
       'nextjs-ts-tailwind': { manifests: ['[[dir/]]package.json'], files: [{ from: 'next/Dockerfile', to: '[[dir/]]Dockerfile' }] },
-      'nestjs-prisma': { manifests: ['[[dir/]]package.json'], files: [{ from: 'nest/Dockerfile', to: '[[dir/]]Dockerfile' }] },
+      'nestjs-prisma': { manifests: ['[[dir/]]package.json', 'tools/migrate/package.json'], files: [{ from: 'nest/Dockerfile', to: '[[dir/]]Dockerfile' }, { from: 'nest/migrate-package.json', to: 'tools/migrate/package.json', when: 'workspace', note: 'template, add tools/migrate to the workspaces' }] },
       'python-fastapi': { files: [{ from: 'py/Dockerfile', to: '[[dir/]]Dockerfile' }] },
       'react-native-expo': { skip: 'mobile app, no container' },
     },
@@ -53,6 +53,7 @@ function bundle({ apps = true } = {}) {
   }));
   write(d, `${tpl}/next/Dockerfile`, 'FROM node\n# kette:if workspace\n[[manifests]]\n# kette:end\nCOPY [[dir]] [[dir]]\n');
   write(d, `${tpl}/nest/Dockerfile`, 'FROM node\nCOPY [[dir]] [[dir]]\n');
+  write(d, `${tpl}/nest/migrate-package.json`, '{ "name": "migrate", "private": true }\n');
   write(d, `${tpl}/py/Dockerfile`, 'FROM python\nCOPY [[dir]] [[dir]]\n');
   write(d, `${tpl}/root/compose.yaml`, 'services:\n# kette:if api\n  api: { dockerfile: [[api/]]Dockerfile }\n# kette:end\n# kette:if web\n  web: { dockerfile: [[web/]]Dockerfile }\n# kette:end\n');
   write(d, `${tpl}/root/ci.yml`, 'jobs:\n# kette:if node\n  node: npm ci\n# kette:end\n# kette:if python\n  python: uv sync\n# kette:end\n');
@@ -114,15 +115,61 @@ test('init python-fastapi: Python Dockerfile, compose and CI without web, Node o
 test('init nestjs-prisma: only the API, no web app anywhere', async () => {
   install(bundle());
   const { root } = await init('nestjs-prisma');
-  assert.deepEqual(files(root), ['.github/workflows/ci.yml', '.gitleaks.toml', 'apps/api/Dockerfile', 'compose.yaml', 'eslint.config.mjs', 'tsconfig.base.json']);
+  assert.deepEqual(files(root), ['.github/workflows/ci.yml', '.gitleaks.toml', 'apps/api/Dockerfile', 'compose.yaml', 'eslint.config.mjs', 'package.json', 'tools/migrate/package.json', 'tsconfig.base.json']);
   assert.doesNotMatch(read(root, 'compose.yaml') + read(root, 'eslint.config.mjs'), /web/);
+});
+
+test('init of a new Node project writes the root package.json the workspace templates need, a Python project gets none', async () => {
+  install(bundle());
+  const { root, out } = await init('nestjs-prisma');
+  assert.deepEqual(JSON.parse(read(root, 'package.json')), { private: true, workspaces: ['apps/api', 'tools/migrate'] });
+  assert.match(out, /\+ create +package\.json +\(npm workspaces for the apps\)/);
+  assert.match(out, /\+ create +tools\/migrate\/package\.json +\(template, listed in the root workspaces\)/);
+  assert.doesNotMatch(out, /add tools\/migrate to the workspaces/);
+  const py = await init('python-fastapi');
+  assert.equal(fs.existsSync(path.join(py.root, 'package.json')), false);
+});
+
+test('add never writes a root package.json; with npm workspaces the migrate hint stays', async () => {
+  install(bundle());
+  const root = tmp();
+  const own = JSON.stringify({ name: 'mine', workspaces: ['backend'] }) + '\n';
+  write(root, 'package.json', own);
+  write(root, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  const cwd = process.cwd();
+  process.chdir(root);
+  let out;
+  try {
+    ({ out } = await capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker', '--patterns', 'layered'])));
+  } finally {
+    process.chdir(cwd);
+  }
+  assert.equal(read(root, 'package.json'), own);
+  assert.match(out, /tools\/migrate\/package\.json +\(template, add tools\/migrate to the workspaces\)/);
+});
+
+test('an existing profile without platform: checks are written, platform templates skipped with a hint, no crash', async () => {
+  install(bundle());
+  const root = tmp();
+  write(root, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], apps: { 'nestjs-prisma': 'api' }, patterns: ['layered'], tier: 'enterprise' }, null, 2) + '\n');
+  const cwd = process.cwd();
+  process.chdir(root);
+  let out;
+  try {
+    ({ out } = await capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker'])));
+  } finally {
+    process.chdir(cwd);
+  }
+  assert.match(out, /The profile has no platform, platform templates are skipped\. Add one to \.kette\/profile\.json, e\.g\. "platform": \{ "id": "github-docker" \}, and run kette add again\./);
+  assert.deepEqual(files(root), ['.gitleaks.toml', 'eslint.config.mjs', 'tsconfig.base.json']);
 });
 
 test('init nextjs + nestjs: new monorepo with apps/web and apps/api as npm workspaces', async () => {
   install(bundle());
   const { root } = await init('nextjs-ts-tailwind,nestjs-prisma');
-  assert.deepEqual(files(root), ['.github/workflows/ci.yml', '.gitleaks.toml', 'apps/api/Dockerfile', 'apps/web/Dockerfile', 'compose.yaml', 'eslint.config.mjs', 'tsconfig.base.json']);
-  assert.match(read(root, 'apps/web/Dockerfile'), /COPY apps\/api\/package\.json apps\/api\/\nCOPY apps\/web\/package\.json apps\/web\//);
+  assert.deepEqual(files(root), ['.github/workflows/ci.yml', '.gitleaks.toml', 'apps/api/Dockerfile', 'apps/web/Dockerfile', 'compose.yaml', 'eslint.config.mjs', 'package.json', 'tools/migrate/package.json', 'tsconfig.base.json']);
+  assert.match(read(root, 'apps/web/Dockerfile'), /COPY apps\/api\/package\.json apps\/api\/\nCOPY apps\/web\/package\.json apps\/web\/\nCOPY tools\/migrate\/package\.json tools\/migrate\//);
+  assert.deepEqual(JSON.parse(read(root, 'package.json')).workspaces, ['apps/web', 'apps/api', 'tools/migrate']);
   assert.deepEqual(profileOf(root).apps, { 'nextjs-ts-tailwind': 'apps/web', 'nestjs-prisma': 'apps/api' });
 });
 
@@ -168,7 +215,7 @@ test('add follows the folders of an existing profile and never rewrites it', asy
 test('react-native-expo gets no container files and the reason is shown', async () => {
   install(bundle());
   const { root, out } = await init('react-native-expo');
-  assert.deepEqual(files(root), ['.gitleaks.toml', 'eslint.config.mjs', 'tsconfig.base.json']);
+  assert.deepEqual(files(root), ['.gitleaks.toml', 'eslint.config.mjs', 'package.json', 'tsconfig.base.json']);
   assert.match(out, /No templates for react-native-expo: mobile app, no container/);
 });
 
