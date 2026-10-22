@@ -37,9 +37,12 @@ The agents, gates and \`/feature-loop\` need Die Kette on the machine (\`kette l
 
 Create infrastructure only as code and check it with plan or what-if. A human runs apply, deploys and destructive migrations.`;
 
+// Core topics named in the note; kept in the CLI so the block is the same for the whole team, whatever bundle each machine has
+export const CORE_TOPICS = ['readability', 'structure', 'errors', 'tests', 'security', 'dependencies', 'logging-operations', 'changes', 'comments'];
+
 const COMMUNITY_FLOW = `## Flow for every change
 1. Before building: pick the architecture pattern (skill \`architecture-patterns\`, under \`patterns\` in the profile) and record hard-to-reverse decisions as ADRs in \`docs/adr/\` (template \`docs/adr/0000-template.md\`, in older projects \`docs/adr/0000-vorlage.md\`).
-2. While building: load the skill \`engineering-rules\` and follow it (readability, structure, errors, tests, security, dependencies, logging, changes).
+2. While building: load the skill \`engineering-rules\` and follow it (${CORE_TOPICS.join(', ')}).
 3. After implementing: have the subagent \`kette-engineering-core:kette-check\` check the diff against the core rules and the chosen pattern, fix every finding and have it check again. For UI changes also check against the skills \`ui-laws\`, \`interaction-principles\` and \`a11y-standards\`.
 4. A change is done when tests for new logic, type checks and lint pass, no \`kette-check\` finding is open, every hard-to-reverse decision has an ADR and infrastructure exists only as code. A human runs apply, deploys and destructive migrations.
 

@@ -7,6 +7,10 @@ const note = agentNote('community');
 const BEGIN = '<!-- kette:begin alt -->';
 const END = '<!-- kette:end -->';
 
+test('the Community flow names the fixed core topics, comments included', () => {
+  assert.match(note, /follow it \(readability, structure, errors, tests, security, dependencies, logging-operations, changes, comments\)\./);
+});
+
 test('genau ein Block wird ersetzt, Text davor und danach bleibt', () => {
   const next = renewNote(`Kopf\n${BEGIN}\nalt\n${END}\nNotiz\n`, note);
   assert.equal(next, `Kopf\n${note}Notiz\n`);

@@ -59,13 +59,30 @@ function platformTopics(dir) {
 }
 
 // All topics of the bundle; profiles without a file in the bundle (Community) stay known but not readable
+// renamed: German topic names of older rulebooks mapped to the English ones (rules/aliases.json)
 export function catalog(dir) {
   return {
     core: coreTopics(dir),
     patterns: patternTopics(dir),
     stacks: stackTopics(dir),
     platforms: platformTopics(dir),
+    renamed: aliasTopics(dir),
+    profileIds: profileIds(dir),
   };
+}
+
+// Ids of all stack and platform profiles from the index files; the Community bundle ships them without the profiles themselves
+function profileIds(dir) {
+  const stacks = readJson(path.join(dir, 'profiles', 'stack', 'index.json'));
+  const stackIds = stacks && typeof stacks === 'object' && !Array.isArray(stacks) ? Object.keys(stacks) : [];
+  return [...stackIds, ...platformTopics(dir).map((t) => t.id)].map((id) => String(id).toLowerCase());
+}
+
+// Only string to string entries count, so a missing or damaged aliases.json just means no aliases
+function aliasTopics(dir) {
+  const topics = readJson(path.join(dir, 'rules', 'aliases.json'))?.topics;
+  if (!topics || typeof topics !== 'object' || Array.isArray(topics)) return {};
+  return Object.fromEntries(Object.entries(topics).filter(([from, to]) => typeof to === 'string' && from).map(([from, to]) => [from.toLowerCase(), to.toLowerCase()]));
 }
 
 function distance(a, b) {
@@ -82,10 +99,7 @@ function distance(a, b) {
   return row[b.length];
 }
 
-export function suggest(input, ids) {
-  const q = input.toLowerCase();
-  return ids.filter((id) => id.includes(q) || q.includes(id) || distance(q, id) <= Math.max(2, Math.floor(id.length / 3))).slice(0, 3);
-}
+const isClose = (q, id) => id.includes(q) || q.includes(id) || distance(q, id) <= Math.max(2, Math.floor(id.length / 3));
 
 const pad = (s, n) => s + ' '.repeat(Math.max(1, n - s.length));
 
@@ -144,7 +158,16 @@ export function render(md) {
 function find(cat, topic) {
   const q = topic.toLowerCase();
   const all = [...cat.core, ...cat.patterns, ...cat.stacks, ...cat.platforms];
-  return { hit: all.find((t) => t.id === q || t.aliases.includes(q)), ids: all.map((t) => t.id) };
+  const match = (id) => all.find((t) => t.id === id || t.aliases.includes(id));
+  return { hit: match(q) || (Object.hasOwn(cat.renamed, q) ? match(cat.renamed[q]) : undefined), ids: all.map((t) => t.id) };
+}
+
+// Suggestions over topic ids and old names; an old name is suggested as the topic it points to, unknown targets are dropped
+function suggestTopics(topic, cat, ids) {
+  const targets = (id) => (Object.hasOwn(cat.renamed, id) ? cat.renamed[id] : id);
+  const q = topic.toLowerCase();
+  const close = [...ids, ...Object.keys(cat.renamed)].filter((id) => isClose(q, id)).map(targets).filter((id) => ids.includes(id));
+  return [...new Set(close)].slice(0, 3);
 }
 
 // kette rules [topic] [--path]; reads only the installed bundle, no network
@@ -160,12 +183,14 @@ export function rules(topic, opts, { bundle, tier, stackIds = [] }) {
   }
   const { hit, ids } = find(cat, topic);
   const missing = !hit || !fs.existsSync(hit.file);
-  if (missing && tier !== ENTERPRISE && (cat.platforms.includes(hit) || stackIds.includes(topic.toLowerCase()))) {
+  // Every profile the bundle or this CLI knows by name but cannot show in Community is an Enterprise topic, not an unknown one
+  const profiles = [...new Set([...cat.profileIds, ...stackIds])];
+  if (missing && tier !== ENTERPRISE && (cat.platforms.includes(hit) || profiles.includes(topic.toLowerCase()))) {
     throw new Error(`${topic} is an Enterprise profile (Die Kette), unlock with: kette login <key>`);
   }
   if (hit && missing) throw new Error(`${tilde(hit.file)} is missing from the bundle. Reload with: kette update`);
   if (!hit) {
-    const close = suggest(topic, [...ids, ...stackIds.filter((s) => !ids.includes(s))]);
+    const close = suggestTopics(topic, cat, [...ids, ...profiles.filter((s) => !ids.includes(s))]);
     throw new Error(`Unknown topic "${topic}".${close.length ? ` Did you mean: ${close.join(', ')}?` : ''} All topics: kette rules`);
   }
   console.log(opts.path ? hit.file : render(read(hit.file)));

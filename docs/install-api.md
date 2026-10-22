@@ -40,7 +40,7 @@ Anfrage (JSON): `{ "key": "CDP-…", "device": "<uuid>" }` (POST, damit der Schl
 
 ## npm-Registry (Design-System-Pakete)
 
-Lesender npm-Proxy im Lieferdienst für genau vier Pakete aus GitHub Packages: `@getitdone-gmbh/figma-design-tokens`, `@getitdone-gmbh/component-library-react`, `@getitdone-gmbh/zero`, `@getitdone-gmbh/zero-pages`. Alles andere (auch `design-tokens-clients`, ungescopte Namen) antwortet `404 not_found`, wie ein nicht vorhandenes Paket.
+Lesender npm-Proxy im Lieferdienst für genau vier Pakete aus GitHub Packages: `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/kette-design-enterprise`, `@getitdone-gmbh/zero`, `@getitdone-gmbh/zero-pages`. Zusätzlich liefert er dauerhaft die alten Namen `@getitdone-gmbh/figma-design-tokens` und `@getitdone-gmbh/component-library-react` (nur lesend): Die Versionen vor der Umbenennung gibt es nur dort, so behalten auch Lizenzen nach dem Update-Zeitraum den Zugang zu ihren Versionen. Unter den alten Namen wird ab 2027-01-31 nichts mehr veröffentlicht. Alles andere (auch `design-tokens-clients`, ungescopte Namen) antwortet `404 not_found`, wie ein nicht vorhandenes Paket.
 
 Basis: `https://npm.kette.itdone.de/` (eigener Host, steht in Lockfiles und Projekt-.npmrc, ändert sich nie). Dieselbe Registry antwortet unter `<Lieferdienst>/npm/` für Vorschau und Tests.
 
@@ -104,7 +104,7 @@ type RegistryError = { error: 'unauthorized' | 'licence_ended' | 'outside_update
 `kette-cli` (`npm run release`) lädt `kette-enterprise-<version>.tgz` plus `kette-enterprise.json` (`{version, sha256, published_at}`) als Asset in ein GitHub-Release des privaten Repos `alexfriedl/kette-engineering` (Tag `v<version>`). chain-delivery liest die Releases mit `GITHUB_TOKEN`, wie heute bei `claude-design-agent-pack`. Nie öffentlich hosten.
 
 ## CLI-Verhalten
-- `kette login <key>`: Schlüssel nach `~/.kette/credentials` (Rechte 600), Token holen, Paket laden, SHA-256 prüfen, entpacken, Plugins `kette-engineering-core`, `kette-engineering`, `design-system-agents` und `design-review-pack` installieren, `ui-gesetze` aus Community entfernen. Das Agenten-Pack steckt im Enterprise-Paket, der Lieferdienst braucht dafür keinen weiteren Zugriff.
+- `kette login <key>`: Schlüssel nach `~/.kette/credentials` (Rechte 600), Token holen, Paket laden, SHA-256 prüfen, entpacken, Plugins `kette-engineering-core`, `kette-engineering`, `design-system-agents`, und `design-review-pack` installieren, `ui-laws` und das umbenannte `ui-gesetze` aus Community entfernen. Das Agenten-Pack steckt im Enterprise-Paket, der Lieferdienst braucht dafür keinen weiteren Zugriff.
 - `kette update`: Community über das Manifest, Enterprise über `/install/latest` und `/install/token`.
 - `kette login` danach: `POST /registry/token`, markierter Block in der Benutzer-npmrc (`NPM_CONFIG_USERCONFIG` oder `~/.npmrc`, Rechte 600) mit Scope-Zeile und Token. Eine vorhandene fremde `@getitdone-gmbh:registry`-Zeile bleibt, der Schritt entfällt mit Hinweis; `--npm-replace` kommentiert sie aus, `--no-npm` überspringt. Scheitert der Schritt, bleibt der Login gültig, `kette update` holt ihn nach.
 - `kette logout`: `POST /registry/token/revoke` (offline egal), nur den Block entfernen (auskommentierte Zeilen wieder aktiv), dann Schlüssel und Enterprise-Paket lokal entfernen (gibt kein Gerät frei, das macht der Support).

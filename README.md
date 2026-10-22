@@ -13,7 +13,7 @@ irm https://kette.itdone.de/install.ps1 | iex              # Windows
 | Kern-Regeln und Architektur-Muster mit ADR-Vorlage | ja | ja |
 | Projektprofil `.kette/profile.json` und `kette doctor` | ja | ja |
 | Plugin `kette-engineering-core@kette` | ja | ja |
-| Plugin `ui-gesetze@kette`: UI-Gesetze, Interaktion, WCAG 2.2 AA (3 Skills) | ja | im Design-Review-Pack enthalten |
+| Plugin `ui-laws@kette`: UI-Gesetze, Interaktion, WCAG 2.2 AA (Skills `ui-laws`, `interaction-principles`, `a11y-standards`) | ja | im Design-Review-Pack enthalten |
 | Ablauf in `.kette/README.md` | Muster und ADR, Regeln beim Bau, Prüfung mit dem Agenten `kette-check`, Definition of Done | Rollen als Subagenten, Pflicht-Gates, `/feature-loop` |
 | Stack- und Plattform-Profile | | ja |
 | Vorlagen für CI, Docker und Deploy, Prüfungen (tsconfig, ESLint, dependency-cruiser, gitleaks) | | ja |
@@ -38,8 +38,9 @@ Im Projektprofil steht die Edition im Feld `tier`: `community` oder `enterprise`
 | `kette logout` | Schlüssel, Enterprise-Paket und npm-Zugang von diesem Rechner entfernen, den npm-Token widerrufen (das Gerät gibt der Support frei) |
 | `kette token ci create <name>` / `list` / `revoke <id>` | CI-Tokens für `npm ci` in Pipelines: Solo 2, Team 5, belegen kein Gerät, werden nur beim Erstellen angezeigt |
 | `kette figma` | aktuelles Figma-Release der Kette laden, Prüfsummen prüfen, Import-Reihenfolge zeigen; `--out ordner` |
+| `kette cloud setup` / `status` | Live deploy to itdone.cloud: account link, itdone MCP server in Claude Code, see below (Community and Enterprise) |
 
-Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out ordner`.
+Optionen: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out ordner`, `--have-account`.
 
 ## Vorlagen nach Profil (Enterprise)
 CI-, Docker- und Prüfvorlagen folgen dem Projektprofil: nur die gewählten Stacks, jeweils in ihrem App-Ordner (`apps` im Profil, sonst `apps/web`, `apps/api`, `apps/mobile`). `kette add` erkennt App-Ordner wie `backend/`, `frontend/` oder `apps/*`. `apps` schreibt nur Enterprise; ein Community-Projekt bekommt die Ordner beim Wechsel auf Enterprise aus der Erkennung. Ein vorhandenes Profil wird nie neu geschrieben: `kette add` hebt höchstens `tier` an und ergänzt `apps`, wenn das Feld fehlt und das installierte Schema es kennt; alle anderen Felder bleiben. Vorhandene Dateien bleiben unverändert (`= keep`).
@@ -69,14 +70,23 @@ Pipelines bekommen einen CI-Token (`kette token ci create "GitHub Actions"`) als
 
 GitLab und andere: `npm config set //npm.kette.itdone.de/:_authToken "$KETTE_NPM_TOKEN"` im Job. yarn berry: in `.yarnrc.yml` `npmScopes: { getitdone-gmbh: { npmRegistryServer: "https://npm.kette.itdone.de/", npmAuthToken: "${KETTE_NPM_TOKEN}" } }` (schreibt die CLI nicht).
 
+## Live deploy to itdone.cloud
+Available in Community and Enterprise. `kette cloud setup` prepares Claude Code for deploys to [itdone.cloud](https://itdone.cloud):
+
+1. Opens `https://dashboard.itdone.cloud/login?register=1` to create an account. Without a terminal, in CI, over SSH or when no browser opens, it prints the link. `--have-account` skips this step.
+2. Registers the itdone MCP server for all projects: `claude mcp add --transport http -s user itdone https://api.itdone.cloud/mcp`, without any auth header. An existing `itdone` entry is never overwritten, the command shows its URL and continues.
+3. Shows the next steps: in Claude Code run `/mcp`, choose `itdone`, then `Authenticate`. Claude Code signs in through the browser (OAuth), the account is created on the first login. Then ask Claude to deploy; the live-deploy skill deploys only after you confirm.
+
+`--dry-run` shows the steps without opening the browser or calling `claude mcp add`. `kette cloud status` shows whether the server is registered (exit code 0 either way), and `kette doctor` names it as an info line. kette never asks for, stores or prints a password or token. Without Claude Code, `kette cloud setup` stops with exit code 1.
+
 ## Wo die Regeln liegen
-Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`, die Verweiszeile in `CLAUDE.md` und die ADR-Vorlage. Das Regelwerk selbst liegt auf dem Rechner unter `~/.kette/bundles/active/` und ist in Claude Code als Plugins aktiv: in Community `kette-engineering-core@kette` (Skills `engineering-rules`, `architecture-patterns`) und `ui-gesetze@kette`, in Enterprise `kette-engineering-core@kette`, `kette-engineering@kette` (`platform-profile`, `code-reviewer`), `design-system-agents@kette` und `design-review-pack@kette`. Ansehen mit `kette rules`, was jedes Plugin mitbringt zeigt `kette doctor`.
+Im Projekt liegen nur wenige Dateien: `.kette/profile.json`, `.kette/README.md`, die Verweiszeile in `CLAUDE.md` und die ADR-Vorlage. Das Regelwerk selbst liegt auf dem Rechner unter `~/.kette/bundles/active/` und ist in Claude Code als Plugins aktiv: in Community `kette-engineering-core@kette` (Skills `engineering-rules`, `architecture-patterns`) und `ui-laws@kette`, in Enterprise `kette-engineering-core@kette`, `kette-engineering@kette` (`platform-profile`, `code-reviewer`), `design-system-agents@kette` und `design-review-pack@kette`. Ansehen mit `kette rules`, was jedes Plugin mitbringt zeigt `kette doctor`.
 
 `.kette/README.md` beschreibt den Ablauf für Claude Code zwischen `<!-- kette:begin` und `<!-- kette:end -->`. `kette init`, `kette add` und `kette update` erneuern nur diesen Block, eigene Notizen darunter bleiben, Zeilenenden (LF oder CRLF) auch. Fehlt eine Markierung oder steht sie doppelt, bleibt die Datei unverändert. Eine unveränderte Fassung aus 0.1.0 bis 0.3.1 ohne Block wird ganz ersetzt, eine selbst geänderte bleibt, und die CLI sagt, wie sie neu entsteht.
 
 Der Ablauf richtet sich nach `tier` im Projektprofil, nicht nach dem Rechner ([ADR-0001](docs/adr/0001-ablauf-folgt-profil.md)). `kette add` hebt `tier` auf die Edition des Rechners an, senkt es aber nie. Hat der Rechner eine niedrigere Edition als das Projekt, warnt `kette doctor`.
 
-Beim Wechsel der Edition entfernt die CLI die Plugins, die die neue Edition nicht hat: `kette login` entfernt `ui-gesetze@kette` (die Skills stecken im Design-Review-Pack), `kette logout` die drei Enterprise-Plugins, bevor es auf das Community-Paket umschaltet. Ob ein Plugin entfernt ist, prüft die CLI an der Plugin-Liste. Enthält ein älteres Paket auf dem Rechner ein Plugin noch nicht, installiert sie die übrigen und nennt `kette update`. Ist das Agenten-Pack zusätzlich einzeln installiert (Marketplace `claude-design-agent-pack`), bleibt es unangetastet, und die CLI nennt die doppelten Plugins.
+Beim Wechsel der Edition entfernt die CLI die Plugins, die die neue Edition nicht hat: `kette login` entfernt `ui-laws@kette` (die Skills stecken im Design-Review-Pack), `kette logout` die drei Enterprise-Plugins, bevor es auf das Community-Paket umschaltet und `ui-laws@kette` wieder installiert. Das umbenannte `ui-gesetze@kette` entfernen `kette update` und `kette add`, sobald das Paket `ui-laws` hat, und `kette login` immer, bevor der Marketplace auf das neue Paket zeigt. Das braucht CLI 0.6.2 oder neuer. Ob ein Plugin entfernt ist, prüft die CLI an der Plugin-Liste. Enthält ein älteres Paket auf dem Rechner ein Plugin noch nicht, installiert sie die übrigen und nennt `kette update`. Ist das Agenten-Pack zusätzlich einzeln installiert (Marketplace `claude-design-agent-pack`), bleibt es unangetastet, und die CLI nennt die doppelten Plugins.
 
 Der Marketplace der ausgelieferten Pakete heißt in Claude Code `kette`. Bis Version 0.3.0 hieß er `kette-engineering`. Zeigt ein alter `kette-engineering` in `~/.kette`, ersetzt die CLI ihn beim nächsten `kette init`, `add`, `update` oder `login`. Zeigt er auf ein Arbeitsrepo des Regelwerks, bleibt er, und die CLI nennt den Befehl zum Deaktivieren, falls Skills doppelt aktiv sind.
 
@@ -99,7 +109,7 @@ Der Marketplace der ausgelieferten Pakete heißt in Claude Code `kette`. Bis Ver
    claude plugin uninstall design-review-pack@kette
    claude plugin uninstall design-system-agents@kette
    claude plugin uninstall kette-engineering@kette
-   claude plugin uninstall ui-gesetze@kette
+   claude plugin uninstall ui-laws@kette
    claude plugin uninstall kette-engineering-core@kette
    claude plugin marketplace remove kette
    ```
@@ -119,9 +129,9 @@ Die Dateien im Projekt (`.kette/`, Verweiszeile in `CLAUDE.md`, ADR-Vorlage) ble
 | `KETTE_NO_MODIFY_PATH` | nicht gesetzt | `1` lässt die Shell-Startdatei unverändert, der Installer zeigt dann die Zeile zum Selbsteintragen |
 
 ## Veröffentlichen
-`npm run release` baut lokal, ohne etwas zu veröffentlichen, aus `../kette-engineering` (oder `KETTE_ENGINEERING`) und den Plugins `ui-gesetze`, `design-system-agents`, `design-review-pack` aus `../claude-design-agent-pack` (oder `KETTE_AGENT_PACK`) nach `dist/`. Vom Agenten-Pack nimmt es den Stand des neuesten Tags `vX.Y.Z` aus Git, nicht den Arbeitsordner; `KETTE_AGENT_PACK_REF` wählt einen anderen Stand zum Testen. Die Version ist `0.<Datum>.<Commits kette-engineering plus Commits Agenten-Pack>`, die Pakete sind reproduzierbar: gleicher Inhalt ergibt auf demselben Build-System dieselbe Prüfsumme (zwischen macOS-tar und GNU tar kann sie abweichen, deshalb baut ein Release immer auf einem System). Liegt in `dist/` schon dieselbe Paketversion oder dieselbe CLI-Version mit anderem Inhalt, bricht das Skript ab und lässt `dist/` unverändert.
+`npm run release` baut lokal, ohne etwas zu veröffentlichen, aus `../kette-engineering` (oder `KETTE_ENGINEERING`) und den Plugins `ui-laws`, `design-system-agents`, `design-review-pack` aus `../claude-design-agent-pack` (oder `KETTE_AGENT_PACK`) nach `dist/`. Vom Agenten-Pack nimmt es den Stand des neuesten Tags `vX.Y.Z` aus Git, nicht den Arbeitsordner; `KETTE_AGENT_PACK_REF` wählt einen anderen Stand zum Testen. Die Version ist `0.<Datum>.<Commits kette-engineering plus Commits Agenten-Pack>`, die Pakete sind reproduzierbar: gleicher Inhalt ergibt auf demselben Build-System dieselbe Prüfsumme (zwischen macOS-tar und GNU tar kann sie abweichen, deshalb baut ein Release immer auf einem System). Welche Plugins des Agenten-Packs in welches Paket gehören, liest das Skript aus `src/editions.mjs`. Fehlt dem gewählten Stand eines davon (Tag `v1.2.2` hat noch `ui-gesetze` statt `ui-laws`), bricht es mit den Plugin-Listen ab und baut nichts. Liegt in `dist/` schon dieselbe Paketversion oder dieselbe CLI-Version mit anderem Inhalt, bricht das Skript ab und lässt `dist/` unverändert.
 - `install.sh`, `install.ps1`, `manifest.json`, `kette-cli-<version>.tgz`, `kette-community-<version>.tgz` (öffentlich unter `https://kette.itdone.de/dl/`)
-- Community-Paket: `kette-engineering-core`, `ui-gesetze`
+- Community-Paket: `kette-engineering-core`, `ui-laws`
 - `private/kette-enterprise-<version>.tgz` mit `kette-engineering-core`, `kette-engineering`, `design-system-agents`, `design-review-pack` und `private/kette-enterprise.json` (`{version, sha256, published_at, agent_pack}`), nie öffentlich
 
 `npm run release -- --publish-enterprise` lädt das Enterprise-Paket zusätzlich mit `gh release create` als Release `v<version>` in das private Repo `alexfriedl/kette-engineering`. Das Skript bricht ab, wenn das Repo nicht privat ist, kette-engineering offene Änderungen hat, der Commit nicht gepusht ist oder der Stand des Agenten-Packs kein Release-Tag ist. Ohne den Schalter zeigt es nur den Befehl.

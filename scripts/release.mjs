@@ -24,9 +24,12 @@ const dirty = execFileSync('git', ['-C', eng, 'status', '--porcelain'], { encodi
 if (dirty && !process.env.KETTE_ALLOW_DIRTY) throw new Error(`kette-engineering hat offene Änderungen, erst committen:\n${dirty}`);
 const count = execFileSync('git', ['-C', eng, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim();
 
-// Plugins aus claude-design-agent-pack: ui-gesetze ist frei und kommt in Community, die beiden anderen nur in Enterprise
-const COMMUNITY_PACK_PLUGINS = ['ui-gesetze'];
-const ENTERPRISE_PACK_PLUGINS = ['design-system-agents', 'design-review-pack'];
+// Plugins from claude-design-agent-pack per edition, taken from src/editions.mjs: every edition plugin that kette-engineering does not ship
+const { COMMUNITY, ENTERPRISE, RENAMED_PLUGINS, pluginsFor } = await import('../src/editions.mjs');
+const engPlugins = JSON.parse(fs.readFileSync(path.join(eng, '.claude-plugin/marketplace.json'), 'utf8')).plugins.map((p) => p.name);
+const { packMismatch, packPluginsFor } = await import('./pack-plugins.mjs');
+const COMMUNITY_PACK_PLUGINS = packPluginsFor(pluginsFor(COMMUNITY), engPlugins);
+const ENTERPRISE_PACK_PLUGINS = packPluginsFor(pluginsFor(ENTERPRISE), engPlugins);
 const agentPack = path.resolve(process.env.KETTE_AGENT_PACK || path.join(root, '..', 'claude-design-agent-pack'));
 const newestTag = () => execFileSync('git', ['-C', agentPack, 'tag', '--list', 'v*', '--sort=-v:refname'], { encoding: 'utf8' }).split('\n').find((tag) => /^v\d+\.\d+\.\d+$/.test(tag)) || '';
 const agentPackRef = process.env.KETTE_AGENT_PACK_REF || newestTag();
@@ -34,6 +37,11 @@ if (!agentPackRef) throw new Error(`claude-design-agent-pack (${agentPack}) hat 
 const agentPackCommit = execFileSync('git', ['-C', agentPack, 'rev-parse', `${agentPackRef}^{commit}`], { encoding: 'utf8' }).trim();
 const agentPackTagged = execFileSync('git', ['-C', agentPack, 'tag', '--points-at', agentPackCommit], { encoding: 'utf8' }).trim() !== '';
 const packCount = execFileSync('git', ['-C', agentPack, 'rev-list', '--count', agentPackCommit], { encoding: 'utf8' }).trim();
+// The pack state must have every plugin the editions install, otherwise a bundle would ship without it (e.g. tag v1.2.2 still has ui-gesetze, the editions need ui-laws)
+const packPlugins = JSON.parse(execFileSync('git', ['-C', agentPack, 'show', `${agentPackCommit}:.claude-plugin/marketplace.json`], { encoding: 'utf8' })).plugins.map((p) => p.name);
+const packDirs = execFileSync('git', ['-C', agentPack, 'ls-tree', '--name-only', agentPackCommit, 'plugins/'], { encoding: 'utf8' }).split('\n').filter(Boolean).map((d) => d.replace(/^plugins\//, ''));
+const mismatch = packMismatch({ ref: agentPackRef, commit: agentPackCommit, packPlugins, packDirs, needed: [...new Set([...COMMUNITY_PACK_PLUGINS, ...ENTERPRISE_PACK_PLUGINS])], renamed: RENAMED_PLUGINS });
+if (mismatch) throw new Error(mismatch);
 // Semver, damit Claude Code neue Plugin-Versionen erkennt: 0.<Datum>.<Commits kette-engineering plus Commits Agenten-Pack>; ein neuer Stand in einem der beiden Repos ergibt eine neue Version
 const version = `0.${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${Number(count) + Number(packCount)}`;
 // Feste Zeit für alle Dateien im Paket (jüngerer der beiden Commits), damit gleicher Inhalt dieselbe Prüfsumme ergibt
@@ -124,6 +132,8 @@ const enterpriseMarket = { ...market, version, plugins: withVersion([...market.p
 const community = pack(`kette-community-${version}.tgz`, [[fromEng('rules'), 'rules'], [fromEng('schema'), 'schema'], [fromEng('plugins/kette-engineering-core'), 'plugins/kette-engineering-core'], ...COMMUNITY_PACK_PLUGINS.map(fromPack)], {
   '.claude-plugin/marketplace.json': JSON.stringify(communityMarket, null, 2) + '\n',
   'profiles/platform/index.json': fs.readFileSync(path.join(eng, 'profiles/platform/index.json'), 'utf8'),
+  // Names of the Enterprise stack profiles, so kette rules <stack> in Community points to kette login
+  'profiles/stack/index.json': fs.readFileSync(path.join(eng, 'profiles/stack/index.json'), 'utf8'),
   'VERSION': version + '\n',
 });
 const enterprise = pack(`private/kette-enterprise-${version}.tgz`, [...['rules', 'schema', 'profiles', 'checks', 'plugins', 'LICENSE'].map((p) => [fromEng(p), p]), ...ENTERPRISE_PACK_PLUGINS.map(fromPack)], {

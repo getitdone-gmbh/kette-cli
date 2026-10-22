@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { bundlesDir } from './paths.mjs';
-import { missingPlugins, pluginsFor } from './editions.mjs';
+import { RENAMED_PLUGINS, bundlePlugins } from './editions.mjs';
 import { cmd, status } from './out.mjs';
 
 // Own name, so the developer marketplace kette-engineering (repo) is never hit
@@ -11,7 +11,9 @@ const LEGACY_MARKETPLACE = 'kette-engineering';
 const ALL_PLUGINS = ['kette-engineering-core', 'kette-engineering'];
 // Marketplace of the separately sold agent pack, whose plugins are also in the Die Kette bundle
 const PACK_MARKETPLACE = 'claude-design-agent-pack';
-const PACK_PLUGINS = ['ui-gesetze', 'design-system-agents', 'design-review-pack'];
+const PACK_PLUGINS = ['ui-laws', 'design-system-agents', 'design-review-pack'];
+// A plugin and its names before a rename, so an older pack install is found too
+const withOldNames = (p) => [p, ...Object.keys(RENAMED_PLUGINS).filter((old) => RENAMED_PLUGINS[old] === p)];
 export const pluginId = (name, market = MARKETPLACE) => `${name}@${market}`;
 
 // npm installs Claude Code on Windows as claude.cmd, which only starts through cmd.exe; the command line is built here from fixed values,
@@ -20,7 +22,7 @@ export function cmdLine(args) {
   if (args.some((a) => /["%\r\n]|\\$/.test(a))) return null;
   return ['claude.cmd', ...args.map((a) => (/[\s&|<>^()]/.test(a) ? `"${a}"` : a))].join(' ');
 }
-function run(args) {
+export function runClaude(args) {
   if (process.platform !== 'win32') return spawnSync('claude', args, { encoding: 'utf8' });
   const exe = spawnSync('claude.exe', args, { encoding: 'utf8' });
   if (exe.error?.code !== 'ENOENT') return exe;
@@ -28,11 +30,11 @@ function run(args) {
   if (!line) return { status: 1, stdout: '', stderr: `Argument not safe for claude.cmd: ${args.join(' ')}` };
   return spawnSync(line, { encoding: 'utf8', shell: true });
 }
-const output = (r) => ((r.stdout || '') + (r.stderr || '')).trim();
-export const hasClaude = () => run(['--version']).status === 0;
+export const output = (r) => ((r.stdout || '') + (r.stderr || '')).trim();
+export const hasClaude = () => runClaude(['--version']).status === 0;
 
 function marketplaces() {
-  const r = run(['plugin', 'marketplace', 'list', '--json']);
+  const r = runClaude(['plugin', 'marketplace', 'list', '--json']);
   if (r.status !== 0) return [];
   try { return JSON.parse(r.stdout); } catch { return []; }
 }
@@ -43,7 +45,7 @@ const listed = (list, id) => list !== null && new RegExp(`(^|\\s)${id.replace(/[
 
 // Success is decided by the plugin list afterwards, not the reply text; if the list is not readable, the exit status decides
 function uninstall(id) {
-  const r = run(['plugin', 'uninstall', id]);
+  const r = runClaude(['plugin', 'uninstall', id]);
   const list = installedPlugins();
   // Reply of Claude Code when the plugin is already gone: counts as removed
   const absent = /not found in installed plugins/i.test(output(r));
@@ -67,7 +69,7 @@ function migrateLegacy(all) {
       const r = uninstall(pluginId(p, LEGACY_MARKETPLACE));
       if (!r.ok) return r;
     }
-    const rm = run(['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE]);
+    const rm = runClaude(['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE]);
     return rm.status === 0 ? { ok: true } : { ok: false, reason: output(rm) };
   }
   duplicateHint(legacy, ALL_PLUGINS.map((p) => pluginId(p, LEGACY_MARKETPLACE)), installedPlugins());
@@ -77,7 +79,7 @@ function migrateLegacy(all) {
 // Agent pack installed on its own (ZIP from the purchase): its plugins that kette now installs too show up twice
 function packDuplicates(all, plugins) {
   const pack = all.find((m) => m.name === PACK_MARKETPLACE);
-  if (pack) duplicateHint(pack, plugins.filter((p) => PACK_PLUGINS.includes(p)).map((p) => pluginId(p, PACK_MARKETPLACE)), installedPlugins());
+  if (pack) duplicateHint(pack, plugins.filter((p) => PACK_PLUGINS.includes(p)).flatMap(withOldNames).map((p) => pluginId(p, PACK_MARKETPLACE)), installedPlugins());
 }
 
 // Commands for a manual setup when the CLI cannot drive Claude Code
@@ -106,26 +108,29 @@ export function installPlugins(source, plugins, retire = []) {
   const fail = (reason) => ({ ok: false, reason: retired.length ? `${reason}; already removed before: ${retired.join(', ')}` : reason });
   packDuplicates(all, plugins);
   if (moved) {
-    const rm = run(['plugin', 'marketplace', 'remove', MARKETPLACE]);
+    const rm = runClaude(['plugin', 'marketplace', 'remove', MARKETPLACE]);
     if (rm.status !== 0) return fail(output(rm));
     known = null;
   }
-  const step = known ? run(['plugin', 'marketplace', 'update', MARKETPLACE]) : run(['plugin', 'marketplace', 'add', source]);
+  const step = known ? runClaude(['plugin', 'marketplace', 'update', MARKETPLACE]) : runClaude(['plugin', 'marketplace', 'add', source]);
   if (step.status !== 0 && !/already/i.test(output(step))) return fail(output(step));
   for (const p of plugins) {
     const id = pluginId(p);
-    let r = run(['plugin', 'install', id]);
-    if (r.status !== 0 && /already/i.test(output(r))) r = run(['plugin', 'update', id]);
+    let r = runClaude(['plugin', 'install', id]);
+    if (r.status !== 0 && /already/i.test(output(r))) r = runClaude(['plugin', 'update', id]);
     if (r.status !== 0) return fail(`${id}: ${output(r)}`);
   }
   return { ok: true };
 }
 
 // Installs the edition plugins the bundle contains; editionHints reports missing ones instead of failing
+// A renamed plugin is retired once the bundle has its successor or the successor is retired as well:
+// kette update replaces ui-gesetze@kette with ui-laws@kette, kette login removes both
 export function installEdition(link, tier, retire = []) {
-  const missing = missingPlugins(link, tier);
-  const present = pluginsFor(tier).filter((p) => !missing.includes(p));
-  return { ...installPlugins(link, present, retire), present, missing };
+  const { present, missing } = bundlePlugins(link, tier);
+  const renamed = Object.keys(RENAMED_PLUGINS).filter((old) => !present.includes(old) && (present.includes(RENAMED_PLUGINS[old]) || retire.includes(RENAMED_PLUGINS[old])));
+  const retireAll = [...new Set([...retire, ...renamed])];
+  return { ...installPlugins(link, present, retireAll), present, missing };
 }
 
 export function editionHints(result, link) {
@@ -142,8 +147,20 @@ export function uninstallPlugin(name) {
 
 // Output of claude plugin list, null when the call fails
 export function installedPlugins() {
-  const r = run(['plugin', 'list']);
+  const r = runClaude(['plugin', 'list']);
   return r.status === 0 ? r.stdout : null;
 }
 
 export const pluginInstalled = (name, list = installedPlugins()) => listed(list, pluginId(name));
+
+// A plugin the bundle has is missing in Claude Code, or an old name is still installed that this edition no longer uses
+// (e.g. after CLI 0.6.1 loaded a bundle with ui-laws); plugins the bundle lacks never count, so an update does not repair again and again
+export function pluginsOutdated(bundleDir, tier) {
+  const list = installedPlugins();
+  if (list === null) return false;
+  const { present } = bundlePlugins(bundleDir, tier);
+  const stale = Object.keys(RENAMED_PLUGINS).filter((old) => !present.includes(old));
+  return present.some((p) => !listed(list, pluginId(p))) || stale.some((old) => listed(list, pluginId(old)));
+}
+
+export const REPAIR_NOTE = 'Claude Code plugins do not match the installed bundle, installing them again.';

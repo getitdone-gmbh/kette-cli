@@ -7,7 +7,7 @@ import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { renderTemplates, TemplateError } from './templates.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
-import { MARKETPLACE, editionHints, hasClaude, installEdition, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
+import { MARKETPLACE, REPAIR_NOTE, editionHints, hasClaude, installEdition, installedPlugins, pluginId, pluginInstalled, pluginsOutdated } from './claude.mjs';
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins } from './editions.mjs';
 import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
@@ -18,6 +18,7 @@ import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.m
 import { accent, bold, brandLine, cmd, configure, dim, error, file, num, status, symbols } from './out.mjs';
 import { othersCanRead, privateHint } from './files.mjs';
 import { ExitError } from './errors.mjs';
+import { cloud, doctorLine } from './cloud.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -27,6 +28,7 @@ const STACKS = [
   { value: 'nestjs-mongoose', label: 'NestJS + Mongoose (backend, documents)' },
   { value: 'python-fastapi', label: 'Python + FastAPI' },
   { value: 'react-native-expo', label: 'React Native + Expo (mobile)' },
+  { value: 'react-spa', label: 'React + Vite (single page app)' },
 ];
 const PLATFORMS = [
   { value: 'github-docker', label: 'GitHub + Docker on your own server' },
@@ -64,6 +66,9 @@ Commands:
   kette token ci create <name> | list | revoke <id>
                         CI tokens for npm ci in pipelines (Solo 2, Team 5, no device seat)
   kette figma           Download the current Figma release of Die Kette (--out folder)
+  kette cloud setup     Live deploy to itdone.cloud: account link and the itdone MCP server in Claude Code
+                        (--have-account skips the link, --dry-run changes nothing)
+  kette cloud status    Show whether the itdone MCP server is registered in Claude Code
   kette version
 
 Options:
@@ -77,9 +82,11 @@ Options:
   --no-npm              With kette login and update, do not set up npm access
   --npm-replace         Comment out an existing @getitdone-gmbh line in ~/.npmrc and use Die Kette
   --out folder          Target folder for kette figma
+  --have-account        With kette cloud setup, do not open the itdone.cloud registration
   --color, --no-color   Force colors on or off (default: on in a terminal, off in pipes, CI and with NO_COLOR)
 
-The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.`;
+The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.
+kette cloud setup only registers the itdone MCP server; Claude Code deploys after you confirm, and kette never handles a password or token.`;
 
 // Brand line with version and edition, only on init and help
 const brand = () => brandLine(`kette ${VERSION} ${symbols().sep} ${editionLabel(tierOf())}`);
@@ -88,7 +95,7 @@ const help = () => [brand(), '', HELP.replace(/^ {2}((?:kette|--)\S*(?: \S+)*?)(
 
 const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
-  '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--help': 'help', '-h': 'help', '--version': 'version',
+  '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--help': 'help', '-h': 'help', '--version': 'version',
 };
 const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out'];
 
@@ -97,7 +104,7 @@ export function parse(argv) {
   const opts = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a in FLAGS) opts[FLAGS[a]] = true;
+    if (Object.hasOwn(FLAGS, a)) opts[FLAGS[a]] = true;
     else if (a === '--color' || a === '--no-color') opts.color = a === '--color';
     else if (VALUES.includes(a)) {
       const value = argv[++i];
@@ -165,7 +172,7 @@ function existingProfile(root) {
 // Project edition after init or add: from the profile, raised to the edition of this machine, never lowered (docs/adr/0001)
 function projectTier(root, machineTier) {
   const tier = existingProfile(root)?.tier;
-  return tier in RANK && RANK[tier] >= RANK[machineTier] ? tier : machineTier;
+  return Object.hasOwn(RANK, tier) && RANK[tier] >= RANK[machineTier] ? tier : machineTier;
 }
 
 // Existing profile: only raise tier and add apps when the field is missing, every other field stays as the user wrote it
@@ -280,17 +287,29 @@ function detectedLine(detected, opts) {
   return `Detected: ${stack} · ${platform}${defaulted.length ? ` (change with ${defaulted.join(' / ')})` : ''}`;
 }
 
+// Detected stacks the bundle schema does not list yet (an older rulebook) stay out, so detection never makes an invalid profile
+function detectFor(root, isNew, schema) {
+  if (isNew) return { folders: { apps: {}, unusable: {} }, detected: { stack: [], platform: null, apps: {} }, unknown: [] };
+  const known = schema.properties?.stack?.items?.enum;
+  const keep = (stack) => !known || known.includes(stack);
+  const pick = (map) => Object.fromEntries(Object.entries(map).filter(([stack]) => keep(stack)));
+  const found = detectAppFolders(root);
+  const stacks = detectStack(root);
+  const folders = { apps: pick(found.apps), unusable: pick(found.unusable) };
+  return { folders, detected: { stack: stacks.filter(keep), platform: detectPlatform(root), apps: folders.apps }, unknown: stacks.filter((s) => !keep(s)) };
+}
+
 async function setup(root, opts, isNew) {
   const tier = tierOf();
   const bundleDir = await ensureBundle(tier);
   if (isNew) fs.mkdirSync(root, { recursive: true });
-  const folders = isNew ? { apps: {}, unusable: {} } : detectAppFolders(root);
-  const detected = isNew ? { stack: [], platform: null, apps: {} } : { stack: detectStack(root), platform: detectPlatform(root), apps: folders.apps };
+  const schema = loadSchema(bundleDir);
+  const { folders, detected, unknown } = detectFor(root, isNew, schema);
   if (!isNew) console.log(detectedLine(detected, opts));
+  if (unknown.length) console.log(`${status('warn', 'WARN')} The installed rulebook does not know ${unknown.join(', ')} yet, left out of the profile. Load the current one with: ${cmd('kette update')}`);
   if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
   // apps only matters where templates are rendered, so Community stays quiet
   if (tier === ENTERPRISE) for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} ${unusableFolder(dir, stack)}`);
-  const schema = loadSchema(bundleDir);
   // apps says where the templates go, so only Enterprise writes it; a Community project gets it from detection when it is upgraded
   const appsSchema = tier === ENTERPRISE ? schema : {};
   const profile = withApps(await buildProfile(root, opts, detected), appsSchema, detected.apps, folders.unusable);
@@ -419,9 +438,10 @@ async function doctor(root, opts) {
   if (!opts.ci && bundle && hasClaude()) {
     const list = installedPlugins();
     if (list === null) line(false, 'Claude Code plugin list not readable (claude plugin list fails)');
-    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installed`, `Plugin ${pluginId(p)} not installed`);
+    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installed`, `Plugin ${pluginId(p)} not installed. Install with: ${cmd('kette update')}`);
   }
   if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir, info);
+  if (!opts.ci && hasClaude()) doctorLine(line, info);
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules', `CLAUDE.md does not point to the Die Kette rules (line @.kette/README.md missing), add it with: ${cmd('kette add')}`);
@@ -450,7 +470,7 @@ function printPluginDetails(tier, bundleDir, info) {
 function renewProjectNote(root) {
   const profile = existingProfile(root);
   if (!profile) return;
-  const tier = profile.tier in RANK ? profile.tier : COMMUNITY;
+  const tier = Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
   const [d] = describe([noteItem(tier)], root);
   if (d.unmarked) { console.log(staleNote([d])); return; }
   if (d.action === 'keep') return;
@@ -464,20 +484,29 @@ async function update(opts) {
   return code;
 }
 
+function refreshPlugins(dir, tier) {
+  const link = setActiveBundle(dir);
+  for (const l of editionHints(installEdition(link, tier, otherEditionPlugins(tier)), link)) console.log(l);
+}
+
 async function updateBundle(opts) {
   if (credentialsStatus() === 'valid') return updateEnterprise(opts, VERSION);
   const manifest = await fetchManifest();
   const tier = COMMUNITY;
   const have = installedBundle(tier);
-  if (have?.version === manifest.version) { console.log(`Up to date (version ${manifest.version}).`); return 0; }
+  if (have?.version === manifest.version) {
+    console.log(`Up to date (version ${manifest.version}).`);
+    if (!opts.dryRun && !opts.noPlugins && hasClaude() && pluginsOutdated(have.dir, tier)) {
+      console.log(REPAIR_NOTE);
+      refreshPlugins(have.dir, tier);
+    }
+    return 0;
+  }
   console.log(`New version ${manifest.version}${have ? ` (installed: ${have.version})` : ''}.`);
   if (manifest.changelog) console.log(manifest.changelog);
   if (opts.dryRun) return 0;
   const dir = await installBundle(manifest, tier);
-  if (!opts.noPlugins) {
-    const link = setActiveBundle(dir);
-    for (const l of editionHints(installEdition(link, tier, otherEditionPlugins(tier)), link)) console.log(l);
-  }
+  if (!opts.noPlugins) refreshPlugins(dir, tier);
   await cliHint(VERSION, manifest);
   console.log(`Rulebook ${manifest.version} installed.`);
   return 0;
@@ -536,6 +565,7 @@ export async function main(argv) {
       return await ciToken(action, value);
     }
     if (command === 'figma') return await figma(opts);
+    if (command === 'cloud') return await cloud(arg, opts);
     if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...readState() }, null, 2)); return 0; }
     console.error(`Unknown command: ${command}\n`);
     console.log(help());

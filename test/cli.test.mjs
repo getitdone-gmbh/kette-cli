@@ -23,6 +23,38 @@ test('erkennt Mongoose, Expo und FastAPI', () => {
   assert.deepEqual(detectStack(d).sort(), ['nestjs-mongoose', 'python-fastapi', 'react-native-expo']);
 });
 
+test('detects a Vite React app as react-spa with its folder, Next.js and Expo stay their own stacks', async () => {
+  const { detectAppFolders } = await import('../src/detect.mjs');
+  const d = tmp();
+  write(d, 'apps/spa/package.json', JSON.stringify({ dependencies: { react: '19' }, devDependencies: { vite: '7' } }));
+  write(d, 'apps/spa/index.html', '<div id="root"></div>');
+  write(d, 'apps/web/package.json', JSON.stringify({ dependencies: { next: '16', react: '19' }, devDependencies: { vite: '7' } }));
+  write(d, 'apps/mobile/package.json', JSON.stringify({ dependencies: { expo: '52', react: '19' }, devDependencies: { vite: '7' } }));
+  write(d, 'tools/docs/package.json', JSON.stringify({ devDependencies: { vite: '7' } }));
+  assert.deepEqual(detectStack(d).sort(), ['nextjs-ts-tailwind', 'react-native-expo', 'react-spa']);
+  assert.equal(detectAppFolders(d).apps['react-spa'], 'apps/spa');
+});
+
+test('react-spa needs Vite, React and an index.html, and no framework, native app or library', () => {
+  const spa = { dependencies: { react: '19' }, devDependencies: { vite: '7' } };
+  const cases = [
+    ['plain Vite React app', spa, true, true],
+    ['no index.html', spa, false, false],
+    ['no vite', { dependencies: { react: '19' } }, true, false],
+    ['react-native', { ...spa, dependencies: { react: '19', 'react-native': '0.80' } }, true, false],
+    ['React Router framework', { ...spa, devDependencies: { vite: '7', '@react-router/dev': '7' } }, true, false],
+    ['Remix', { ...spa, dependencies: { react: '19', '@remix-run/react': '2' } }, true, false],
+    ['TanStack Start', { ...spa, dependencies: { react: '19', '@tanstack/react-start': '1' } }, true, false],
+    ['component library', { ...spa, peerDependencies: { react: '>=18' } }, true, false],
+  ];
+  for (const [name, pkg, html, want] of cases) {
+    const d = tmp();
+    write(d, 'package.json', JSON.stringify(pkg));
+    if (html) write(d, 'index.html', '<div id="root"></div>');
+    assert.equal(detectStack(d).includes('react-spa'), want, name);
+  }
+});
+
 test('erkennt Plattformen an CI- und IaC-Dateien', () => {
   const cases = [
     ['azure-pipelines.yml', 'trigger: [main]', 'azure-devops'],
@@ -58,6 +90,13 @@ test('without a terminal a question stops with exit code 2 and a hint instead of
   const r = spawnSync(process.execPath, [bin, 'init'], { cwd: tmp(), env: { ...process.env, KETTE_HOME: tmp() }, stdio: ['ignore', 'pipe', 'pipe'], detached: true, encoding: 'utf8' });
   assert.equal(r.status, 2);
   assert.equal(r.stderr.trim(), 'kette: No terminal. Use --yes with --stack/--platform/--patterns.');
+});
+
+test('arguments named like Object prototype keys stay positional, never a flag', async () => {
+  const { parse } = await import('../src/cli.mjs');
+  for (const key of ['toString', '__proto__', 'constructor', 'hasOwnProperty']) {
+    assert.deepEqual(parse(['rules', key]), { _: ['rules', key] }, key);
+  }
 });
 
 test('unknown options and options without a value stop with exit code 2 and the help', async () => {

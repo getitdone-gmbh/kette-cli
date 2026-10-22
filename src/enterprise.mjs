@@ -3,7 +3,7 @@ import path from 'node:path';
 import { COMMUNITY, ENTERPRISE, editionLabel, retiredPlugins, isNewer } from './editions.mjs';
 import { DeliveryError, KEY_PATTERN, deviceId, downloadErrorText, latest, readCredentials, removeCredentials, requestToken, writeCredentials } from './delivery.mjs';
 import { DownloadError, fetchManifest, installEntry, installedBundle, readState, removeState, setActiveBundle, validVersion, writeState } from './manifest.mjs';
-import { editionHints, hasClaude, installEdition, pluginId, uninstallPlugin } from './claude.mjs';
+import { REPAIR_NOTE, editionHints, hasClaude, installEdition, pluginId, pluginsOutdated, uninstallPlugin } from './claude.mjs';
 import { bundlesDir, credentialsFile, delivery } from './paths.mjs';
 import { ensureNpm, setupNpm, teardownNpm } from './npm-access.mjs';
 import { askSecret } from './prompt.mjs';
@@ -118,6 +118,10 @@ export async function updateEnterprise(opts, cli) {
   }
   if (have && have.version === info.available) {
     console.log(`Up to date (${editionLabel(ENTERPRISE)} ${have.version}).`);
+    if (!opts.dryRun && !opts.noPlugins && hasClaude() && pluginsOutdated(have.dir, ENTERPRISE)) {
+      console.log(REPAIR_NOTE);
+      plugins(have.dir, opts);
+    }
     if (!opts.dryRun) await ensureNpm(key, opts);
     await cliHint(cli);
     return 0;
