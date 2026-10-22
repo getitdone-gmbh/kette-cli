@@ -350,11 +350,12 @@ function tool(bin, args = ['--version']) {
 
 async function doctor(root, opts) {
   let problems = 0;
-  const line = (ok, msg) => { console.log(`${ok ? status('ok', 'OK  ') : status('fail', 'FAIL')} ${msg}`); if (!ok) problems++; };
+  // failMsg states the actual condition when the check fails, msg when it holds
+  const line = (ok, msg, failMsg = msg) => { console.log(`${ok ? status('ok', 'OK  ') : status('fail', 'FAIL')} ${ok ? msg : failMsg}`); if (!ok) problems++; };
   const warn = (msg) => console.log(`${status('warn', 'WARN')} ${msg}`);
   const info = (msg) => console.log(`${status('info', 'INFO')} ${msg}`);
-  line(Number(process.versions.node.split('.')[0]) >= 20, `Node ${process.versions.node} ${dim('(20 or newer)')}`);
-  line(Boolean(tool('git')), 'git found');
+  line(Number(process.versions.node.split('.')[0]) >= 20, `Node ${process.versions.node} ${dim('(20 or newer)')}`, `Node ${process.versions.node} is too old, 20 or newer is required`);
+  line(Boolean(tool('git')), 'git found', 'git not found');
   if (!opts.ci) {
     const claude = hasClaude();
     if (claude) line(true, 'Claude Code found');
@@ -363,17 +364,20 @@ async function doctor(root, opts) {
   const tier = tierOf();
   const bundle = installedBundle(tier);
   edition(tier, { line, warn });
-  line(Boolean(bundle), `Rulebook installed ${dim(`(${editionLabel(tier)}${bundle ? `, version ${bundle.version}` : ''})`)}`);
+  line(Boolean(bundle), `Rulebook installed ${dim(`(${editionLabel(tier)}${bundle ? `, version ${bundle.version}` : ''})`)}`, `Rulebook not installed (${editionLabel(tier)}). Load it with: ${cmd('kette update')}`);
   if (bundle) info(`Rulebook and plugins live in ${file(tilde(fs.existsSync(activeBundleLink()) ? activeBundleLink() : bundle.dir))}`);
   const raw = readProfile(root);
   const profile = normalizeProfile(raw);
   // Outside a project only --ci counts a missing profile, a person just gets told where to go
-  if (profile || opts.ci) line(Boolean(profile), '.kette/profile.json present');
+  if (profile || opts.ci) line(Boolean(profile), '.kette/profile.json present', '.kette/profile.json missing');
   else info(`No kette project in this folder. cd into your project or run ${cmd('kette init')}.`);
   if (raw && isLegacyTier(raw.tier)) warn(`Profile uses the old value tier "${raw.tier}", read as "${profile.tier}". Change it to "${profile.tier}" in .kette/profile.json.`);
   if (profile && bundle) {
-    const errs = validate(loadSchema(bundle.dir), profile);
-    line(errs.length === 0, `Profile valid${errs.length ? `: ${errs.join('; ')}` : ''}`);
+    const schema = loadSchema(bundle.dir);
+    const errs = validate(schema, profile);
+    // A profile written by a newer CLI may name app folders the installed rulebook does not know yet: that needs an update, not a fix
+    if (errs.length === 1 && errs[0] === '$: unknown field apps' && !schema.properties?.apps) warn(`The profile names app folders (apps), the installed rulebook does not know them yet. Load the current one with: ${cmd('kette update')}`);
+    else line(errs.length === 0, 'Profile valid', `Profile not valid: ${errs.join('; ')}`);
     if (PREVIEW.includes(platformStatus(bundle.dir, profile.platform?.id))) warn(`Platform ${profile.platform.id} is still a preview ${dim('(no verified reference project)')}`);
     if (profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn(`Profile requires the Enterprise edition (Die Kette), only Community is installed here. Agents, gates, /feature-loop, platform profiles and checks from .kette/README.md are missing. Unlock with: ${cmd('kette login <key>')}`);
     if (profile.tier !== ENTERPRISE && tier === ENTERPRISE) warn(`Enterprise (Die Kette) is installed here, the project is on Community. Switch to the flow with agents and gates: ${cmd('kette add')}`);
@@ -382,12 +386,12 @@ async function doctor(root, opts) {
   if (!opts.ci && bundle && hasClaude()) {
     const list = installedPlugins();
     if (list === null) line(false, 'Claude Code plugin list not readable (claude plugin list fails)');
-    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installed`);
+    else for (const p of pluginsFor(tier)) line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installed`, `Plugin ${pluginId(p)} not installed`);
   }
   if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir, info);
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
   const md = path.join(root, 'CLAUDE.md');
-  if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules');
+  if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules', `CLAUDE.md does not point to the Die Kette rules (line @.kette/README.md missing), add it with: ${cmd('kette add')}`);
   console.log(`\n${problems ? bold(error(`${problems} open issue(s)`)) : bold(accent('all good'))}`);
   return problems ? 1 : 0;
 }

@@ -274,7 +274,7 @@ test('doctor prüft Block und Token und findet einen Token in einer Datei im Git
   execFileSync('git', ['-C', project, 'add', '.']);
   state.valid.clear();
   ({ out } = await inDir(project, () => run('doctor')));
-  assert.match(out, /FAIL npm token valid \(response 401, issue a new one with: kette update\)/);
+  assert.match(out, /FAIL npm token rejected \(response 401\), issue a new one with: kette update/);
   assert.match(out, /FAIL npm token in files tracked by git: ci\/\.npmrc/);
 });
 

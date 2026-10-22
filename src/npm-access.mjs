@@ -120,7 +120,7 @@ export async function npmChecks(root, { line, warn }, opts) {
   if (token && !opts.ci) {
     const code = await whoami(registryUrl(), token);
     if (code === null) warn(`Registry ${registryUrl()} not reachable, token not checked`);
-    else line(code === 200, `npm token valid${code === 200 ? '' : ` (response ${code}, issue a new one with: ${cmd('kette update')})`}`);
+    else line(code === 200, 'npm token valid', `npm token rejected (response ${code}), issue a new one with: ${cmd('kette update')}`);
   }
   const project = projectScope(readFile(path.join(root, '.npmrc')));
   if (project?.includes(GITHUB_PACKAGES)) warn(`.npmrc in the project points ${SCOPE} to ${GITHUB_PACKAGES}. For Die Kette customers: ${scopeLine().trim()}`);

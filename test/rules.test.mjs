@@ -294,9 +294,45 @@ test('doctor outside a project gives a hint instead of an open issue, --ci stays
     assert.match(out, /\nall good$/);
     assert.equal(result, 0);
     const ci = await run('doctor', '--ci');
-    assert.match(ci.out, /^FAIL \.kette\/profile\.json present$/m);
+    assert.match(ci.out, /^FAIL \.kette\/profile\.json missing$/m);
     assert.match(ci.out, /\n1 open issue\(s\)$/);
     assert.equal(ci.result, 1);
+  } finally {
+    claude.restore();
+    process.chdir(cwd);
+  }
+});
+
+test('doctor: a profile with apps and an installed schema without apps is a WARN with kette update, not a FAIL (also --ci)', async () => {
+  const d = rulebook('community');
+  write(d, 'schema/profile.schema.json', JSON.stringify({ type: 'object', additionalProperties: false, properties: { version: {}, project: {}, stack: {}, platform: {}, patterns: {}, tier: {} } }));
+  const project = tmp();
+  write(project, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], apps: { 'nestjs-prisma': 'backend' }, platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community' }));
+  write(project, 'CLAUDE.md', '@.kette/README.md\n');
+  const cwd = process.cwd();
+  process.chdir(project);
+  try {
+    const { out, result } = await run('doctor', '--ci');
+    assert.match(out, /^WARN The profile names app folders \(apps\), the installed rulebook does not know them yet\. Load the current one with: kette update$/m);
+    assert.doesNotMatch(out, /FAIL/);
+    assert.equal(result, 0);
+    write(project, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], apps: {}, platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community', extra: 1 }));
+    assert.match((await run('doctor', '--ci')).out, /^FAIL Profile not valid: \$: unknown field apps; \$: unknown field extra$/m);
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
+test('doctor names a missing plugin as not installed', async () => {
+  rulebook('community');
+  const project = tmp();
+  const cwd = process.cwd();
+  const claude = fakeClaude([], 'kette-engineering-core@kette\n');
+  process.chdir(project);
+  try {
+    const { out } = await run('doctor');
+    assert.match(out, /^OK {3}Plugin kette-engineering-core@kette installed$/m);
+    assert.match(out, /^FAIL Plugin ui-gesetze@kette not installed$/m);
   } finally {
     claude.restore();
     process.chdir(cwd);
