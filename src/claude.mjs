@@ -124,11 +124,12 @@ export function installPlugins(source, plugins, retire = []) {
 }
 
 // Installs the edition plugins the bundle contains; editionHints reports missing ones instead of failing
-// A renamed plugin is retired once the bundle has its successor, so kette update replaces ui-gesetze@kette with ui-laws@kette
+// A renamed plugin is retired once the bundle has its successor or the successor is retired as well:
+// kette update replaces ui-gesetze@kette with ui-laws@kette, kette login removes both
 export function installEdition(link, tier, retire = []) {
   const missing = missingPlugins(link, tier);
   const present = pluginsFor(tier).filter((p) => !missing.includes(p));
-  const renamed = Object.keys(RENAMED_PLUGINS).filter((old) => present.includes(RENAMED_PLUGINS[old]));
+  const renamed = Object.keys(RENAMED_PLUGINS).filter((old) => present.includes(RENAMED_PLUGINS[old]) || retire.includes(RENAMED_PLUGINS[old]));
   const retireAll = [...new Set([...retire, ...renamed])];
   return { ...installPlugins(link, present, retireAll), present, missing };
 }

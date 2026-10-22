@@ -17,7 +17,7 @@ test('Anzeigenamen und Plugins je Edition', () => {
   assert.equal(editionLabel('community'), 'Community');
   assert.equal(editionLabel('kette'), 'Enterprise (Die Kette)');
   assert.deepEqual(pluginsFor('free'), ['kette-engineering-core', 'ui-laws']);
-  assert.deepEqual(pluginsFor('enterprise'), ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack', 'ui-laws']);
+  assert.deepEqual(pluginsFor('enterprise'), ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack']);
   assert.deepEqual(RENAMED_PLUGINS, { 'ui-gesetze': 'ui-laws' });
 });
 
@@ -30,7 +30,7 @@ test('tier values that are Object prototype keys are no legacy tier and no editi
 });
 
 test('beim Wechsel der Edition fallen nur die Plugins weg, die die neue Edition nicht hat', () => {
-  assert.deepEqual(retiredPlugins(COMMUNITY, ENTERPRISE), []);
+  assert.deepEqual(retiredPlugins(COMMUNITY, ENTERPRISE), ['ui-laws']);
   assert.deepEqual(retiredPlugins(ENTERPRISE, COMMUNITY), ['kette-engineering', 'design-system-agents', 'design-review-pack']);
 });
 
@@ -55,7 +55,7 @@ test('Inhalt der Plugins wird aus den Ordnern im Paket gezählt', () => {
   assert.deepEqual(pluginContents(d, 'design-system-agents').commands, ['/feature-loop']);
   assert.equal(pluginContents(d, 'design-review-pack'), null);
   assert.equal(pluginContents(null, 'kette-engineering'), null);
-  assert.equal(pluginSummary(ENTERPRISE, 'kette', d), 'kette-engineering-core@kette (Agent kette-check, Skills architecture-patterns, engineering-rules), kette-engineering@kette (Agent code-reviewer, Skill platform-profile), design-system-agents@kette (4 Agents, Skill loop-contract, Command /feature-loop), design-review-pack@kette, ui-laws@kette');
+  assert.equal(pluginSummary(ENTERPRISE, 'kette', d), 'kette-engineering-core@kette (Agent kette-check, Skills architecture-patterns, engineering-rules), kette-engineering@kette (Agent code-reviewer, Skill platform-profile), design-system-agents@kette (4 Agents, Skill loop-contract, Command /feature-loop), design-review-pack@kette');
   const details = pluginDetails(ENTERPRISE, 'kette', d);
   assert.deepEqual(details[2], { id: 'design-system-agents@kette', lines: ['Agents (4): a, b, c, d', 'Skills (1): loop-contract', 'Commands (1): /feature-loop'] });
   assert.deepEqual(details[3].lines, ['not in the bundle']);
