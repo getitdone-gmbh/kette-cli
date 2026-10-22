@@ -36,17 +36,30 @@ export function detectStack(dir) {
   return [...new Set(manifests(dir).flatMap(stacksOf))];
 }
 
+// Same rule as apps in the profile schema: plain folder names joined by /, so a detected folder always makes a valid profile
+const APP_FOLDER = /^(\.|(?!(.*\/)?\.\.?(\/|$))[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*\/?)$/;
+
 // App folder per stack, relative with / (e.g. backend, frontend, apps/web); the least nested manifest wins, the root of an npm workspace never counts
-export function detectApps(dir) {
+// unusable: stacks found only in folders whose name the profile cannot hold (spaces, umlauts), they get no apps entry
+export function detectAppFolders(dir) {
   const depth = (rel) => (rel === '.' ? 0 : rel.split('/').length);
   const found = manifests(dir)
     .map((f) => ({ f, rel: path.relative(dir, path.dirname(f)).split(path.sep).join('/') || '.' }))
     .filter(({ f, rel }) => !(rel === '.' && readJson(f)?.workspaces))
     .sort((a, b) => depth(a.rel) - depth(b.rel) || a.rel.localeCompare(b.rel));
   const apps = {};
-  for (const { f, rel } of found) for (const stack of stacksOf(f)) apps[stack] ??= rel;
-  return apps;
+  const unusable = {};
+  for (const { f, rel } of found) {
+    for (const stack of stacksOf(f)) {
+      if (APP_FOLDER.test(rel)) apps[stack] ??= rel;
+      else unusable[stack] ??= rel;
+    }
+  }
+  for (const stack of Object.keys(apps)) delete unusable[stack];
+  return { apps, unusable };
 }
+
+export const detectApps = (dir) => detectAppFolders(dir).apps;
 
 // npm workspaces at the repository root: the Node apps then share one install and one lockfile
 export const detectWorkspace = (dir) => Boolean(readJson(path.join(dir, 'package.json'))?.workspaces);

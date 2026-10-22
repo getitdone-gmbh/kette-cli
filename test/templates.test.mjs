@@ -377,3 +377,31 @@ test('ADR template: English 0000-template.md for a new project, nothing new besi
   const legacy = await init('nestjs-prisma');
   assert.equal(read(legacy.root, 'docs/adr/0000-vorlage.md'), '# ADR-Vorlage\n');
 });
+
+test('a detected folder the profile cannot hold ("Web App", umlauts) gets no apps entry and a hint; add finishes with a valid profile', async () => {
+  const { detectAppFolders } = await import('../src/detect.mjs');
+  const d = tmp();
+  write(d, 'Web App/package.json', JSON.stringify({ dependencies: { next: '16' } }));
+  write(d, 'Lösung/api/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  assert.deepEqual(detectAppFolders(d), { apps: {}, unusable: { 'nextjs-ts-tailwind': 'Web App', 'nestjs-prisma': 'Lösung/api' } });
+
+  install(bundle());
+  const root = tmp();
+  write(root, 'Web App/package.json', JSON.stringify({ dependencies: { next: '16' } }));
+  write(root, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  const { out, result } = await addIn(root, ['--platform', 'github-docker', '--patterns', 'layered']);
+  assert.equal(result, 0);
+  assert.match(out, /WARN Folder "Web App" \(nextjs-ts-tailwind\) can't be used as an app folder, set apps by hand in \.kette\/profile\.json/);
+  assert.deepEqual(profileOf(root).apps, { 'nestjs-prisma': 'backend' });
+  assert.ok(files(root).includes('backend/Dockerfile'));
+  assert.ok(!files(root).some((f) => f.startsWith('apps/')), 'no default folder for the skipped app');
+  assert.match(out, /No templates for nextjs-ts-tailwind: folder "Web App" can't be used as an app folder/);
+
+  const existing = tmp();
+  write(existing, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nextjs-ts-tailwind', 'nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community' }, null, 2) + '\n');
+  write(existing, 'Web App/package.json', JSON.stringify({ dependencies: { next: '16' } }));
+  write(existing, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  await addIn(existing);
+  assert.deepEqual(profileOf(existing).apps, { 'nestjs-prisma': 'backend' });
+  assert.equal(profileOf(existing).tier, 'enterprise');
+});

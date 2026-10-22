@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fetchManifest, installBundle, installedBundle, readState, setActiveBundle } from './manifest.mjs';
-import { detectApps, detectPlatform, detectStack, detectWorkspace } from './detect.mjs';
+import { detectAppFolders, detectPlatform, detectStack, detectWorkspace } from './detect.mjs';
 import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { renderTemplates, TemplateError } from './templates.mjs';
@@ -182,10 +182,13 @@ function insertAfter(obj, after, key, value) {
 }
 
 // App folders in the profile only when the installed schema knows the field, older bundles reject unknown fields; folders already in the profile stay
-function withApps(profile, schema, detected) {
+// unusable: stacks whose detected folder the profile cannot hold, they get no entry (no default either, it would point to a folder that is not there)
+// Only folders the schema accepts are added, so kette never writes an invalid apps entry into a profile
+function withApps(profile, schema, detected, unusable = {}) {
   const known = schema.properties?.apps?.properties;
   if (!known) return profile;
-  const apps = Object.fromEntries((profile.stack || []).filter((s) => known[s]).map((s) => [s, detected[s] || known[s].default]).filter(([, dir]) => dir));
+  const accepted = (s, dir) => dir && (!known[s].pattern || new RegExp(known[s].pattern).test(dir));
+  const apps = Object.fromEntries((profile.stack || []).filter((s) => known[s] && !(s in unusable)).map((s) => [s, detected[s] || known[s].default]).filter(([s, dir]) => accepted(s, dir)));
   const merged = { ...apps, ...profile.apps };
   return 'apps' in profile ? { ...profile, apps: merged } : insertAfter(profile, 'stack', 'apps', merged);
 }
@@ -259,22 +262,28 @@ async function setup(root, opts, isNew) {
   const tier = tierOf();
   const bundleDir = await ensureBundle(tier);
   if (isNew) fs.mkdirSync(root, { recursive: true });
-  const detected = isNew ? { stack: [], platform: null, apps: {} } : { stack: detectStack(root), platform: detectPlatform(root), apps: detectApps(root) };
+  const folders = isNew ? { apps: {}, unusable: {} } : detectAppFolders(root);
+  const detected = isNew ? { stack: [], platform: null, apps: {} } : { stack: detectStack(root), platform: detectPlatform(root), apps: folders.apps };
   if (!isNew) console.log(`Detected: stack ${detected.stack.join(', ') || 'none'}, platform ${detected.platform || 'none'}`);
   if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
+  for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} Folder "${dir}" (${stack}) can't be used as an app folder, set apps by hand in .kette/profile.json`);
   const schema = loadSchema(bundleDir);
   // apps says where the templates go, so only Enterprise writes it; a Community project gets it from detection when it is upgraded
   const appsSchema = tier === ENTERPRISE ? schema : {};
-  const profile = withApps(await buildProfile(root, opts, detected), appsSchema, detected.apps);
+  const profile = withApps(await buildProfile(root, opts, detected), appsSchema, detected.apps, folders.unusable);
   const errors = validate(schema, profile);
   if (errors.length) throw new Error(`Invalid profile: ${errors.join('; ')}`);
 
   // Templates follow the profile in the project if there is one, it is never replaced
   const current = existingProfile(root);
-  const target = current ? withApps(current, appsSchema, detected.apps) : profile;
+  const target = current ? withApps(current, appsSchema, detected.apps, folders.unusable) : profile;
   // The profile in the project steers paths, so it is checked against the schema before anything is rendered from it
   const invalid = current ? validate(schema, target) : [];
-  const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : templatesFor(bundleDir, target, isNew || detectWorkspace(root));
+  // A stack found only in an unusable folder and without an apps entry renders nothing, the default folder would not be its folder
+  const skippedStacks = (target.stack || []).filter((s) => s in folders.unusable && !target.apps?.[s]);
+  const renderable = { ...target, stack: (target.stack || []).filter((s) => !skippedStacks.includes(s)) };
+  const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : templatesFor(bundleDir, renderable, isNew || detectWorkspace(root));
+  if (rendered.templates) rendered.templates.skipped.push(...skippedStacks.map((stack) => ({ stack, reason: `folder "${folders.unusable[stack]}" can't be used as an app folder, set apps by hand in .kette/profile.json` })));
   const workspace = isNew && rendered.templates ? workspaceManifest(bundleDir, target, rendered.templates) : null;
   const templates = workspace?.templates || rendered.templates || null;
   const plan = planFor(root, profile, bundleDir, tier, projectTier(root, tier), templates, target.apps);
