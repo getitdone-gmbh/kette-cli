@@ -120,4 +120,6 @@ test('install.ps1 installs from the local mirror and kette.cmd runs', { skip: (!
   const { stdout } = await exec(pwsh, ['-NoProfile', '-File', path.join(repo, 'install', 'install.ps1')], { env });
   assert.match(stdout, /Installed: /);
   assert.equal(fs.existsSync(path.join(home, 'cli', 'test', 'bin', 'kette.mjs')), true);
+  const version = spawnSync(path.join(home, 'bin', 'kette.cmd'), ['version'], { shell: true, encoding: 'utf8' });
+  assert.equal(version.stdout.trim(), JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).version);
 });
