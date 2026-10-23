@@ -67,8 +67,8 @@ Commands:
                         CI tokens for npm ci in pipelines (Solo 2, Team 5, no device seat)
   kette figma           Download the current Figma release of Die Kette (--out folder)
   kette cloud setup     Live deploy to itdone.cloud: account link and the itdone MCP server in Claude Code
-                        (--have-account skips the link, --dry-run changes nothing)
-  kette cloud status    Show whether the itdone MCP server is registered in Claude Code
+                        (--have-account skips the link, --dcr skips the fixed sign-in client, --dry-run changes nothing)
+  kette cloud status    Show whether the itdone MCP server is registered and how it signs in
   kette version
 
 Options:
@@ -83,6 +83,7 @@ Options:
   --npm-replace         Comment out an existing @getitdone-gmbh line in ~/.npmrc and use Die Kette
   --out folder          Target folder for kette figma
   --have-account        With kette cloud setup, do not open the itdone.cloud registration
+  --dcr                 With kette cloud setup, sign in through dynamic client registration instead of the fixed client
   --color, --no-color   Force colors on or off (default: on in a terminal, off in pipes, CI and with NO_COLOR)
 
 The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.
@@ -95,7 +96,7 @@ const help = () => [brand(), '', HELP.replace(/^ {2}((?:kette|--)\S*(?: \S+)*?)(
 
 const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
-  '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--help': 'help', '-h': 'help', '--version': 'version',
+  '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--dcr': 'dcr', '--help': 'help', '-h': 'help', '--version': 'version',
 };
 const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out'];
 
@@ -527,6 +528,12 @@ function edition(tier, { line, warn }) {
   if (othersCanRead(credentialsFile())) warn(privateHint(credentialsFile(), cmd));
 }
 
+// kette state shows whether a licence email is stored, never the address
+function redactedState() {
+  const state = readState();
+  return state.login?.email ? { ...state, login: { ...state.login, email: '(stored)' } } : state;
+}
+
 export async function main(argv) {
   let opts;
   try {
@@ -565,8 +572,9 @@ export async function main(argv) {
       return await ciToken(action, value);
     }
     if (command === 'figma') return await figma(opts);
-    if (command === 'cloud') return await cloud(arg, opts);
-    if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...readState() }, null, 2)); return 0; }
+    // The licence email only prefills the signup of an active Enterprise licence
+    if (command === 'cloud') return await cloud(arg, opts, { email: tierOf() === ENTERPRISE ? loginState()?.email : null });
+    if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...redactedState() }, null, 2)); return 0; }
     console.error(`Unknown command: ${command}\n`);
     console.log(help());
     return 1;

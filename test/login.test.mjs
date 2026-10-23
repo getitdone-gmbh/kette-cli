@@ -21,6 +21,9 @@ const bundles = { [V1]: fakeBundle(V1), [V2]: fakeBundle(V2) };
 const requests = [];
 let server;
 let current = V1;
+// Licence email as the delivery service sends it since CLI 0.6.4; undefined plays an older delivery service
+const EMAIL = 'kunde+team@example.com';
+let licenceEmail = EMAIL;
 
 before(async () => {
   server = await serve((req, res, body) => {
@@ -33,11 +36,11 @@ before(async () => {
       if (b.key === KEYS.other) return json(res, 403, { error: 'wrong_offer' });
       if (b.key === KEYS.full) return json(res, 429, { error: 'device_limit', seats: { used: 3, max: 3 } });
       const sum = b.key === KEYS.badsum ? '0'.repeat(64) : bundles[current].sha256;
-      return json(res, 200, { edition: 'enterprise', version: current, url: `${server.url}/install/download/${current}`, sha256: sum, expires_at: UNTIL, updates_until: UNTIL, seats: { used: 1, max: 3 } });
+      return json(res, 200, { edition: 'enterprise', version: current, url: `${server.url}/install/download/${current}`, sha256: sum, expires_at: UNTIL, updates_until: UNTIL, seats: { used: 1, max: 3 }, email: licenceEmail });
     }
     if (url.pathname === '/install/latest') {
       if (req.method !== 'POST') return json(res, 405, { error: 'method_not_allowed' });
-      return json(res, 200, { version: current, available: current, updates_until: UNTIL });
+      return json(res, 200, { version: current, available: current, updates_until: UNTIL, email: licenceEmail });
     }
     const m = url.pathname.match(/^\/install\/download\/(.+)$/);
     if (m && bundles[m[1]]) { res.writeHead(200, { 'content-type': 'application/gzip' }); return res.end(bundles[m[1]].buf); }
@@ -53,6 +56,7 @@ beforeEach(() => {
   kh = tmp();
   process.env.KETTE_HOME = kh;
   current = V1;
+  licenceEmail = EMAIL;
   requests.length = 0;
 });
 
@@ -171,6 +175,59 @@ test('logout entfernt Schlüssel und Paket, die Geräte-ID bleibt', async () => 
   assert.ok(fs.existsSync(path.join(kh, 'device-id')));
   assert.equal(tierOf(), 'community');
   assert.match((await run('logout')).out, /Not signed in/);
+});
+
+const loginEmail = () => JSON.parse(fs.readFileSync(path.join(kh, 'state.json'), 'utf8')).login?.email;
+
+test('login keeps the licence email in the private state, never prints it, kette state only says it is stored, logout removes it', async () => {
+  const { out } = await run('login', KEYS.ok, '--no-plugins');
+  assert.equal(loginEmail(), EMAIL);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(kh, 'state.json')).mode & 0o777, 0o600);
+  assert.ok(!out.includes(EMAIL));
+  assert.ok(!(await run('doctor', '--ci')).out.includes(EMAIL));
+  const state = await run('state');
+  assert.ok(!state.out.includes(EMAIL));
+  assert.equal(JSON.parse(state.out).login.email, '(stored)');
+  await run('logout', '--no-plugins');
+  assert.equal(loginEmail(), undefined);
+});
+
+test('update picks up the licence email when the login came from an older delivery service, a missing field keeps it', async () => {
+  licenceEmail = undefined;
+  await run('login', KEYS.ok, '--no-plugins');
+  assert.equal(loginEmail(), null);
+  licenceEmail = EMAIL;
+  assert.ok(!(await run('update', '--no-plugins')).out.includes(EMAIL));
+  assert.equal(loginEmail(), EMAIL);
+  licenceEmail = undefined;
+  await run('update', '--no-plugins');
+  assert.equal(loginEmail(), EMAIL);
+  licenceEmail = 'not an email';
+  await run('update', '--no-plugins');
+  assert.equal(loginEmail(), EMAIL, 'an invalid value is never stored');
+});
+
+test('cloud setup with an active licence opens the signup with the licence email prefilled, Community without', async () => {
+  const ci = process.env.CI;
+  process.env.CI = '1';
+  process.env.KETTE_CLOUD_AUTH_URL = `${server.url}/realms/itdone`;
+  const claude = fakeClaude();
+  try {
+    await run('login', KEYS.ok, '--no-plugins');
+    const { result, out } = await run('cloud', 'setup');
+    assert.equal(result, 0);
+    const prefill = `${server.url}/realms/itdone/protocol/openid-connect/registrations?client_id=itdone-web&response_type=code&scope=openid&redirect_uri=https://dashboard.itdone.cloud/callback&login_hint=kunde%2Bteam@example.com`;
+    assert.ok(out.includes(`INFO Create your itdone.cloud account (email from your licence prefilled): ${prefill}`), out);
+    assert.equal(out.split(EMAIL.replace('+', '%2B')).length - 1, 1, 'the email shows up only in the setup line');
+    fs.rmSync(creds());
+    const community = await run('cloud', 'setup', '--dry-run');
+    assert.ok(community.out.includes('INFO Would open https://dashboard.itdone.cloud/login?register=1 in the browser'), community.out);
+    assert.doesNotMatch(community.out, /login_hint|prefilled/);
+  } finally {
+    claude.restore();
+    delete process.env.KETTE_CLOUD_AUTH_URL;
+    if (ci === undefined) delete process.env.CI; else process.env.CI = ci;
+  }
 });
 
 test('login installiert beide Plugins über den festen Pfad des aktiven Pakets', { skip: process.platform === 'win32' }, async () => {

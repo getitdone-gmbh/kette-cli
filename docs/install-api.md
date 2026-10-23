@@ -1,6 +1,6 @@
 # Install API (contract between kette-cli and chain-delivery)
 
-As of 2026-10-22. Both sides build against this contract. Change it only together, in kette-cli and chain-delivery at the same time.
+As of 2026-10-23. Both sides build against this contract. Change it only together, in kette-cli and chain-delivery at the same time.
 
 ## Editions
 - **Community (free):** public under `https://kette.itdone.de/dl` (manifest, CLI, bundle `kette-community-<version>.tgz`). No key.
@@ -20,8 +20,9 @@ Format `CDP-XXXXX-XXXXX-XXXXX-XXXXX` (as in chain-delivery). Valid for offers of
 Request (JSON): `{ "key": "CDP-…", "device": "<uuid>", "cli": "0.2.0" }`
 
 Responses:
-- `200` `{ "edition": "enterprise", "version": "0.20261020.7", "url": "https://…/install/download/<token>", "sha256": "<hex>", "expires_at": "<ISO>", "updates_until": "<ISO>", "seats": { "used": 2, "max": 3 } }`
+- `200` `{ "edition": "enterprise", "version": "0.20261020.7", "url": "https://…/install/download/<token>", "sha256": "<hex>", "expires_at": "<ISO>", "updates_until": "<ISO>", "seats": { "used": 2, "max": 3 }, "email": "buyer@example.com" }`
   - `url` is a signed link, valid for 15 minutes, for exactly this version.
+  - `email` (since CLI 0.6.4) is the licence email. It is only sent after the key passed every check (active licence of the family `kette`), never in an error response. The CLI keeps it in its private state and uses it only to prefill the itdone.cloud registration in `kette cloud setup`; it never logs it otherwise. An older service without the field is fine, the CLI then just does not prefill.
 - `400` `{ "error": "bad_request" }` (format of key or device wrong)
 - `401` `{ "error": "invalid_key" }` (unknown)
 - `403` `{ "error": "revoked" }` (revoked or fully refunded)
@@ -36,7 +37,7 @@ Streams the bundle (`application/gzip`). Expired or wrong token: `410` or `404`.
 ### POST /install/latest
 Request (JSON): `{ "key": "CDP-…", "device": "<uuid>" }` (POST so the key does not end up in proxy access logs; GET answers 405).
 
-`200` `{ "version": "…" (newest version overall), "available": "…", "updates_until": "…", "changelog": "…" }`. `available` is the newest version this key gets. Registers no new device (only `/install/token` takes devices). Same error codes as above.
+`200` `{ "version": "…" (newest version overall), "available": "…", "updates_until": "…", "changelog": "…", "email": "…" }`. `email` as for `/install/token` (since CLI 0.6.4), so a login from an older CLI gets it with the next `kette update`. `available` is the newest version this key gets. Registers no new device (only `/install/token` takes devices). Same error codes as above.
 
 ## npm registry (design system packages)
 
@@ -107,7 +108,8 @@ type RegistryError = { error: 'unauthorized' | 'licence_ended' | 'outside_update
 
 ## CLI behaviour
 - `kette login <key>`: key to `~/.kette/credentials` (mode 600), get a token, download the bundle, verify the SHA-256, unpack, install the plugins `kette-engineering-core`, `kette-engineering`, `design-system-agents` and `design-review-pack`, remove `ui-laws` and the renamed `ui-gesetze` from Community. The agent pack is inside the Enterprise bundle, the delivery service needs no further access for it.
-- `kette update`: Community through the manifest, Enterprise through `/install/latest` and `/install/token`.
+- `kette update`: Community through the manifest, Enterprise through `/install/latest` and `/install/token`. Both store `email` (when present and a valid address) in `~/.kette/state.json` (mode 600) under `login`, `kette logout` removes it.
+- `kette cloud setup` with an active Enterprise licence: opens the Keycloak registration with `login_hint=<email>`; Community has no prefill.
 - `kette login` afterwards: `POST /registry/token`, marked block in the user npmrc (`NPM_CONFIG_USERCONFIG` or `~/.npmrc`, mode 600) with scope line and token. An existing foreign `@getitdone-gmbh:registry` line stays and the step is skipped with a hint; `--npm-replace` comments it out, `--no-npm` skips the step. If the step fails, the login stays valid and `kette update` catches up.
 - `kette logout`: `POST /registry/token/revoke` (offline does not matter), remove only the block (commented-out lines become active again), then remove key and Enterprise bundle locally (frees no device, support does that).
 - `kette update`: block missing or `GET /-/whoami` answers 401: new token.

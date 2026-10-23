@@ -62,7 +62,8 @@ export async function capture(fn) {
 
 // Ersetzt claude im PATH durch ein Node-Skript mit Zustand: list ist die Antwort auf marketplace list --json, plugins die installierten Plugin-IDs (Text, IDs werden herausgelesen)
 // install und uninstall ändern den Zustand; responses legt je Aufruf (z. B. 'plugin install a@kette') { code, out } fest, ohne den Zustand zu ändern
-// mcp maps MCP server names to URLs; mcp get shows a header with a secret, like Claude Code does for servers added with --header
+// mcp maps MCP server names to URLs, or to { url, port } for a server added with --client-id and --callback-port;
+// mcp get shows a header with a secret, like Claude Code does for servers added with --header, and the OAuth line of Claude Code 2.1
 export function fakeClaude(list = [], plugins = '', responses = {}, mcp = {}) {
   const bin = tmp();
   const log = path.join(bin, 'calls.log');
@@ -82,13 +83,17 @@ else if (args === 'plugin marketplace list --json') console.log(JSON.stringify(s
 else if (args === 'plugin list') console.log(s.plugins.length ? 'Installed plugins:\\n\\n' + s.plugins.map((id) => '  ❯ ' + id + '\\n    Status: enabled').join('\\n') : 'No plugins installed.');
 else if (a === 'mcp' && b === 'get') {
   if (!s.mcp[c]) { console.error('No MCP server named "' + c + '". Configured servers: ' + Object.keys(s.mcp).join(', ')); process.exit(1); }
-  console.log(c + ':\\n  Scope: User config (available in all your projects)\\n  Status: ✔ Connected\\n  Type: http\\n  URL: ' + s.mcp[c] + '\\n  Headers:\\n    Authorization: Bearer fake-secret-value\\n');
+  const e = typeof s.mcp[c] === 'string' ? { url: s.mcp[c] } : s.mcp[c];
+  const oauth = e.port ? '  OAuth: client_id configured, callback_port ' + e.port + '\\n' : '';
+  console.log(c + ':\\n  Scope: User config (available in all your projects)\\n  Status: ✔ Connected\\n  Type: http\\n  URL: ' + e.url + '\\n' + oauth + '  Headers:\\n    Authorization: Bearer fake-secret-value\\n');
 }
-else if (args === 'mcp list') console.log('Checking MCP server health…\\n\\n' + Object.entries(s.mcp).map(([n, u]) => n + ': ' + u + ' (HTTP) - ✔ Connected').join('\\n'));
+else if (args === 'mcp list') console.log('Checking MCP server health…\\n\\n' + Object.entries(s.mcp).map(([n, u]) => n + ': ' + (u.url || u) + ' (HTTP) - ✔ Connected').join('\\n'));
 else if (a === 'mcp' && b === 'add') {
-  const [name, url] = process.argv.slice(-2);
+  const argv = process.argv.slice(2);
+  const [name, url] = argv.slice(-2);
   if (s.mcp[name]) { console.error('MCP server ' + name + ' already exists in user config'); process.exit(1); }
-  s.mcp[name] = url; save();
+  const flag = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : null);
+  s.mcp[name] = flag('--client-id') ? { url, clientId: flag('--client-id'), port: Number(flag('--callback-port')) } : url; save();
 }
 else if (a === 'plugin' && b === 'install') { if (!s.plugins.includes(c)) s.plugins.push(c); save(); }
 else if (a === 'plugin' && b === 'uninstall') {
