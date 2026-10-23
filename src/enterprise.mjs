@@ -5,6 +5,7 @@ import { DeliveryError, KEY_PATTERN, deviceId, downloadErrorText, latest, readCr
 import { DownloadError, fetchManifest, installEntry, installedBundle, readState, removeState, setActiveBundle, validVersion, writeState } from './manifest.mjs';
 import { REPAIR_NOTE, editionHints, hasClaude, installEdition, pluginId, pluginsOutdated, uninstallPlugin } from './claude.mjs';
 import { bundlesDir, credentialsFile, delivery } from './paths.mjs';
+import { validEmail } from './cloud.mjs';
 import { ensureNpm, setupNpm, teardownNpm } from './npm-access.mjs';
 import { askSecret } from './prompt.mjs';
 import { cmd, isoDate, status } from './out.mjs';
@@ -21,6 +22,8 @@ export function credentialsStatus() {
 
 export const tierOf = () => (credentialsStatus() === 'valid' && installedBundle(ENTERPRISE) ? ENTERPRISE : COMMUNITY);
 export const loginState = () => readState().login || null;
+// Licence email from the delivery service, kept only to prefill the itdone.cloud signup (kette cloud setup)
+const licenceEmail = (reply, fallback = null) => (validEmail(reply.email) ? reply.email : fallback);
 
 async function grant(key, cli) {
   const g = await requestToken({ key, device: deviceId(), cli });
@@ -38,7 +41,7 @@ async function install(g) {
     if (err instanceof DownloadError) throw new DeliveryError(err.checksum ? 'checksum' : 'download', downloadErrorText(err));
     throw err;
   }
-  writeState({ login: { edition: ENTERPRISE, version: g.version, updates_until: g.updates_until || null, seats: g.seats || null, checked_at: new Date().toISOString() } });
+  writeState({ login: { edition: ENTERPRISE, version: g.version, updates_until: g.updates_until || null, seats: g.seats || null, email: licenceEmail(g), checked_at: new Date().toISOString() } });
   return dir;
 }
 
@@ -112,7 +115,7 @@ export async function updateEnterprise(opts, cli) {
   const info = await latest({ key, device: deviceId() });
   const have = installedBundle(ENTERPRISE);
   const state = loginState() || { edition: ENTERPRISE };
-  writeState({ login: { ...state, updates_until: info.updates_until || state.updates_until || null, checked_at: new Date().toISOString() } });
+  writeState({ login: { ...state, updates_until: info.updates_until || state.updates_until || null, email: licenceEmail(info, state.email || null), checked_at: new Date().toISOString() } });
   if (info.version && info.available && info.version !== info.available) {
     console.log(`Version ${info.version} is out, the update period of this license ended on ${formatDate(info.updates_until)}. ${info.available} stays installable, renew the license for newer versions.`);
   }
