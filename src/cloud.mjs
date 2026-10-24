@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { hasClaude, output, runClaude } from './claude.mjs';
 import { bold, cmd, num, status } from './out.mjs';
@@ -95,10 +96,19 @@ export function openerFor(url, platform = process.platform) {
   return { command: 'xdg-open', args: [url], options: {} };
 }
 
+// Command that opens a local file (kette theme --preview) in the default app; no shell except cmd.exe on Windows, where
+// paths with quotes or cmd metacharacters are refused (null) so the caller prints the path instead
+export function openerForFile(file, platform = process.platform) {
+  if (!(platform === 'win32' ? path.win32 : path.posix).isAbsolute(file) || /[\r\n]/.test(file)) return null;
+  if (platform === 'darwin') return { command: 'open', args: [file], options: {} };
+  if (platform === 'win32') return /["%!^&|<>]/.test(file) ? null : { command: 'cmd', args: ['/d', '/c', 'start', '""', `"${file}"`], options: { windowsVerbatimArguments: true } };
+  return { command: 'xdg-open', args: [file], options: {} };
+}
+
 // true when the opener ran successfully; any error leaves it to the caller to print the link
-export function openBrowser(url, { env = process.env, isTTY = process.stdout.isTTY, platform = process.platform, spawn = spawnSync } = {}) {
+export function openBrowser(url, { env = process.env, isTTY = process.stdout.isTTY, platform = process.platform, spawn = spawnSync, openerOf = openerFor } = {}) {
   if (!canOpenBrowser(env, { isTTY, platform })) return false;
-  const opener = openerFor(url, platform);
+  const opener = openerOf(url, platform);
   if (!opener) return false;
   const r = spawn(opener.command, opener.args, { stdio: 'ignore', timeout: 10000, ...opener.options });
   return !r.error && r.status === 0;

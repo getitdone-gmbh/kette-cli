@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+- New `kette theme` (Community and Enterprise, free): generates a theme.css for `@getitdone-gmbh/kette-design-community` from a brand colour, a drop-in replacement for `@import '@getitdone-gmbh/kette-design-community/theme.css'`. Questions in a terminal, otherwise `--primary <hex>` (required) with `--accent`, `--neutral warm|cool|neutral|<hex>`, `--radius none|sm|md|lg|full|<px>`, `--font`, `--name`, `--out` (default `./theme.css`), `--preview` (self-contained `theme-preview.html` with components in light and dark, palettes and contrast table), `--dry-run` and `--json`. Without a terminal and without `--primary` it stops with exit code 2. A file it did not write is only replaced after a yes or with `--yes`.
+- Light and dark in one file with exactly the variables of Community 0.4.2 per block (1343 variables, same selectors): OKLCH tonal palettes from the primary, neutral family, accent surfaces, chart series, radius scale, font, elevation. Status and data colours keep their meaning.
+- WCAG 2.2 AA enforced: the 51 fill/text pairs of `color-pairs.js` (kette-tokens 5.23.1, status pairs included), the status and badge pairs of the Community tests, paper, text and focus pairs, 94 checks. Values below 4.5:1 (3:1 for focus rings) get the smallest lightness change, each change is reported, a failing pair is never written. The pair and scope rules of the Community package hold in every block, also for paper inside a dark page. The base blue reproduces Community 0.4.2 exactly.
+- Needs Community 0.4.2 or newer: the generated file carries the 0.4.2 variable set.
+- Deterministic and without dependencies; all data in `src/theme/manifest.json`, rebuilt with `node scripts/theme-manifest.mjs` from the fixtures in `test/fixtures` (README "Theming").
+- Output notes the editions: Community generates the theme.css, Enterprise extends the token source in kette-tokens (several brands, Figma variables).
+
 ## 0.6.5
 - Enterprise: `kette cloud setup` opens the registration through the dashboard (`https://dashboard.itdone.cloud/login?register=1&login_hint=<email>`) instead of the Keycloak registrations URL. The dashboard passes the licence email on to the registration form and keeps its own login state, so the account creation now ends signed in on the dashboard instead of at `/callback` without a matching state. Encoding is unchanged: `@` stays readable, `+` becomes `%2B` (on Windows such a link is printed instead of opened). `KETTE_CLOUD_AUTH_URL` now only affects the preflight.
 
