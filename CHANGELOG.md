@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.5
+- Enterprise: `kette cloud setup` opens the registration through the dashboard (`https://dashboard.itdone.cloud/login?register=1&login_hint=<email>`) instead of the Keycloak registrations URL. The dashboard passes the licence email on to the registration form and keeps its own login state, so the account creation now ends signed in on the dashboard instead of at `/callback` without a matching state. Encoding is unchanged: `@` stays readable, `+` becomes `%2B` (on Windows such a link is printed instead of opened). `KETTE_CLOUD_AUTH_URL` now only affects the preflight.
+
 ## 0.6.4
 - `kette cloud setup` registers the itdone MCP server with the fixed public OAuth client `kette-cli` (PKCE, loopback redirect on port 53761): `claude mcp add --transport http -s user --client-id kette-cli --callback-port 53761 itdone https://api.itdone.cloud/mcp`, so Claude Code no longer registers a new client on every login. A preflight asks the itdone.cloud Keycloak first whether the client exists and accepts the redirect; until it does (or when the server does not answer within 5 seconds) setup says so in one line and falls back to dynamic client registration (DCR) as before.
 - New `--dcr` for `kette cloud setup`: always DCR, no preflight. `KETTE_CLOUD_CLIENT_ID` and `KETTE_CLOUD_CALLBACK_PORT` override client ID and port, `KETTE_CLOUD_AUTH_URL` the Keycloak realm; wrong values stop with exit code 2 before anything changes.

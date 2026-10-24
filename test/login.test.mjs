@@ -216,7 +216,7 @@ test('cloud setup with an active licence opens the signup with the licence email
     await run('login', KEYS.ok, '--no-plugins');
     const { result, out } = await run('cloud', 'setup');
     assert.equal(result, 0);
-    const prefill = `${server.url}/realms/itdone/protocol/openid-connect/registrations?client_id=itdone-web&response_type=code&scope=openid&redirect_uri=https://dashboard.itdone.cloud/callback&login_hint=kunde%2Bteam@example.com`;
+    const prefill = 'https://dashboard.itdone.cloud/login?register=1&login_hint=kunde%2Bteam@example.com';
     assert.ok(out.includes(`INFO Create your itdone.cloud account (email from your licence prefilled): ${prefill}`), out);
     assert.equal(out.split(EMAIL.replace('+', '%2B')).length - 1, 1, 'the email shows up only in the setup line');
     fs.rmSync(creds());
