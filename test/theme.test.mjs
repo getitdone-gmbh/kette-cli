@@ -18,9 +18,6 @@ const manifest = loadManifest();
 const fixtureCss = fs.readFileSync(FIXTURES.css, 'utf8');
 const PAIRS = loadPairs(FIXTURES.pairs);
 const PAIR_VARS = [...new Set(PAIRS.flatMap(([, fill, text]) => [fill, text]))];
-// The pair side 0.4.1 does not define anywhere; 0.4.2 adds it, until then kette theme derives it as the on-colour of its fill
-const DERIVED = ['--colors-button-foreground-destructive'];
-
 // Mode blocks found the way the tokens gates (check-pairs.js, check-scopes.js) find them, independent of the manifest builder
 const HEADERS = {
   root: '\n:root {',
@@ -45,55 +42,68 @@ const run = (args, opts = {}) => spawnSync(process.execPath, [bin, 'theme', ...a
 test('manifest.json is the current build of the fixtures (rebuild: node scripts/theme-manifest.mjs)', () => {
   const { manifest: fresh, warnings } = buildFrom();
   assert.equal(formatManifest(fresh), fs.readFileSync(MANIFEST_PATH, 'utf8').replace(/\r\n/g, '\n'));
-  // What 0.4.1 lacks against the 5.22.1 pair contract, derived and reported instead of guessed silently
-  assert.deepEqual(warnings.sort(), [
-    '--colors-background-accent has no light value, its dark value is pinned in :root and paper',
-    '--colors-background-destructive has no light value, its dark value is pinned in :root and paper',
-    '--colors-button-foreground-destructive (button destructive) is not defined in the theme, it is derived as the on-colour of --colors-button-background-destructive',
-    '--colors-foreground-accent has no light value, its dark value is pinned in :root and paper',
-    '--colors-foreground-destructive has no light value, its dark value is pinned in :root and paper',
-  ]);
+  // 0.4.2 defines every pair side kette theme needs, nothing is derived or skipped
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(fresh.pairOn, {});
 });
 
-test('manifest pairs are exactly color-pairs.js of the tokens, and every pair is checked at 4.5:1', () => {
-  assert.equal(PAIRS.length, 27);
+test('manifest pairs are exactly color-pairs.js of the tokens (51 with the status pairs), and every pair is checked at 4.5:1', () => {
+  assert.equal(PAIRS.length, 51);
   assert.deepEqual(manifest.pairs, PAIRS);
-  for (const [label, fill, text] of PAIRS) assert.ok(manifest.checks.some((c) => c.label === label && c.fill === fill && c.text === text && c.min === 4.5), label);
+  for (const [label, fill, text] of PAIRS) assert.ok(manifest.checks.some((c) => c.label === label && c.fill === fill && c.text === text && c.min === 4.5 && !c.mode), label);
+  assert.equal(new Set(manifest.checks.map((c) => `${c.fill} ${c.text}`)).size, manifest.checks.length);
 });
 
-test('the generated theme declares every variable of the Community theme.css, plus only the derived pair side', () => {
+test('the generated theme declares exactly the variables of the Community 0.4.2 theme.css', () => {
   const { css } = generateTheme(parseThemeOptions({ primary: '#0f766e' }));
   const want = declared(fixtureCss);
   const got = declared(css);
-  assert.equal(want.size, 1334);
-  assert.deepEqual([...want].filter((v) => !got.has(v)), []);
-  assert.deepEqual([...got].filter((v) => !want.has(v)), DERIVED);
+  assert.equal(want.size, 1343);
+  assert.deepEqual([...got].sort(), [...want].sort());
 });
 
-test('every mode block keeps its Community variables, pins both sides of every pair and every dark contrast fix', () => {
-  const { css, tokens } = generateTheme(parseThemeOptions({ primary: '#c2410c' }));
+test('every mode block has exactly the Community 0.4.2 variables', () => {
   const want = blocks(fixtureCss);
-  const got = blocks(css);
-  // Besides the pairs, the dark blocks may only gain variables whose dark value contrast enforcement moved
-  const darkFixes = tokens.adjustments.filter((a) => a.mode === 'dark').map((a) => a.name);
-  assert.ok(darkFixes.length > 0);
-  for (const key of Object.keys(HEADERS)) {
-    const allowed = ['dark', 'media'].includes(key) ? [...PAIR_VARS, ...darkFixes] : PAIR_VARS;
-    const extra = Object.keys(got[key]).filter((v) => !(v in want[key]));
-    assert.deepEqual(Object.keys(want[key]).filter((v) => !(v in got[key])), [], `${key} lost variables`);
-    assert.deepEqual(extra.filter((v) => !allowed.includes(v)), [], `${key} added other variables`);
-    for (const [label, fill, text] of PAIRS) assert.ok(fill in got[key] && text in got[key], `${key}: ${label}`);
+  for (const primary of ['#0f766e', '#c2410c', '#4f46e5', '#facc15']) {
+    const got = blocks(generateTheme(parseThemeOptions({ primary })).css);
+    for (const key of Object.keys(HEADERS)) assert.deepEqual(Object.keys(got[key]).sort(), Object.keys(want[key]).sort(), `${primary} ${key}`);
   }
 });
 
-test('paper resolves to the light values and the dark media block to the .dark values (5.22.1 scope rule)', () => {
-  const { css } = generateTheme(parseThemeOptions({ primary: '#4f46e5', accent: '#db2777', neutral: 'warm' }));
+test('a dark contrast fix on a variable the dark blocks inherit is pinned in both dark blocks, and with its light value in paper', () => {
+  // 0.4.2 declares every dark-checked variable in .dark, so a synthetic dark check on an inherited variable exercises the pin path
+  const base = loadManifest();
+  const synthetic = { ...base, checks: [...base.checks, { label: 'synthetic', fill: '--colors-background', text: '--semantic-text-on-paper', min: 4.5, mode: 'dark' }] };
+  assert.ok(base.colors['--semantic-text-on-paper'].inherit);
+  const { css, tokens } = generateTheme(parseThemeOptions({ primary: '#0f766e' }), { manifest: synthetic });
+  const fix = tokens.adjustments.find((a) => a.name === '--semantic-text-on-paper');
+  assert.equal(fix.mode, 'dark');
   const b = blocks(css);
-  for (const [name, value] of Object.entries(b.paper)) if (name in b.root) assert.equal(value, b.root[name], `paper ${name}`);
-  assert.deepEqual(b.media, b.dark);
+  const darkValue = b.dark['--semantic-text-on-paper'];
+  assert.ok(darkValue && darkValue === b.media['--semantic-text-on-paper']);
+  assert.equal(b.paper['--semantic-text-on-paper'], b.root['--semantic-text-on-paper']);
+  assert.ok(contrast(rgb(b.dark['--colors-background']), rgb(darkValue)) >= 4.5);
 });
 
-test('random inputs never emit a pair below its minimum, read back from the CSS in light, paper, dark and OS dark', () => {
+// Mirrors kette-design-community src/lib/theme-pairs.test.ts (0.4.2): pairs travel together, the dark blocks pin the pair variables
+// of :root, the destructive button text is defined everywhere, paper is light, OS dark equals .dark
+test('pairs and scopes hold the kette-design-community 0.4.2 rules', () => {
+  for (const primary of ['#0f766e', '#c2410c', '#4f46e5', '#facc15']) {
+    const b = blocks(generateTheme(parseThemeOptions({ primary, neutral: 'warm', accent: '#db2777' })).css);
+    for (const [key, vars] of Object.entries(b)) {
+      for (const [label, fill, text, shared] of PAIRS) {
+        assert.ok(!(fill in vars) || text in vars, `${primary} ${key} ${label}: fill without text`);
+        assert.ok(!(text in vars) || fill in vars || shared, `${primary} ${key} ${label}: text without fill`);
+      }
+      assert.ok('--colors-button-foreground-destructive' in vars, `${primary} ${key} destructive button text`);
+    }
+    for (const v of PAIR_VARS.filter((x) => x in b.root)) assert.ok(v in b.dark && v in b.media, `${primary} pins ${v}`);
+    for (const [name, value] of Object.entries(b.paper)) if (name in b.root) assert.equal(value, b.root[name], `${primary} paper ${name}`);
+    assert.deepEqual(b.media, b.dark);
+  }
+});
+
+test('random inputs never emit a pair below its minimum, read back from the CSS in light, .dark, OS dark and paper inside .dark', () => {
   const rand = prng(42);
   const hex = () => toHex([0, 0, 0].map(() => Math.floor(rand() * 256)));
   const neutrals = ['cool', 'warm', 'neutral'];
@@ -103,9 +113,15 @@ test('random inputs never emit a pair below its minimum, read back from the CSS 
     const { css, tokens } = generateTheme(parseThemeOptions(raw));
     assert.equal(tokens.contrast.failing, 0, JSON.stringify(raw));
     const b = blocks(css);
-    const scopes = { light: b.root, paper: { ...b.root, ...b.paper }, dark: { ...b.root, ...b.dark }, media: { ...b.root, ...b.media } };
-    for (const [scope, vars] of Object.entries(scopes)) {
-      for (const c of manifest.checks) {
+    const contexts = [
+      ['light', 'light', b.root],
+      ['.dark', 'dark', { ...b.root, ...b.dark }],
+      ['OS dark', 'dark', { ...b.root, ...b.media }],
+      ['paper in .dark', 'light', { ...b.root, ...b.dark, ...b.paper }],
+    ];
+    for (const [scope, mode, vars] of contexts) {
+      for (const c of manifest.checks.filter((k) => !k.mode || k.mode === mode)) {
+        if (!(c.fill in vars) || !(c.text in vars)) continue;
         const ratio = contrast(rgb(vars[c.fill]), rgb(vars[c.text]));
         assert.ok(ratio >= c.min, `${JSON.stringify(raw)} ${scope} ${c.label}: ${ratio.toFixed(2)}`);
       }
@@ -113,21 +129,14 @@ test('random inputs never emit a pair below its minimum, read back from the CSS 
   }
 });
 
-test('the base brand colour with cool neutrals reproduces the Community values, apart from reported contrast fixes', () => {
+test('the base brand colour with cool neutrals reproduces the Community 0.4.2 values exactly, with no adjustment', () => {
   const { css, tokens } = generateTheme(parseThemeOptions({ primary: '#2563eb' }));
+  assert.deepEqual(tokens.adjustments, []);
   const want = blocks(fixtureCss);
   const got = blocks(css);
-  const adjusted = new Set(tokens.adjustments.map((a) => `${a.mode}:${a.name}`));
-  for (const [key, mode] of [['root', 'light'], ['dark', 'dark']]) {
-    for (const [name, value] of Object.entries(want[key])) {
-      if (/^\d+ \d+ \d+$/.test(value) && !adjusted.has(`${mode}:${name}`)) assert.equal(got[key][name], value, `${key} ${name}`);
-    }
+  for (const key of Object.keys(HEADERS)) {
+    for (const [name, value] of Object.entries(want[key])) if (/^\d+ \d+ \d+$/.test(value)) assert.equal(got[key][name], value, `${key} ${name}`);
   }
-  // Exactly the checks 0.4.1 itself fails (white on emerald, orange and red fills) are fixed, each once and reported
-  const base = { light: want.root, dark: { ...want.root, ...want.dark } };
-  const failingInBase = manifest.checks.flatMap((c) => ['light', 'dark'].filter((m) => base[m][c.fill] && base[m][c.text] && contrast(rgb(base[m][c.fill]), rgb(base[m][c.text])) < c.min).map((m) => `${m}:${c.text}`));
-  assert.deepEqual([...new Set(failingInBase)].sort(), [...adjusted].sort());
-  assert.ok(tokens.adjustments.every((a) => a.before < 4.5 && a.after >= 4.5));
 });
 
 test('same inputs give the same output, and the primary colour itself is kept exactly', () => {
@@ -218,7 +227,8 @@ test('--dry-run writes nothing and --json prints the tokens with the contrast re
   assert.equal(data.inputs.primary, '#c2410c');
   assert.equal(data.written, false);
   assert.equal(data.contrast.failing, 0);
-  assert.equal(data.checks.length, manifest.checks.length * 2);
+  assert.equal(data.checks.length, data.contrast.checked);
+  assert.ok(data.checks.length > manifest.checks.length);
   assert.equal(data.light['--colors-primary'], '#c2410c');
   assert.ok(data.dark['--colors-background']);
   assert.deepEqual(fs.readdirSync(dir), []);
@@ -231,7 +241,6 @@ test('kette theme writes theme.css and the preview into a folder with spaces, ke
   const css = fs.readFileSync(path.join(dir, 'theme.css'), 'utf8');
   assert.ok(css.startsWith(`${HEADER_MARK}"indigo"`));
   assert.ok(fs.readFileSync(path.join(dir, 'theme-preview.html'), 'utf8').includes(PREVIEW_MARK));
-  assert.match(r.stdout, /Adjusted \d+ values? to reach the minimum contrast/);
 
   // Rewriting its own file is fine, a file it did not write needs --yes
   assert.equal(run(['--primary', '#0f766e', '--out', path.join(dir, 'theme.css')]).status, 0);

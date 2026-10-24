@@ -1,4 +1,4 @@
-// Fixture: copied unchanged below this line from getitdone-gmbh/kette-tokens@eed33bc scripts/color-pairs.js (5.22.1). Source of the pairs in src/theme/manifest.json.
+// Fixture: copied unchanged below this line from getitdone-gmbh/kette-tokens@v5.23.1 scripts/color-pairs.js. Source of the pairs in src/theme/manifest.json.
 // Fill and text pairs that must always travel together (5.21.1). A theme CSS block that sets one side of a pair without the other lets a second stylesheet (generic theme, other mode selector) supply the missing half: blue fill with near-black text.
 // A fifth entry 'shared' marks a fill that reuses the text of another pair (hover/active states): the text may be set without it, the fill never without the text.
 // Used by build-css-vars.ts (pins every pair variable in every mode block) and scripts/check-pairs.js (gate).
@@ -31,6 +31,31 @@ const PAIRS = [
     ['sidebar', '--colors-sidebar-background', '--colors-sidebar-foreground'],
     ['sidebar muted', '--colors-sidebar-background', '--colors-sidebar-muted-foreground', 'shared'],
     ['sidebar accent', '--colors-sidebar-accent', '--colors-sidebar-accent-foreground'],
+    // 5.23.1: status on-colour pairs (success, warning, info, destructive). Bold fills with semantic-text-on-*, general fills with general-*-on; hover/active share the label of the default fill.
+    ['success bold', '--semantic-background-success-bold-default', '--semantic-text-on-success'],
+    ['success bold hover', '--semantic-background-success-bold-hover', '--semantic-text-on-success', 'shared'],
+    ['success bold active', '--semantic-background-success-bold-active', '--semantic-text-on-success', 'shared'],
+    ['success general', '--colors-general-success-default', '--colors-general-success-on'],
+    ['success general hover', '--colors-general-success-hover', '--colors-general-success-on', 'shared'],
+    ['success general active', '--colors-general-success-active', '--colors-general-success-on', 'shared'],
+    ['warning bold', '--semantic-background-warning-bold-default', '--semantic-text-on-warning'],
+    ['warning bold hover', '--semantic-background-warning-bold-hover', '--semantic-text-on-warning', 'shared'],
+    ['warning bold active', '--semantic-background-warning-bold-active', '--semantic-text-on-warning', 'shared'],
+    ['warning general', '--colors-general-warning-default', '--colors-general-warning-on'],
+    ['warning general hover', '--colors-general-warning-hover', '--colors-general-warning-on', 'shared'],
+    ['warning general active', '--colors-general-warning-active', '--colors-general-warning-on', 'shared'],
+    ['info bold', '--semantic-background-info-bold-default', '--semantic-text-on-info'],
+    ['info bold hover', '--semantic-background-info-bold-hover', '--semantic-text-on-info', 'shared'],
+    ['info bold active', '--semantic-background-info-bold-active', '--semantic-text-on-info', 'shared'],
+    ['info general', '--colors-general-info-default', '--colors-general-info-on'],
+    ['info general hover', '--colors-general-info-hover', '--colors-general-info-on', 'shared'],
+    ['info general active', '--colors-general-info-active', '--colors-general-info-on', 'shared'],
+    ['destructive bold', '--semantic-background-destructive-bold-default', '--semantic-text-on-destructive'],
+    ['destructive bold hover', '--semantic-background-destructive-bold-hover', '--semantic-text-on-destructive', 'shared'],
+    ['destructive bold active', '--semantic-background-destructive-bold-active', '--semantic-text-on-destructive', 'shared'],
+    ['destructive general', '--colors-general-destructive-default', '--colors-general-destructive-on'],
+    ['destructive general hover', '--colors-general-destructive-hover', '--colors-general-destructive-on', 'shared'],
+    ['destructive general active', '--colors-general-destructive-active', '--colors-general-destructive-on', 'shared'],
 ];
 const PAIR_VARS = new Set(PAIRS.flatMap(([, fill, text]) => [fill, text]));
 module.exports = { PAIRS, PAIR_VARS };

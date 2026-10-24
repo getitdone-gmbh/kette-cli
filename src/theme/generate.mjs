@@ -95,15 +95,16 @@ export function generateTheme(options, { manifest = loadManifest(), version = '0
   for (const [text, fill] of Object.entries(manifest.pairOn)) {
     for (const mode of ['light', 'dark']) values[mode][text] = onColour(values[mode][fill], t.toNeutral);
   }
-  const adjustments = ['light', 'dark'].flatMap((mode) => enforceContrast(values[mode], manifest.checks, mode));
-  const checks = ['light', 'dark'].flatMap((mode) => contrastReport(values[mode], manifest.checks, mode));
+  const checksFor = (mode) => manifest.checks.filter((c) => !c.mode || c.mode === mode);
+  const adjustments = ['light', 'dark'].flatMap((mode) => enforceContrast(values[mode], checksFor(mode), mode));
+  const checks = ['light', 'dark'].flatMap((mode) => contrastReport(values[mode], checksFor(mode), mode));
   const basePx = manifest.radius['--borderRadius']?.px || RADIUS_NAMES.md;
   const radius = Object.fromEntries(Object.entries(manifest.radius).map(([n, e]) => [n, `${radiusPx(e, options.radius, basePx)}px`]));
   const font = options.font || manifest.font;
   const shadows = Object.fromEntries(Object.entries(manifest.shadows).map(([n, v]) => [n, t.shadow(v)]));
-  // Variables the dark blocks inherit from :root are pinned there when contrast gave them their own dark value
+  // Variables the dark blocks inherit from :root are pinned there when contrast gave them their own dark value, and in paper with the light one
   const darkPins = Object.entries(manifest.colors).filter(([n, spec]) => spec.inherit && !sameRgb(values.dark[n], values.light[n])).map(([n]) => n);
-  const pinned = manifest.template.replace(/^(\s*)\{\{pins:dark\}\}\n/gm, (_, indent) => darkPins.map((n) => `${indent}${n}: ${toTriplet(values.dark[n])};\n`).join(''));
+  const pinned = manifest.template.replace(/^(\s*)\{\{pins:(dark|paper)\}\}\n/gm, (_, indent, mode) => darkPins.map((n) => `${indent}${n}: ${toTriplet(values[mode === 'paper' ? 'light' : 'dark'][n])};\n`).join(''));
   const body = pinned.replace(/\{\{([^}]+)\}\}/g, (_, key) => {
     const [kind, a, b] = key.split(':');
     if (kind === 'c') return toTriplet(values[a][b]);
