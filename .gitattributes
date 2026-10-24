@@ -1,2 +1,4 @@
 # Fixtures are compared byte for byte, keep LF on every system
 test/fixtures/** text eol=lf
+# The theme manifest is compared with a fresh build from the fixtures, keep LF too
+src/theme/manifest.json text eol=lf

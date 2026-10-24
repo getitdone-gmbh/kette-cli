@@ -1,6 +1,6 @@
 # kette-cli
 
-Sets up the rulebook and the agents of Die Kette from the terminal. Current version: 0.6.3.
+Sets up the rulebook and the agents of Die Kette from the terminal. Current version: 0.7.0.
 
 ```sh
 curl -fsSL https://kette.itdone.de/install | sh          # macOS, Linux
@@ -43,9 +43,10 @@ The project profile names the edition in the field `tier`: `community` or `enter
 | `kette token ci create <name>` / `list` / `revoke <id>` | CI tokens for `npm ci` in pipelines: Solo 2, Team 5, take no device seat, shown only when created |
 | `kette figma` | Download the current Figma release of Die Kette, verify checksums, show the import order; `--out folder`. The Figma files follow as an update by 2026-11-30 |
 | `kette cloud setup` / `status` | Live deploy to itdone.cloud: account link and the itdone MCP server in Claude Code, see below |
+| `kette theme` | Free theme generator: a theme.css for the Community components from your brand colour, light and dark, WCAG AA, see Theming |
 | `kette version` | Show the CLI version |
 
-Options: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out folder`, `--have-account`, `--color` / `--no-color` (default: on in a terminal, off in pipes, CI and with `NO_COLOR`).
+Options: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out folder`, `--have-account`, `--primary`, `--accent`, `--neutral`, `--radius`, `--font`, `--name`, `--preview`, `--json`, `--color` / `--no-color` (default: on in a terminal, off in pipes, CI and with `NO_COLOR`).
 
 ## Templates by profile (Enterprise)
 CI, Docker and check templates follow the project profile: only the chosen stacks, each in its app folder (`apps` in the profile, otherwise `apps/web`, `apps/api`, `apps/mobile`, `apps/spa`). `kette add` detects app folders such as `backend/`, `frontend/` or `apps/*`. Only Enterprise writes `apps`; a Community project gets the folders from detection when it switches to Enterprise. An existing profile is never rewritten: `kette add` at most raises `tier` and adds `apps` when the field is missing and the installed schema knows it; all other fields stay. Existing files stay unchanged (`= keep`).
@@ -95,6 +96,51 @@ Available in Community and Enterprise. `kette cloud setup` prepares Claude Code 
 | `KETTE_CLOUD_AUTH_URL` | `https://auth.itdone.cloud/realms/itdone` | Keycloak realm for the preflight (https, plain http only for localhost or with `KETTE_INSECURE=1`) |
 
 The licence email comes from the delivery service (`/install/token` on `kette login`, `/install/latest` on `kette update`) and is kept in `~/.kette/state.json` (mode 600) next to the other licence fields. It is only shown in the setup line that opens or prints the link; `kette state` shows `(stored)` instead, `kette logout` removes it. A login made before CLI 0.6.4 gets it with the next `kette update`.
+
+## Theming
+`kette theme` generates a complete theme for the free Community components (`@getitdone-gmbh/kette-design-community`) from your brand colour. The result is a drop-in replacement for the Community theme file:
+
+```css
+/* before */
+@import '@getitdone-gmbh/kette-design-community/theme.css';
+/* after */
+@import './theme.css';
+```
+
+```sh
+kette theme                                    # questions in a terminal
+kette theme --primary "#0f766e"                # flags, e.g. in scripts and CI
+kette theme --primary "#4f46e5" --accent "#db2777" --neutral warm --radius lg --font "IBM Plex Sans" --name acme --out src/styles/theme.css --preview
+kette theme --primary "#c2410c" --json --dry-run   # tokens and contrast report as JSON, nothing written
+```
+
+| Option | Values | Default |
+|---|---|---|
+| `--primary` | hex colour, required without a terminal | |
+| `--accent` | hex colour for accent surfaces (accent, sidebar accent) | neutral |
+| `--neutral` | `cool` (the slate of the Community theme), `warm`, `neutral` (pure grey) or a hex colour that tints the greys | `cool` |
+| `--radius` | `none`, `sm`, `md`, `lg`, `full` (pill controls, doubled surfaces) or pixels up to 64 | `md` (8px) |
+| `--font` | font family or stack; the theme names it, load the font yourself | Inter |
+| `--name` | lowercase letters, digits, dashes | `custom-<primary>` |
+| `--out` | CSS file or folder | `./theme.css` |
+| `--preview` | also writes `theme-preview.html` next to it (self-contained: components in light and dark, palettes, contrast table) and opens it in a terminal | off |
+| `--dry-run` | writes nothing | off |
+| `--json` | prints the tokens, palettes, every contrast check and every adjustment as JSON | off |
+
+What it generates, in one run, for light and dark:
+- Exactly the variable set of the Community `theme.css` (1334 variables, same selectors: `:root`, `.dark`, the dark `prefers-color-scheme` block, the paper scope `.light, [data-document-surface], [data-surface="paper"]`, product blocks, typography classes). Sizes, spacing, motion and typography stay as they are.
+- Tonal palettes in OKLCH: the brand ramp of the Community theme is moved onto your primary (lightness through your colour, gamut-relative chroma, hue offsets kept), so your exact primary is the fill of primary buttons. Neutrals follow `--neutral`, chart series rotate with the primary hue, status colours (destructive, success, warning, info) and data colours keep their meaning.
+- Radius scale, font family and elevation (shadow colours follow the neutral family).
+- WCAG 2.2 AA for every fill/text pair: the 27 pairs of `color-pairs.js` from kette-tokens plus text on page, card, canvas, input, status containers and status fills (4.5:1) and focus rings (3:1). A pair below its minimum gets the smallest lightness change of its text (or of its fill when the text is shared), and every change is reported. A failing pair is never emitted; the command stops instead.
+- Both sides of every pair in every mode block, and every dark contrast fix pinned in the dark blocks, so no other stylesheet can supply half a pair. Paper resolves to the light values.
+
+The same inputs always give the same file. No network, no dependencies.
+
+If you use the prebuilt `@getitdone-gmbh/kette-design-community/styles.css` instead of Tailwind, import your `theme.css` after it.
+
+**Community and Enterprise.** Community generates a theme.css on top of the token system: one brand, light and dark. Enterprise extends the token source itself in `@getitdone-gmbh/kette-tokens`: several brands, component tokens and Figma variables synced to code (`kette login`).
+
+**After a Community or tokens update.** All data sits in one file, `src/theme/manifest.json`, built from a copy of the Community `theme.css` and of `scripts/color-pairs.js` from kette-tokens in `test/fixtures`. Replace both fixtures (keep the first line that names the source), update the source labels in `scripts/theme-manifest.mjs`, run `node scripts/theme-manifest.mjs` and `npm test`. The tests fail when the manifest is not the build of the fixtures, when a Community variable is missing, or when a pair is not pinned in every mode block. With 0.4.1 the build reports what the theme lacks against the 5.22.1 pair contract (`--colors-button-foreground-destructive` is derived as the on-colour of its fill, four destructive and accent pair variables get their dark value pinned in light), and the generator fixes and reports the pairs 0.4.1 itself has below 4.5:1 (white on emerald, orange and red fills).
 
 ## Where the rules live
 The project holds only a few files: `.kette/profile.json`, `.kette/README.md`, the reference line in `CLAUDE.md` and the ADR template. The rulebook itself lives on the machine under `~/.kette/bundles/active/` and is active in Claude Code as plugins: in Community `kette-engineering-core@kette` and `ui-laws@kette`, in Enterprise `kette-engineering-core@kette`, `kette-engineering@kette` (`platform-profile`, `code-reviewer`), `design-system-agents@kette` and `design-review-pack@kette`. Browse with `kette rules`; `kette doctor` shows what each plugin brings.

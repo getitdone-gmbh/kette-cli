@@ -19,6 +19,7 @@ import { accent, bold, brandLine, cmd, configure, dim, error, file, num, status,
 import { othersCanRead, privateHint } from './files.mjs';
 import { ExitError } from './errors.mjs';
 import { cloud, doctorLine } from './cloud.mjs';
+import { theme } from './theme/command.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -69,6 +70,9 @@ Commands:
   kette cloud setup     Live deploy to itdone.cloud: account link and the itdone MCP server in Claude Code
                         (--have-account skips the link, --dcr skips the fixed sign-in client, --dry-run changes nothing)
   kette cloud status    Show whether the itdone MCP server is registered and how it signs in
+  kette theme           Generate a theme.css for the Community components from your brand colour (light and dark, WCAG AA)
+                        Questions in a terminal, otherwise --primary <hex> [--accent <hex>] [--neutral warm|cool|neutral|<hex>]
+                        [--radius none|sm|md|lg|full|<px>] [--font "<family>"] [--name <id>] [--out <path>] [--preview] [--json]
   kette version
 
 Options:
@@ -81,11 +85,20 @@ Options:
   --path                With kette rules, show file paths instead of content
   --no-npm              With kette login and update, do not set up npm access
   --npm-replace         Comment out an existing @getitdone-gmbh line in ~/.npmrc and use Die Kette
-  --out folder          Target folder for kette figma
+  --out folder          Target folder for kette figma; with kette theme the CSS file (default ./theme.css)
+  --primary hex         With kette theme, the brand colour (required without a terminal)
+  --accent hex          With kette theme, an accent for accent surfaces (default: neutral)
+  --neutral kind        With kette theme, warm, cool (default), neutral or a hex colour to tint the greys
+  --radius size         With kette theme, none, sm, md (default), lg, full or pixels
+  --font family         With kette theme, the font family (default Inter)
+  --name id             With kette init the project name, with kette theme the theme name
+  --preview             With kette theme, also write theme-preview.html and open it in a terminal
+  --json                With kette theme, print the tokens and the contrast report as JSON
   --have-account        With kette cloud setup, do not open the itdone.cloud registration
   --dcr                 With kette cloud setup, sign in through dynamic client registration instead of the fixed client
   --color, --no-color   Force colors on or off (default: on in a terminal, off in pipes, CI and with NO_COLOR)
 
+kette theme writes a drop-in replacement for the Community theme.css. Enterprise extends the token source in kette-tokens instead.
 The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.
 kette cloud setup only registers the itdone MCP server; Claude Code deploys after you confirm, and kette never handles a password or token.`;
 
@@ -97,8 +110,9 @@ const help = () => [brand(), '', HELP.replace(/^ {2}((?:kette|--)\S*(?: \S+)*?)(
 const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
   '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--dcr': 'dcr', '--help': 'help', '-h': 'help', '--version': 'version',
+  '--preview': 'preview', '--json': 'json',
 };
-const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out'];
+const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out', '--primary', '--accent', '--neutral', '--radius', '--font'];
 
 // Unknown options and options without their value stop with exit code 2, so a typo never runs with defaults
 export function parse(argv) {
@@ -574,6 +588,7 @@ export async function main(argv) {
     if (command === 'figma') return await figma(opts);
     // The licence email only prefills the signup of an active Enterprise licence
     if (command === 'cloud') return await cloud(arg, opts, { email: tierOf() === ENTERPRISE ? loginState()?.email : null });
+    if (command === 'theme') return await theme(opts, { version: VERSION });
     if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...redactedState() }, null, 2)); return 0; }
     console.error(`Unknown command: ${command}\n`);
     console.log(help());
