@@ -11,9 +11,6 @@ export const MCP_URL = 'https://api.itdone.cloud/mcp';
 export const REGISTER_URL = 'https://dashboard.itdone.cloud/login?register=1';
 export const CLIENT_ID = 'kette-cli';
 export const CALLBACK_PORT = 53761;
-// Client and redirect of the itdone.cloud dashboard; its Keycloak registration page takes login_hint, the dashboard login does not pass it on yet
-const DASHBOARD_CLIENT = 'itdone-web';
-const DASHBOARD_CALLBACK = 'https://dashboard.itdone.cloud/callback';
 const PREFLIGHT_TIMEOUT_MS = 5000;
 // Any valid S256 challenge works, the preflight never finishes a login
 const PREFLIGHT_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
@@ -70,12 +67,12 @@ export async function fixedClientReady(client, { env = process.env, fetchFn = fe
   return { ready: false, reason: `HTTP ${res.status}` };
 }
 
-// Registration with the email prefilled, straight on the Keycloak page; : / and @ stay readable (valid in a query),
-// so the Windows opener, which refuses percent signs, still takes a plain address. Without a valid email the dashboard link.
-export function registerUrl(email, env = process.env) {
+// The dashboard passes login_hint on to its Keycloak registration and keeps its own login state. @ stays readable (valid in a query),
+// so the Windows opener, which refuses percent signs, still takes a plain address; a plus becomes %2B and is printed there instead.
+export function registerUrl(email) {
   if (!validEmail(email)) return REGISTER_URL;
   const hint = encodeURIComponent(email).replace(/%40/g, '@');
-  return `${authUrl(env)}/protocol/openid-connect/registrations?client_id=${DASHBOARD_CLIENT}&response_type=code&scope=openid&redirect_uri=${DASHBOARD_CALLBACK}&login_hint=${hint}`;
+  return `${REGISTER_URL}&login_hint=${hint}`;
 }
 
 const ok = (msg) => console.log(`${status('ok', 'OK  ')} ${msg}`);

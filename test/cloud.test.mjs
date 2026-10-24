@@ -311,17 +311,18 @@ test('cloud setup falls back to DCR when the sign-in server is not reachable', a
   assert.match(out, /INFO Fixed sign-in client kette-cli not available on itdone\.cloud \(itdone\.cloud sign-in not reachable: \w+\), using dynamic client registration instead/);
 });
 
-test('signup link prefills a valid licence email on the Keycloak registration page, otherwise the dashboard link', () => {
-  const env = {};
-  assert.equal(registerUrl(null, env), REGISTER_URL);
-  assert.equal(registerUrl('', env), REGISTER_URL);
-  assert.equal(registerUrl('not-an-email', env), REGISTER_URL);
-  assert.equal(registerUrl('a b@example.com', env), REGISTER_URL);
-  assert.equal(registerUrl('kunde@example.com', env), 'https://auth.itdone.cloud/realms/itdone/protocol/openid-connect/registrations?client_id=itdone-web&response_type=code&scope=openid&redirect_uri=https://dashboard.itdone.cloud/callback&login_hint=kunde@example.com');
-  const plus = new URL(registerUrl('a.b+team@example.com', env));
+test('signup link prefills a valid licence email through the dashboard login, otherwise the plain dashboard link', () => {
+  assert.equal(registerUrl(null), REGISTER_URL);
+  assert.equal(registerUrl(''), REGISTER_URL);
+  assert.equal(registerUrl('not-an-email'), REGISTER_URL);
+  assert.equal(registerUrl('a b@example.com'), REGISTER_URL);
+  assert.equal(registerUrl('kunde@example.com'), 'https://dashboard.itdone.cloud/login?register=1&login_hint=kunde@example.com');
+  const plus = new URL(registerUrl('a.b+team@example.com'));
+  assert.equal(plus.origin + plus.pathname, 'https://dashboard.itdone.cloud/login');
+  assert.equal(plus.searchParams.get('register'), '1');
   assert.equal(plus.searchParams.get('login_hint'), 'a.b+team@example.com', 'a plus is encoded, so it does not turn into a space');
-  assert.equal(plus.searchParams.get('redirect_uri'), 'https://dashboard.itdone.cloud/callback');
-  assert.equal(openerFor(registerUrl('kunde@example.com', env), 'win32').command, 'cmd', 'a plain address still opens on Windows');
+  assert.equal(openerFor(registerUrl('kunde@example.com'), 'win32').command, 'cmd', 'a plain address still opens on Windows');
+  assert.equal(openerFor(registerUrl('a.b+team@example.com'), 'win32'), null, 'the encoded plus is refused on Windows, the link is printed');
 });
 
 test('cloud setup for Community opens the signup without a prefilled email', async () => {
