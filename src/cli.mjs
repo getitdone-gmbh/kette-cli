@@ -10,7 +10,7 @@ import { ask, choose, confirm, close } from './prompt.mjs';
 import { MARKETPLACE, REPAIR_NOTE, editionHints, hasClaude, installEdition, installedPlugins, pluginId, pluginInstalled, pluginsOutdated } from './claude.mjs';
 import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginDetails, pluginsFor, pluginSummary, retiredPlugins } from './editions.mjs';
-import { NOTE_PATH, agentNote, renewNote } from './note.mjs';
+import { NOTE_PATH, COMMUNITY_REVIEWERS, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
 import { cliHint, cliUpgradeHint, credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 import { SCOPE } from './npmrc.mjs';
@@ -183,9 +183,9 @@ async function buildProfile(root, opts, detected) {
   };
 }
 
-// .kette/README.md as a marked block, so init, add and update renew only that part; tier is the project edition
-function noteItem(tier) {
-  const note = agentNote(tier);
+// .kette/README.md as a marked block, so init, add and update renew only that part; tier is the project edition, flow the review flow from the profile
+function noteItem(tier, flow) {
+  const note = agentNote(tier, flow);
   return { path: NOTE_PATH, mode: 'renew', content: note, renew: (current) => renewNote(current, note) };
 }
 
@@ -243,7 +243,7 @@ function adrItem(root, bundleDir) {
 function planFor(root, profile, bundleDir, tier, noteTier, templates, apps) {
   const plan = [
     { path: '.kette/profile.json', mode: 'renew', content: JSON.stringify(profile, null, 2) + '\n', renew: (current) => renewProfile(current, noteTier, apps) },
-    noteItem(noteTier),
+    noteItem(noteTier, existingProfile(root)?.flow ?? profile.flow),
     { path: 'CLAUDE.md', mode: 'append', marker: '@.kette/README.md', content: '@.kette/README.md\n', note: 'points to the Die Kette rules' },
     adrItem(root, bundleDir),
   ].filter(Boolean);
@@ -458,11 +458,17 @@ async function doctor(root, opts) {
     const errs = validate(schema, profile);
     // A profile written by a newer CLI may name app folders the installed rulebook does not know yet: that needs an update, not a fix
     if (errs.length === 1 && errs[0] === '$: unknown field apps' && !schema.properties?.apps) warn(`The profile names app folders (apps), the installed rulebook does not know them yet. Load the current one with: ${cmd('kette update')}`);
+    // Same for the review flow: a profile with flow needs a rulebook that knows it
+    else if (errs.length === 1 && errs[0] === '$: unknown field flow' && !schema.properties?.flow) warn(`The profile sets the review flow (flow), the installed rulebook does not know it yet. Load the current one with: ${cmd('kette update')}`);
     else line(errs.length === 0, 'Profile valid', `Profile not valid: ${errs.join('; ')}`);
     if (PREVIEW.includes(platformStatus(bundle.dir, profile.platform?.id))) warn(`Platform ${profile.platform.id} is still a preview ${dim('(no verified reference project)')}`);
     if (profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn(`Profile requires the Enterprise edition (Die Kette), only Community is installed here. Agents, gates, /feature-loop, platform profiles and checks from .kette/README.md are missing. Unlock with: ${cmd('kette login <key>')}`);
     if (profile.tier !== ENTERPRISE && tier === ENTERPRISE) warn(`Enterprise (Die Kette) is installed here, the project is on Community. Switch to the flow with agents and gates: ${cmd('kette add')}`);
     for (const o of profile.overlays || []) warn(`Overlay ${o.source} is loaded by the agents, not checked here`);
+    // Community has kette-check only; other reviewers in flow.review are Enterprise agents
+    const reviewers = [...(profile.flow?.review?.ui || []), ...(profile.flow?.review?.code || [])];
+    const enterpriseOnly = reviewers.filter((r) => !COMMUNITY_REVIEWERS.includes(r));
+    if (profile.tier !== ENTERPRISE && enterpriseOnly.length) warn(`flow.review names ${enterpriseOnly.join(', ')}, these are agents of Die Kette (Enterprise). On Community only kette-check runs. Unlock with: ${cmd('kette login <key>')}`);
   }
   if (!opts.ci && bundle && hasClaude()) {
     const list = installedPlugins();
@@ -501,7 +507,7 @@ function renewProjectNote(root) {
   const profile = existingProfile(root);
   if (!profile) return;
   const tier = Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
-  const [d] = describe([noteItem(tier)], root);
+  const [d] = describe([noteItem(tier, profile.flow)], root);
   if (d.unmarked) { console.log(staleNote([d])); return; }
   if (d.action === 'keep') return;
   apply([d], root);

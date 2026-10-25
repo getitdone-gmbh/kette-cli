@@ -19,21 +19,78 @@ const LEGACY_NOTES = new Set([
 
 const COMMON = `This project follows the rules of Die Kette. Agents read \`.kette/profile.json\` first and apply rules in this order: company overlays, platform, stack, architecture patterns, core. A core rule applies unless an ADR explicitly overrides it.`;
 
-const ENTERPRISE_FLOW = `## Flow for every change
+const DEFAULT_GATES = `4. Required gates, independent of the implementation:
+   - \`kette-engineering:code-reviewer\` checks the diff against core rules, patterns and the project profile.
+   - \`design-system-agents:qa-engineer\` verifies every requirement with evidence.
+   - For UI changes also \`design-review-pack:design-reviewer\` and \`design-review-pack:ux-reviewer\`, and where keyboard, contrast, focus or screen readers are affected, \`design-system-agents:accessibility-manager\`.`;
+const DEFAULT_TRAIN = `Several branches in the same round (release train): \`/feature-loop train <name> <branch...>\`. Builders check themselves against the rules and the probes in \`.review/probes/\`, without gates per branch or per fix. All branches go onto one release branch, the gates from step 4 run once on it, in parallel (the train takes \`codeReviewer: kette-engineering:code-reviewer\` and \`gates: [qa, accessibility]\` next to design and UX review), then one fix round and a re-check of only the failed findings. At most 4 heavy agents (browsers, simulators, builds) run at once. The round is done when the review on the release branch passes.`;
+const DEFAULT_COMMUNITY_STEP4 = `4. Several branches in the same round: build and self-check each branch, merge them onto one release branch, run \`kette-check\` once on that branch, fix, then have it re-check only the open findings.`;
+
+// Reviewer IDs of flow.review in the profile and the agents they stand for
+export const REVIEWERS = {
+  design: 'design-review-pack:design-reviewer',
+  ux: 'design-review-pack:ux-reviewer',
+  accessibility: 'design-system-agents:accessibility-manager',
+  material: 'design-system-agents:material-design-guardian',
+  'code-reviewer': 'kette-engineering:code-reviewer',
+  'kette-check': 'kette-engineering-core:kette-check',
+  qa: 'design-system-agents:qa-engineer',
+  security: 'design-system-agents:security-data-governance-engineer',
+  performance: 'design-system-agents:performance-reliability-engineer',
+};
+export const COMMUNITY_REVIEWERS = ['kette-check'];
+const agentList = (ids) => ids.map((id) => `\`${REVIEWERS[id] || id}\``).join(', ');
+const listOf = (v) => (Array.isArray(v) ? v.filter((id) => typeof id === 'string') : []);
+
+// Only known values steer the text, anything else falls back to the text without flow (kette doctor reports the invalid profile)
+function flowOf(flow) {
+  const f = flow && typeof flow === 'object' ? flow : {};
+  const int = (v, min, max, def) => (Number.isInteger(v) && v >= min && v <= max ? v : def);
+  return {
+    mode: ['per-change', 'train'].includes(f.mode) ? f.mode : null,
+    cap: int(f.maxParallel, 1, 16, 4),
+    rounds: int(f.fixRounds, 0, 5, 1),
+    ui: listOf(f.review?.ui),
+    code: listOf(f.review?.code),
+  };
+}
+
+function trainSteps({ cap, rounds }) {
+  const fix = rounds === 0 ? 'open findings go to a person' : `${rounds === 1 ? 'one fix round' : `up to ${rounds} fix rounds`} and a re-check of only the failed findings`;
+  return `Builders check themselves against the rules and the probes in \`.review/probes/\`. All branches go onto one release branch, the gates from step 4 run once on it, in parallel, then ${fix}. At most ${cap} heavy agents (browsers, simulators, builds) run at once. The round is done when the review on the release branch passes.`;
+}
+
+function enterpriseParts(f) {
+  const lines = [];
+  if (f.code.length) lines.push(`   - Every change: ${agentList(f.code)} (\`flow.review.code\` in the profile).`);
+  if (f.ui.length) lines.push(`   - UI changes also: ${agentList(f.ui)} (\`flow.review.ui\`).`);
+  const gates = lines.length ? `4. Required gates, independent of the implementation:\n${lines.join('\n')}` : DEFAULT_GATES;
+  const takes = '`/feature-loop` takes mode, agent cap, fix rounds and reviewers from `flow` in `.kette/profile.json`.';
+  let train = DEFAULT_TRAIN;
+  if (f.mode === 'train') train = `Default for this project (\`flow.mode: train\`): several branches or many small fixes in a round always run as a release train, \`/feature-loop train <name> <branch...>\`, never with gates per branch, pull request or fix. ${trainSteps(f)} ${takes} A single feature runs with \`/feature-loop start\`.`;
+  if (f.mode === 'per-change') train = `Default for this project (\`flow.mode: per-change\`): the gates from step 4 run on every change and branch. A release train with one review at the end (\`/feature-loop train <name> <branch...>\`) runs only when asked for. ${takes}`;
+  return { gates, train };
+}
+
+function communityParts(f) {
+  let step4 = DEFAULT_COMMUNITY_STEP4;
+  if (f.mode === 'train') step4 = '4. Default for this project (`flow.mode: train`): several branches or many small fixes in a round are built and self-checked per branch, merged onto one release branch, checked once there by `kette-check`, fixed, then re-checked on only the open findings. No `kette-check` per branch or pull request.';
+  if (f.mode === 'per-change') step4 = '4. Default for this project (`flow.mode: per-change`): `kette-check` runs on every change and branch. Several branches get one check on a release branch only when asked for.';
+  return { step4 };
+}
+
+const enterpriseFlow = ({ gates, train }) => `## Flow for every change
 Apply small fixes (a typo, one line) directly and check them with step 4. Everything else runs like this, each role as its own subagent:
 
 1. Requirements: \`design-system-agents:requirements-engineer\` writes testable requirements with IDs.
 2. Architecture: \`design-system-agents:software-architect\` picks the pattern (skill \`architecture-patterns\`), cuts modules and interfaces and records hard-to-reverse decisions as ADRs in \`docs/adr/\`.
 3. Implementation: \`design-system-agents:fullstack-developer\` builds in small, tested steps following \`engineering-rules\` and \`platform-profile\`.
-4. Required gates, independent of the implementation:
-   - \`kette-engineering:code-reviewer\` checks the diff against core rules, patterns and the project profile.
-   - \`design-system-agents:qa-engineer\` verifies every requirement with evidence.
-   - For UI changes also \`design-review-pack:design-reviewer\` and \`design-review-pack:ux-reviewer\`, and where keyboard, contrast, focus or screen readers are affected, \`design-system-agents:accessibility-manager\`.
+${gates}
 5. Findings go back to the role that caused them (skill \`evidence-and-defect-routing\`), then the gate checks again. A change is done only when all gates pass.
 
 A whole feature with all roles, fix loop and run log: \`/feature-loop start <feature>\` (in Claude Code \`/design-system-agents:feature-loop\`).
 
-Several branches in the same round (release train): \`/feature-loop train <name> <branch...>\`. Builders check themselves against the rules and the probes in \`.review/probes/\`, without gates per branch or per fix. All branches go onto one release branch, the gates from step 4 run once on it, in parallel (the train takes \`codeReviewer: kette-engineering:code-reviewer\` and \`gates: [qa, accessibility]\` next to design and UX review), then one fix round and a re-check of only the failed findings. At most 4 heavy agents (browsers, simulators, builds) run at once. The round is done when the review on the release branch passes.
+${train}
 
 The agents, gates and \`/feature-loop\` need Die Kette on the machine (\`kette login <key>\`). Without them, patterns and ADRs, \`engineering-rules\` while building and the check with \`kette-engineering-core:kette-check\` still apply, and \`kette doctor\` shows what is missing.
 
@@ -44,18 +101,18 @@ Create infrastructure only as code and check it with plan or what-if. A human ru
 // Core topics named in the note; kept in the CLI so the block is the same for the whole team, whatever bundle each machine has
 export const CORE_TOPICS = ['readability', 'structure', 'errors', 'tests', 'security', 'dependencies', 'logging-operations', 'changes', 'comments'];
 
-const COMMUNITY_FLOW = `## Flow for every change
+const communityFlow = ({ step4 }) => `## Flow for every change
 1. Before building: pick the architecture pattern (skill \`architecture-patterns\`, under \`patterns\` in the profile) and record hard-to-reverse decisions as ADRs in \`docs/adr/\` (template \`docs/adr/0000-template.md\`, in older projects \`docs/adr/0000-vorlage.md\`).
 2. While building: load the skill \`engineering-rules\` and follow it (${CORE_TOPICS.join(', ')}).
 3. After implementing: have the subagent \`kette-engineering-core:kette-check\` check the diff against the core rules and the chosen pattern, fix every finding and have it check again. For UI changes also check against the skills \`ui-laws\`, \`interaction-principles\` and \`a11y-standards\`.
-4. Several branches in the same round: build and self-check each branch, merge them onto one release branch, run \`kette-check\` once on that branch, fix, then have it re-check only the open findings.
+${step4}
 5. A change is done when tests for new logic, type checks and lint pass, no \`kette-check\` finding is open (for several branches: on the release branch), every hard-to-reverse decision has an ADR and infrastructure exists only as code. A human runs apply, deploys and destructive migrations.
 
 Agents for requirements, architecture and implementation plus independent gates (code reviewer, QA, design review) come with Die Kette (Enterprise edition): \`kette login <key>\`.`;
 
-// Text for .kette/README.md per project edition (profile.tier), between the markers, so only this block is renewed
+// Text for .kette/README.md per project edition (profile.tier) and review flow (profile.flow), between the markers, so only this block is renewed
 // No counts or machine state, because the file lives in the repo and stays the same for the whole team
-export function agentNote(tier) {
+export function agentNote(tier, flow) {
   const enterprise = tier === ENTERPRISE;
   const where = enterprise ? '`rules/`, `profiles/`, `checks/`' : '`rules/core`, `rules/architecture`';
   return `${BEGIN}
@@ -63,7 +120,7 @@ export function agentNote(tier) {
 
 ${COMMON}
 
-${enterprise ? ENTERPRISE_FLOW : COMMUNITY_FLOW}
+${enterprise ? enterpriseFlow(enterpriseParts(flowOf(flow))) : communityFlow(communityParts(flowOf(flow)))}
 
 ## Where the rules live
 - On this machine in \`~/.kette/bundles/active/\`: ${where}.

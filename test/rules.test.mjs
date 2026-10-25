@@ -441,3 +441,27 @@ test('add names the stack and platform it writes: detected, from a flag, or the 
     process.chdir(cwd);
   }
 });
+
+test('doctor: flow in the profile with an installed schema without flow is a WARN with kette update; Community with Enterprise reviewers is a WARN', async () => {
+  const d = rulebook('community');
+  write(d, 'schema/profile.schema.json', JSON.stringify({ type: 'object', additionalProperties: false, properties: { version: {}, project: {}, stack: {}, platform: {}, patterns: {}, tier: {} } }));
+  const project = tmp();
+  const base = { version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community' };
+  write(project, '.kette/profile.json', JSON.stringify({ ...base, flow: { mode: 'train' } }));
+  write(project, 'CLAUDE.md', '@.kette/README.md\n');
+  const cwd = process.cwd();
+  process.chdir(project);
+  try {
+    const { out, result } = await run('doctor', '--ci');
+    assert.match(out, /^WARN The profile sets the review flow \(flow\), the installed rulebook does not know it yet\. Load the current one with: kette update$/m);
+    assert.doesNotMatch(out, /FAIL/);
+    assert.equal(result, 0);
+    write(d, 'schema/profile.schema.json', JSON.stringify({ type: 'object', additionalProperties: false, properties: { version: {}, project: {}, stack: {}, platform: {}, patterns: {}, tier: {}, flow: {} } }));
+    write(project, '.kette/profile.json', JSON.stringify({ ...base, flow: { mode: 'train', review: { ui: ['design'], code: ['kette-check', 'qa'] } } }));
+    const second = await run('doctor', '--ci');
+    assert.match(second.out, /^WARN flow\.review names design, qa, these are agents of Die Kette \(Enterprise\)\. On Community only kette-check runs\. Unlock with: kette login <key>$/m);
+    assert.equal(second.result, 0);
+  } finally {
+    process.chdir(cwd);
+  }
+});

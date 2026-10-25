@@ -50,6 +50,19 @@ The project profile names the edition in the field `tier`: `community` or `enter
 
 Options: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out folder`, `--have-account`, `--primary`, `--accent`, `--neutral`, `--radius`, `--font`, `--name`, `--preview`, `--json`, `--provider`, `--env`, `--app`, `--note`, `--stdin`, `--github-env`, `--repo`, `--color` / `--no-color` (default: on in a terminal, off in pipes, CI and with `NO_COLOR`).
 
+## Review flow (`flow` in the profile)
+How a team reviews changes is set once in `.kette/profile.json`; `kette add` and `kette update` write it into the flow text of `.kette/README.md`, which Claude Code reads in every session.
+
+```json
+"flow": { "mode": "train", "maxParallel": 4, "fixRounds": 1, "review": { "ui": ["design", "ux"], "code": ["code-reviewer", "qa"] } }
+```
+
+- `mode: train` (release train): several branches or many small fixes in a round check themselves against the rules and the probes in `.review/probes/`, merge onto one release branch and get one review round there, one fix round, then a re-check of only the failed findings. No review per branch or pull request. `mode: per-change`: the reviewers run on every change. Without `mode`, the text names both and the agents pick per round.
+- `maxParallel`: heavy agents (browsers, simulators, builds) at once, default 4. `fixRounds`: default 1.
+- `review.ui` / `review.code`: which reviewers run on UI changes and on every change. Enterprise: `design`, `ux`, `accessibility`, `material`, `code-reviewer`, `qa`, `security`, `performance`. Community: `kette-check`; `kette doctor` warns about Enterprise reviewers in a Community project.
+- `/feature-loop` (Enterprise) takes these values as defaults. Plain words work too: "three branches this round, review at the end".
+- Commit `.review/probes/`: the reviewers leave one small check per finding there, builders run them before the next review.
+
 ## Templates by profile (Enterprise)
 CI, Docker and check templates follow the project profile: only the chosen stacks, each in its app folder (`apps` in the profile, otherwise `apps/web`, `apps/api`, `apps/mobile`, `apps/spa`). `kette add` detects app folders such as `backend/`, `frontend/` or `apps/*`. Only Enterprise writes `apps`; a Community project gets the folders from detection when it switches to Enterprise. An existing profile is never rewritten: `kette add` at most raises `tier` and adds `apps` when the field is missing and the installed schema knows it; all other fields stay. Existing files stay unchanged (`= keep`).
 
