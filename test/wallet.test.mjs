@@ -86,6 +86,7 @@ test('wallet needs Enterprise, help works without it', async () => {
   const { result, out } = await run('wallet', 'help');
   assert.equal(result, 0);
   assert.match(out, /kette wallet run --env <env> -- <command>/);
+  assert.match(out, /Get IT Done never sees or stores a value/);
 });
 
 test('init writes names from .env.example, default Infisical, and sets platform.secrets in the profile', async () => {

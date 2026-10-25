@@ -1,6 +1,9 @@
 # Changelog
 
 ## 0.9.1
+- `kette wallet help` and the end of `kette wallet init` say who owns the credentials: your own Infisical or vault; Get IT Done never sees or stores a value and does not manage credentials. Same in the README.
+
+## 0.9.1
 - Review flow per project: optional `flow` in `.kette/profile.json` (`mode` `train` or `per-change`, `maxParallel`, `fixRounds`, reviewers in `review.ui` and `review.code`). `kette add` and `kette update` write it into `.kette/README.md`: with `mode: train` the release train is the project default (no review per branch or pull request), with `per-change` the gates run on every change, and the named reviewers replace the default gate list. Without `flow` the text stays as before.
 - `kette doctor` warns when the profile sets `flow` and the installed rulebook does not know it yet (`kette update`), and when a Community project names Enterprise reviewers.
 - The profile check knows whole numbers with limits (copy of `kette-engineering/lib/validate.mjs`).
