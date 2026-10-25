@@ -1,4 +1,4 @@
-// Fixture: copied unchanged below this line from getitdone-gmbh/kette-tokens@v5.23.2 scripts/color-pairs.js. Source of the pairs in src/theme/manifest.json.
+// Fixture: copied below this line from getitdone-gmbh/kette-tokens@v5.23.2 scripts/color-pairs.js. Source of the pairs in src/theme/manifest.json. Only change: the client name in one comment is neutralised.
 // Fill and text pairs that must always travel together (5.21.1). A theme CSS block that sets one side of a pair without the other lets a second stylesheet (generic theme, other mode selector) supply the missing half: blue fill with near-black text.
 // A fifth entry 'shared' marks a fill that reuses the text of another pair (hover/active states): the text may be set without it, the fill never without the text.
 // Used by build-css-vars.ts (pins every pair variable in every mode block) and scripts/check-pairs.js (gate).
@@ -20,7 +20,7 @@ const PAIRS = [
     ['brand bold icon', '--semantic-background-brand-bold-default', '--semantic-icon-on-brand', 'shared'],
     ['utility primary', '--colors-primary', '--colors-utility-primary-foreground'],
     ['utility destructive', '--colors-utility-destructive', '--colors-utility-destructive-foreground'],
-    // 5.22.1: the remaining background/foreground utility pairs (shadcn names and the older colors/background-* aliases). Not a pair on purpose: --colors-background with --colors-utility-foreground, because the client theme escapr pins --colors-background to slate.900 in light mode (a brand decision, reported open in the 5.22.1 changelog)
+    // 5.22.1: the remaining background/foreground utility pairs (shadcn names and the older colors/background-* aliases). Not a pair on purpose: --colors-background with --colors-utility-foreground, because a client theme (Kunde A) pins --colors-background to slate.900 in light mode (a brand decision, reported open in the 5.22.1 changelog)
     ['background destructive', '--colors-background-destructive', '--colors-foreground-destructive'],
     ['background accent', '--colors-background-accent', '--colors-foreground-accent'],
     ['utility accent', '--colors-utility-accent', '--colors-utility-accent-foreground'],
