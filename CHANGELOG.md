@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2
+- Flow text in `.kette/README.md` (rewritten by `kette update` and `kette add`) describes two modes. Enterprise: one feature with `/feature-loop start`, or a release train with `/feature-loop train <name> <branch...>`: builders self-check against the rules and the probes in `.review/probes/`, all branches merge onto one release branch, the gates run once there in parallel, one fix round, then a re-check of only the failed findings, at most 4 heavy agents at once. The UI gate now names `design-review-pack:ux-reviewer` next to `design-reviewer`. Community: several branches get one `kette-check` on the release branch and a re-check of the open findings.
+- Definition of done for several branches: the review on the integrated release branch passes.
+- `kette init` and `kette add` (Enterprise) name `/feature-loop train` in the next steps.
+- Goes with claude-design-agent-pack 1.5.0 (release train in `/feature-loop`, re-check mode and probes for `design-reviewer` and `ux-reviewer`) and kette-engineering-core 0.4.0 (`kette-check` per release branch and as a targeted re-check).
+
 ## 0.7.1
 - Theme generator follows Community 0.4.3: standalone-complete theme, new typography button variables, accent/destructive pairs in all scopes.
 - The generated file carries the 0.4.3 variable set per block (1401 variables: `:root` 1401, `.dark` and the dark media block 487 each, paper 487): light values for the 58 colour roles Community 0.4.2 left undefined in light mode, `--typo-button-*` with `.typography-button`, and `--colors-background-accent`, `--colors-background-destructive`, `--colors-foreground-accent`, `--colors-foreground-destructive` in `:root`, both dark blocks and paper.

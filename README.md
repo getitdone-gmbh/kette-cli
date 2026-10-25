@@ -16,7 +16,7 @@ Quick start: [Community](docs/setup/community.md) · [Enterprise](docs/setup/ent
 | Project profile `.kette/profile.json` and `kette doctor` | yes | yes |
 | Plugin `kette-engineering-core@kette` (skills `engineering-rules`, `architecture-patterns`, `live-deploy`, agent `kette-check`) | yes | yes |
 | Plugin `ui-laws@kette`: UI laws, interaction, WCAG 2.2 AA (skills `ui-laws`, `interaction-principles`, `a11y-standards`) | yes | included in the design review pack |
-| Flow in `.kette/README.md` | patterns and ADR, rules while building, review with the agent `kette-check`, definition of done | roles as subagents, mandatory gates, `/feature-loop` |
+| Flow in `.kette/README.md` | patterns and ADR, rules while building, review with the agent `kette-check` (per change, or once per release branch), definition of done | roles as subagents, mandatory gates, `/feature-loop` for one feature or as a release train with one review at the end |
 | Stack and platform profiles | | yes |
 | Templates for CI, Docker and deploy, checks (tsconfig, ESLint, dependency-cruiser, gitleaks) | | yes |
 | Plugin `kette-engineering@kette` with the code reviewer | | yes |

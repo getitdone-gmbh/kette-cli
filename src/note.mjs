@@ -28,10 +28,12 @@ Apply small fixes (a typo, one line) directly and check them with step 4. Everyt
 4. Required gates, independent of the implementation:
    - \`kette-engineering:code-reviewer\` checks the diff against core rules, patterns and the project profile.
    - \`design-system-agents:qa-engineer\` verifies every requirement with evidence.
-   - For UI changes also \`design-review-pack:design-reviewer\`, and where keyboard, contrast, focus or screen readers are affected, \`design-system-agents:accessibility-manager\`.
+   - For UI changes also \`design-review-pack:design-reviewer\` and \`design-review-pack:ux-reviewer\`, and where keyboard, contrast, focus or screen readers are affected, \`design-system-agents:accessibility-manager\`.
 5. Findings go back to the role that caused them (skill \`evidence-and-defect-routing\`), then the gate checks again. A change is done only when all gates pass.
 
 A whole feature with all roles, fix loop and run log: \`/feature-loop start <feature>\` (in Claude Code \`/design-system-agents:feature-loop\`).
+
+Several branches in the same round (release train): \`/feature-loop train <name> <branch...>\`. Builders check themselves against the rules and the probes in \`.review/probes/\`, without gates per branch or per fix. All branches go onto one release branch, the gates from step 4 run once on it, in parallel (the train takes \`codeReviewer: kette-engineering:code-reviewer\` and \`gates: [qa, accessibility]\` next to design and UX review), then one fix round and a re-check of only the failed findings. At most 4 heavy agents (browsers, simulators, builds) run at once. The round is done when the review on the release branch passes.
 
 The agents, gates and \`/feature-loop\` need Die Kette on the machine (\`kette login <key>\`). Without them, patterns and ADRs, \`engineering-rules\` while building and the check with \`kette-engineering-core:kette-check\` still apply, and \`kette doctor\` shows what is missing.
 
@@ -44,7 +46,8 @@ const COMMUNITY_FLOW = `## Flow for every change
 1. Before building: pick the architecture pattern (skill \`architecture-patterns\`, under \`patterns\` in the profile) and record hard-to-reverse decisions as ADRs in \`docs/adr/\` (template \`docs/adr/0000-template.md\`, in older projects \`docs/adr/0000-vorlage.md\`).
 2. While building: load the skill \`engineering-rules\` and follow it (${CORE_TOPICS.join(', ')}).
 3. After implementing: have the subagent \`kette-engineering-core:kette-check\` check the diff against the core rules and the chosen pattern, fix every finding and have it check again. For UI changes also check against the skills \`ui-laws\`, \`interaction-principles\` and \`a11y-standards\`.
-4. A change is done when tests for new logic, type checks and lint pass, no \`kette-check\` finding is open, every hard-to-reverse decision has an ADR and infrastructure exists only as code. A human runs apply, deploys and destructive migrations.
+4. Several branches in the same round: build and self-check each branch, merge them onto one release branch, run \`kette-check\` once on that branch, fix, then have it re-check only the open findings.
+5. A change is done when tests for new logic, type checks and lint pass, no \`kette-check\` finding is open (for several branches: on the release branch), every hard-to-reverse decision has an ADR and infrastructure exists only as code. A human runs apply, deploys and destructive migrations.
 
 Agents for requirements, architecture and implementation plus independent gates (code reviewer, QA, design review) come with Die Kette (Enterprise edition): \`kette login <key>\`.`;
 
