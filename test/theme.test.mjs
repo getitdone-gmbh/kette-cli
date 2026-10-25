@@ -42,7 +42,7 @@ const run = (args, opts = {}) => spawnSync(process.execPath, [bin, 'theme', ...a
 test('manifest.json is the current build of the fixtures (rebuild: node scripts/theme-manifest.mjs)', () => {
   const { manifest: fresh, warnings } = buildFrom();
   assert.equal(formatManifest(fresh), fs.readFileSync(MANIFEST_PATH, 'utf8').replace(/\r\n/g, '\n'));
-  // 0.4.2 defines every pair side kette theme needs, nothing is derived or skipped
+  // 0.4.3 defines every pair side kette theme needs, nothing is derived or skipped
   assert.deepEqual(warnings, []);
   assert.deepEqual(fresh.pairOn, {});
 });
@@ -54,15 +54,15 @@ test('manifest pairs are exactly color-pairs.js of the tokens (51 with the statu
   assert.equal(new Set(manifest.checks.map((c) => `${c.fill} ${c.text}`)).size, manifest.checks.length);
 });
 
-test('the generated theme declares exactly the variables of the Community 0.4.2 theme.css', () => {
+test('the generated theme declares exactly the variables of the Community 0.4.3 theme.css', () => {
   const { css } = generateTheme(parseThemeOptions({ primary: '#0f766e' }));
   const want = declared(fixtureCss);
   const got = declared(css);
-  assert.equal(want.size, 1343);
+  assert.equal(want.size, 1401);
   assert.deepEqual([...got].sort(), [...want].sort());
 });
 
-test('every mode block has exactly the Community 0.4.2 variables', () => {
+test('every mode block has exactly the Community 0.4.3 variables', () => {
   const want = blocks(fixtureCss);
   for (const primary of ['#0f766e', '#c2410c', '#4f46e5', '#facc15']) {
     const got = blocks(generateTheme(parseThemeOptions({ primary })).css);
@@ -71,7 +71,7 @@ test('every mode block has exactly the Community 0.4.2 variables', () => {
 });
 
 test('a dark contrast fix on a variable the dark blocks inherit is pinned in both dark blocks, and with its light value in paper', () => {
-  // 0.4.2 declares every dark-checked variable in .dark, so a synthetic dark check on an inherited variable exercises the pin path
+  // 0.4.3 declares every dark-checked variable in .dark, so a synthetic dark check on an inherited variable exercises the pin path
   const base = loadManifest();
   const synthetic = { ...base, checks: [...base.checks, { label: 'synthetic', fill: '--colors-background', text: '--semantic-text-on-paper', min: 4.5, mode: 'dark' }] };
   assert.ok(base.colors['--semantic-text-on-paper'].inherit);
@@ -85,9 +85,9 @@ test('a dark contrast fix on a variable the dark blocks inherit is pinned in bot
   assert.ok(contrast(rgb(b.dark['--colors-background']), rgb(darkValue)) >= 4.5);
 });
 
-// Mirrors kette-design-community src/lib/theme-pairs.test.ts (0.4.2): pairs travel together, the dark blocks pin the pair variables
-// of :root, the destructive button text is defined everywhere, paper is light, OS dark equals .dark
-test('pairs and scopes hold the kette-design-community 0.4.2 rules', () => {
+// Mirrors kette-design-community src/lib/theme-pairs.test.ts and theme-vars.test.ts (0.4.3): pairs travel together, every block
+// pins every pair variable, the destructive button text is defined everywhere, paper is light, OS dark equals .dark
+test('pairs and scopes hold the kette-design-community 0.4.3 rules', () => {
   for (const primary of ['#0f766e', '#c2410c', '#4f46e5', '#facc15']) {
     const b = blocks(generateTheme(parseThemeOptions({ primary, neutral: 'warm', accent: '#db2777' })).css);
     for (const [key, vars] of Object.entries(b)) {
@@ -97,7 +97,8 @@ test('pairs and scopes hold the kette-design-community 0.4.2 rules', () => {
       }
       assert.ok('--colors-button-foreground-destructive' in vars, `${primary} ${key} destructive button text`);
     }
-    for (const v of PAIR_VARS.filter((x) => x in b.root)) assert.ok(v in b.dark && v in b.media, `${primary} pins ${v}`);
+    // 0.4.3 is standalone-complete (theme-vars.test.ts): every pair variable, accent and destructive included, sits in all four blocks
+    for (const [key, vars] of Object.entries(b)) for (const v of PAIR_VARS) assert.ok(v in vars, `${primary} ${key} pins ${v}`);
     for (const [name, value] of Object.entries(b.paper)) if (name in b.root) assert.equal(value, b.root[name], `${primary} paper ${name}`);
     assert.deepEqual(b.media, b.dark);
   }
@@ -129,7 +130,7 @@ test('random inputs never emit a pair below its minimum, read back from the CSS 
   }
 });
 
-test('the base brand colour with cool neutrals reproduces the Community 0.4.2 values exactly, with no adjustment', () => {
+test('the base brand colour with cool neutrals reproduces the Community 0.4.3 values exactly, with no adjustment', () => {
   const { css, tokens } = generateTheme(parseThemeOptions({ primary: '#2563eb' }));
   assert.deepEqual(tokens.adjustments, []);
   const want = blocks(fixtureCss);

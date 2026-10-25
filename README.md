@@ -1,6 +1,6 @@
 # kette-cli
 
-Sets up the rulebook and the agents of Die Kette from the terminal. Current version: 0.7.0.
+Sets up the rulebook and the agents of Die Kette from the terminal. Current version: 0.7.1.
 
 ```sh
 curl -fsSL https://kette.itdone.de/install | sh          # macOS, Linux
@@ -128,19 +128,21 @@ kette theme --primary "#c2410c" --json --dry-run   # tokens and contrast report 
 | `--json` | prints the tokens, palettes, every contrast check and every adjustment as JSON | off |
 
 What it generates, in one run, for light and dark:
-- Exactly the variable set of the Community `theme.css` per block (0.4.2: 1343 variables, same selectors: `:root`, `.dark`, the dark `prefers-color-scheme` block, the paper scope `.light, [data-document-surface], [data-surface="paper"]`, product blocks, typography classes). Sizes, spacing, motion and typography stay as they are.
+- Exactly the variable set of the Community `theme.css` per block (0.4.3: 1401 variables, same selectors: `:root`, `.dark`, the dark `prefers-color-scheme` block, the paper scope `.light, [data-document-surface], [data-surface="paper"]`, product blocks, typography classes). Sizes, spacing, motion and typography stay as they are.
 - Tonal palettes in OKLCH: the brand ramp of the Community theme is moved onto your primary (lightness through your colour, gamut-relative chroma, hue offsets kept), so your exact primary is the fill of primary buttons. Neutrals follow `--neutral`, chart series rotate with the primary hue, status colours (destructive, success, warning, info) and data colours keep their meaning.
 - Radius scale, font family and elevation (shadow colours follow the neutral family).
 - WCAG 2.2 AA for every fill/text pair: the 51 pairs of `color-pairs.js` from kette-tokens (status pairs included), the status and badge pairs the Community package tests, text on the paper surface, page, card, canvas and input (4.5:1) and focus rings (3:1), 94 checks. A pair below its minimum gets the smallest lightness change of its text (or of its fill when the text is shared), and every change is reported. A failing pair is never emitted; the command stops instead.
-- The pair rules of the Community package: no block sets one side of a pair without the other, the dark blocks carry every pair variable of `:root`, paper resolves to the light values (also inside a dark page), the dark media block equals `.dark`. A dark contrast fix on a variable the dark blocks inherit is pinned there, and with its light value in paper.
+- The pair rules of the Community package: no block sets one side of a pair without the other, every pair variable (accent and destructive included) is declared in `:root`, both dark blocks and paper, paper resolves to the light values (also inside a dark page), the dark media block equals `.dark`. A dark contrast fix on a variable the dark blocks inherit is pinned there, and with its light value in paper.
 
 The same inputs always give the same file. No network, no dependencies.
 
 If you use the prebuilt `@getitdone-gmbh/kette-design-community/styles.css` instead of Tailwind, import your `theme.css` after it.
 
+**Community version.** Use Community 0.4.3 or newer: its `theme.css` is self-contained, and the generated file carries its variable set (light values for 58 colour roles such as `--colors-avatar-*`, `--colors-switch-*` and `--colors-error`, the typography role `--typo-button-*` with `.typography-button`). With 0.4.2 the generated file works too: the extra variables are harmless, and they give the light `border-error`, `ring-error` and `bg-background-accent` the colour 0.4.2 left undefined. The Tailwind colours that use the other new variables (for example `bg-avatar-background-default`) exist only in the 0.4.3 preset.
+
 **Community and Enterprise.** Community generates a theme.css on top of the token system: one brand, light and dark. Enterprise extends the token source itself in `@getitdone-gmbh/kette-tokens`: several brands, component tokens and Figma variables synced to code (`kette login`).
 
-**After a Community or tokens update.** All data sits in one file, `src/theme/manifest.json`, built from a copy of the Community `theme.css` and of `scripts/color-pairs.js` from kette-tokens in `test/fixtures` (now Community 0.4.2 at `ef9cc94` and kette-tokens `v5.23.1`). Replace both fixtures (keep the first line that names the source), update the source labels in `scripts/theme-manifest.mjs`, run `node scripts/theme-manifest.mjs` and `npm test`. The tests fail when the manifest is not the build of the fixtures, when a block of the generated CSS differs from the Community block, or when a pair rule or contrast check fails. With the base blue and cool neutrals the generator reproduces the Community values exactly, with no adjustment.
+**After a Community or tokens update.** All data sits in one file, `src/theme/manifest.json`, built from a copy of the Community `theme.css` and of `scripts/color-pairs.js` from kette-tokens in `test/fixtures` (now Community 0.4.3 at `639d509` and kette-tokens `v5.23.2`). Replace both fixtures (keep the first line that names the source), update the source labels in `scripts/theme-manifest.mjs`, run `node scripts/theme-manifest.mjs` and `npm test`. The tests fail when the manifest is not the build of the fixtures, when a block of the generated CSS differs from the Community block, or when a pair rule or contrast check fails. With the base blue and cool neutrals the generator reproduces the Community values exactly, with no adjustment.
 
 ## Where the rules live
 The project holds only a few files: `.kette/profile.json`, `.kette/README.md`, the reference line in `CLAUDE.md` and the ADR template. The rulebook itself lives on the machine under `~/.kette/bundles/active/` and is active in Claude Code as plugins: in Community `kette-engineering-core@kette` and `ui-laws@kette`, in Enterprise `kette-engineering-core@kette`, `kette-engineering@kette` (`platform-profile`, `code-reviewer`), `design-system-agents@kette` and `design-review-pack@kette`. Browse with `kette rules`; `kette doctor` shows what each plugin brings.

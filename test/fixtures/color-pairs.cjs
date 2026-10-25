@@ -1,4 +1,4 @@
-// Fixture: copied unchanged below this line from getitdone-gmbh/kette-tokens@v5.23.1 scripts/color-pairs.js. Source of the pairs in src/theme/manifest.json.
+// Fixture: copied unchanged below this line from getitdone-gmbh/kette-tokens@v5.23.2 scripts/color-pairs.js. Source of the pairs in src/theme/manifest.json.
 // Fill and text pairs that must always travel together (5.21.1). A theme CSS block that sets one side of a pair without the other lets a second stylesheet (generic theme, other mode selector) supply the missing half: blue fill with near-black text.
 // A fifth entry 'shared' marks a fill that reuses the text of another pair (hover/active states): the text may be set without it, the fill never without the text.
 // Used by build-css-vars.ts (pins every pair variable in every mode block) and scripts/check-pairs.js (gate).

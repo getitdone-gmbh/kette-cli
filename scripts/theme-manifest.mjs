@@ -9,10 +9,10 @@ import { hueDistance, rgbToOklch, sameRgb } from '../src/theme/color.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const FIXTURES = {
-  css: path.join(root, 'test', 'fixtures', 'community-theme-0.4.2.css'),
+  css: path.join(root, 'test', 'fixtures', 'community-theme-0.4.3.css'),
   pairs: path.join(root, 'test', 'fixtures', 'color-pairs.cjs'),
-  themeSource: '@getitdone-gmbh/kette-design-community@0.4.2 styles/theme.css (getitdone-gmbh/kette-design-community@ef9cc94)',
-  pairsSource: 'getitdone-gmbh/kette-tokens@v5.23.1 scripts/color-pairs.js',
+  themeSource: '@getitdone-gmbh/kette-design-community@0.4.3 styles/theme.css (getitdone-gmbh/kette-design-community@639d509)',
+  pairsSource: 'getitdone-gmbh/kette-tokens@v5.23.2 scripts/color-pairs.js',
 };
 export const MANIFEST_PATH = path.join(root, 'src', 'theme', 'manifest.json');
 
@@ -168,7 +168,7 @@ export function buildManifest({ css, pairs, themeSource, pairsSource }) {
   const brand = base.light['--colors-primary'];
   if (!brand) throw new Error('The theme has no --colors-primary in :root, the brand anchor of kette theme');
 
-  // Pins per block, as kette-design-community 0.4.2 tests them: the dark blocks and paper carry every pair variable :root defines, and
+  // Pins per block, as kette-design-community 0.4.3 tests them: the dark blocks and paper carry every pair variable :root defines, and
   // no block sets one side of a pair without the other. A pair absent from a block on both sides stays absent (exact variable parity).
   const pinsByBlock = {};
   for (const block of Object.keys(blockVars)) {
