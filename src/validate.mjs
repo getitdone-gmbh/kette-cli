@@ -10,6 +10,11 @@ export function validate(schema, value, path = '$') {
     else if (schema.minLength && value.length < schema.minLength) at(path, 'must not be empty');
     else if (schema.pattern && !new RegExp(schema.pattern).test(value)) at(path, `${JSON.stringify(value)} has an invalid format`);
   }
+  if (schema.type === 'integer') {
+    if (!Number.isInteger(value)) at(path, 'must be a whole number');
+    else if ('minimum' in schema && value < schema.minimum) at(path, `must be at least ${schema.minimum}`);
+    else if ('maximum' in schema && value > schema.maximum) at(path, `must be at most ${schema.maximum}`);
+  }
   if (schema.type === 'array') {
     if (!Array.isArray(value)) at(path, 'must be a list');
     else {

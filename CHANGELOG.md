@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1
+- Review flow per project: optional `flow` in `.kette/profile.json` (`mode` `train` or `per-change`, `maxParallel`, `fixRounds`, reviewers in `review.ui` and `review.code`). `kette add` and `kette update` write it into `.kette/README.md`: with `mode: train` the release train is the project default (no review per branch or pull request), with `per-change` the gates run on every change, and the named reviewers replace the default gate list. Without `flow` the text stays as before.
+- `kette doctor` warns when the profile sets `flow` and the installed rulebook does not know it yet (`kette update`), and when a Community project names Enterprise reviewers.
+- The profile check knows whole numbers with limits (copy of `kette-engineering/lib/validate.mjs`).
+- Needs kette-engineering with the `flow` schema; goes with claude-design-agent-pack 1.6.0 (`/feature-loop` reads `flow`).
 ## 0.9.0
 - Secret wallet in the onboarding: `kette init` and `kette add` (Enterprise, in a terminal) offer `kette wallet init` at the end and list it in the next steps while the project has no wallet; `kette doctor` shows it as INFO.
 - `kette wallet init` guides Infisical: checks the Infisical CLI (install hint otherwise), region EU, US or own instance, starts `infisical login` when not signed in, picks the project with `infisical init` or takes `.infisical.json`, then reaches every environment once and says which one is missing. `--yes` also takes the project from `.infisical.json`.

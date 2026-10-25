@@ -42,3 +42,23 @@ test('CRLF bleibt CRLF, auch beim Erkennen der alten Fassung', () => {
   assert.equal(renewNote(legacy.replace(/\n/g, '\r\n'), note), note.replace(/\n/g, '\r\n'));
   assert.equal(renewNote(legacy, note), note);
 });
+
+test('without flow the text names both modes; flow.mode train makes the release train the project default', () => {
+  const plain = agentNote('enterprise');
+  assert.match(plain, /Several branches in the same round \(release train\)/);
+  const train = agentNote('enterprise', { mode: 'train', maxParallel: 3, fixRounds: 2, review: { ui: ['design', 'ux'], code: ['code-reviewer', 'qa'] } });
+  assert.match(train, /Default for this project \(`flow\.mode: train`\).*never with gates per branch, pull request or fix\./);
+  assert.match(train, /At most 3 heavy agents/);
+  assert.match(train, /up to 2 fix rounds/);
+  assert.match(train, /   - Every change: `kette-engineering:code-reviewer`, `design-system-agents:qa-engineer` \(`flow\.review\.code` in the profile\)\./);
+  assert.match(train, /   - UI changes also: `design-review-pack:design-reviewer`, `design-review-pack:ux-reviewer` \(`flow\.review\.ui`\)\./);
+  assert.doesNotMatch(train, /Several branches in the same round \(release train\)/);
+});
+
+test('flow.mode per-change keeps the gates per change; unknown values fall back to the text without flow', () => {
+  assert.match(agentNote('enterprise', { mode: 'per-change' }), /the gates from step 4 run on every change and branch\. A release train .* runs only when asked for\./);
+  assert.match(agentNote('community', { mode: 'per-change' }), /^4\. Default for this project \(`flow\.mode: per-change`\): `kette-check` runs on every change and branch\./m);
+  assert.match(agentNote('community', { mode: 'train' }), /^4\. Default for this project \(`flow\.mode: train`\).*No `kette-check` per branch or pull request\./m);
+  assert.equal(agentNote('enterprise', { mode: 'sometimes', maxParallel: 99, review: { ui: 'design' } }), agentNote('enterprise'));
+  assert.match(agentNote('enterprise', { mode: 'train', fixRounds: 0 }), /then open findings go to a person\./);
+});
