@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.4
+- The release train is now called batch review. The flow text in `.kette/README.md` (written by `kette add` and `kette update`) says "batch review" and starts it by describing the round to `/feature-loop` (for example `/feature-loop filter and export done, review at the end`) instead of naming branches. `flow.mode: batch` is the new value, the old value `train` gives the same text.
+- `kette init` and `kette add` (Enterprise) name `/feature-loop <description of the round>` in the next steps.
+- Goes with claude-design-agent-pack 1.7.0 and kette-engineering 0.6.0.
+
 ## 0.9.3
 - Hidden prompts (`kette login`, `kette wallet set`) accept pasted values: bracketed-paste markers and other control characters are removed (iTerm sent them with the key, so a pasted licence key was refused).
 - Without a terminal the hidden prompts say how to pass the value instead (`kette login <key>` or `KETTE_LICENSE_KEY`, `kette wallet set … --stdin`), not the init hint about `--yes`.

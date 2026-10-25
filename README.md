@@ -16,7 +16,7 @@ Quick start: [Community](docs/setup/community.md) · [Enterprise](docs/setup/ent
 | Project profile `.kette/profile.json` and `kette doctor` | yes | yes |
 | Plugin `kette-engineering-core@kette` (skills `engineering-rules`, `architecture-patterns`, `live-deploy`, agent `kette-check`) | yes | yes |
 | Plugin `ui-laws@kette`: UI laws, interaction, WCAG 2.2 AA (skills `ui-laws`, `interaction-principles`, `a11y-standards`) | yes | included in the design review pack |
-| Flow in `.kette/README.md` | patterns and ADR, rules while building, review with the agent `kette-check` (per change, or once per release branch), definition of done | roles as subagents, mandatory gates, `/feature-loop` for one feature or as a release train with one review at the end |
+| Flow in `.kette/README.md` | patterns and ADR, rules while building, review with the agent `kette-check` (per change, or once per release branch), definition of done | roles as subagents, mandatory gates, `/feature-loop` for one feature or as a batch review with one review at the end |
 | Stack and platform profiles | | yes |
 | Templates for CI, Docker and deploy, checks (tsconfig, ESLint, dependency-cruiser, gitleaks) | | yes |
 | Plugin `kette-engineering@kette` with the code reviewer | | yes |
@@ -54,13 +54,13 @@ Options: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`,
 How a team reviews changes is set once in `.kette/profile.json`; `kette add` and `kette update` write it into the flow text of `.kette/README.md`, which Claude Code reads in every session.
 
 ```json
-"flow": { "mode": "train", "maxParallel": 4, "fixRounds": 1, "review": { "ui": ["design", "ux"], "code": ["code-reviewer", "qa"] } }
+"flow": { "mode": "batch", "maxParallel": 4, "fixRounds": 1, "review": { "ui": ["design", "ux"], "code": ["code-reviewer", "qa"] } }
 ```
 
-- `mode: train` (release train): several branches or many small fixes in a round check themselves against the rules and the probes in `.review/probes/`, merge onto one release branch and get one review round there, one fix round, then a re-check of only the failed findings. No review per branch or pull request. `mode: per-change`: the reviewers run on every change. Without `mode`, the text names both and the agents pick per round.
+- `mode: batch` (batch review): several branches or many small fixes in a round check themselves against the rules and the probes in `.review/probes/`, merge onto one release branch and get one review round there, one fix round, then a re-check of only the failed findings. No review per branch or pull request. Start it by describing the round to `/feature-loop`. The old value `train` means the same. `mode: per-change`: the reviewers run on every change. Without `mode`, the text names both and the agents pick per round.
 - `maxParallel`: heavy agents (browsers, simulators, builds) at once, default 4. `fixRounds`: default 1.
 - `review.ui` / `review.code`: which reviewers run on UI changes and on every change. Enterprise: `design`, `ux`, `accessibility`, `material`, `code-reviewer`, `qa`, `security`, `performance`. Community: `kette-check`; `kette doctor` warns about Enterprise reviewers in a Community project.
-- `/feature-loop` (Enterprise) takes these values as defaults. Plain words work too: "three branches this round, review at the end".
+- `/feature-loop` (Enterprise) takes these values as defaults. Describe the round in plain words, for example `/feature-loop filter and export done, review at the end`; the agent finds the branches, names the batch and asks before it starts.
 - Commit `.review/probes/`: the reviewers leave one small check per finding there, builders run them before the next review.
 
 ## Templates by profile (Enterprise)
