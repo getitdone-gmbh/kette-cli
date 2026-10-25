@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0
+- Secret wallet in the onboarding: `kette init` and `kette add` (Enterprise, in a terminal) offer `kette wallet init` at the end and list it in the next steps while the project has no wallet; `kette doctor` shows it as INFO.
+- `kette wallet init` guides Infisical: checks the Infisical CLI (install hint otherwise), region EU, US or own instance, starts `infisical login` when not signed in, picks the project with `infisical init` or takes `.infisical.json`, then reaches every environment once and says which one is missing. `--yes` also takes the project from `.infisical.json`.
+- Provider choice marks Vault, AWS Secrets Manager and Azure Key Vault as preview (tested with stand-ins only); Infisical is the verified default.
+- New `kette wallet import <file> --env <env>`: moves the values of a `.env` file into the wallet, declares new names, prints names only, warns when the file is tracked by git, offers to delete it. `--dry-run` shows the plan.
+
 ## 0.8.0
 - New secret wallet for Enterprise (Die Kette): `kette wallet init | status | add | set | remove | run | sync github | trust`. `.kette/wallet.json` in the repo holds provider, environments and names (per app, with a note), never a value. Values stay in the provider: Infisical by default (cloud or self-hosted), or Vault/OpenBao (KV v2), AWS Secrets Manager, Azure Key Vault, or your own commands (`command`, e.g. 1Password, Doppler, pass).
 - Values never travel as an argument: Infisical through a private temp YAML file, Vault and `gh` through stdin, AWS and Azure through a private temp file, removed right away. Output shows names only.

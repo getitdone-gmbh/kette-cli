@@ -9,12 +9,13 @@ import { ExitError } from '../errors.mjs';
 import { cmdLine } from '../claude.mjs';
 import {
   DEFAULT_ENVIRONMENTS, DEFAULT_PROVIDER, PROVIDERS, PROVIDER_IDS, WALLET_PATH, checkEnv, checkName, exampleNames,
-  namesFor, newWallet, providerHash, readWallet, walletFile, writeWallet,
+  NAME_PATTERN, namesFor, newWallet, parseDotenv, providerHash, readWallet, walletFile, writeWallet,
 } from './config.mjs';
+import { linkedProject, setupInfisical } from './infisical.mjs';
 import { ProviderError, installHint, providerFor, providerVersion, spawnTool } from './providers.mjs';
 
-export const WALLET_HELP = `kette wallet init     Secret wallet (Enterprise): create .kette/wallet.json with the provider (default Infisical,
-                        or Vault, AWS, Azure, your own commands), environments and the names from .env.example
+export const WALLET_HELP = `kette wallet init     Secret wallet (Enterprise): create .kette/wallet.json. Infisical (default) is guided: sign-in,
+                        project, environment check; previews: Vault, AWS, Azure; or your own commands
   kette wallet status   Which declared secrets are missing per environment (names only, never values)
   kette wallet add <name> | set <name> | remove <name>
                         Declare a secret (--env a,b --app name --note text), store its value (--env, hidden prompt
@@ -23,6 +24,8 @@ export const WALLET_HELP = `kette wallet init     Secret wallet (Enterprise): cr
                         Run a command with the declared secrets as environment variables (--app name narrows them)
   kette wallet sync github --env <env>
                         Copy the secrets into a GitHub environment after a yes (--github-env name, --repo owner/name)
+  kette wallet import <file> --env <env>
+                        Move the values of a .env file into the wallet, names only on screen, then delete the file
   kette wallet trust    Confirm the provider of .kette/wallet.json on this machine`;
 
 const line = (kind, text) => console.log(`${status(kind, { ok: 'OK  ', warn: 'WARN', info: 'INFO', fail: 'FAIL' }[kind])} ${text}`);
@@ -72,13 +75,8 @@ async function readValues(provider, env, names) {
 }
 const asExit = (err) => (err instanceof ProviderError ? new ExitError(err.message, 1) : err);
 
-async function providerSettings(id, opts, project) {
-  if (id === 'infisical') {
-    const proj = await ask('Infisical project ID (Project settings, copy the ID)');
-    if (!proj) throw new ExitError('The Infisical project ID is needed.', 1);
-    const domain = await ask('Infisical domain (empty for Infisical Cloud US; EU: https://eu.infisical.com)', '');
-    return { id, project: proj, ...(domain ? { domain: domain.replace(/\/$/, '') } : {}) };
-  }
+async function providerSettings(id, root, project) {
+  if (id === 'infisical') return setupInfisical(root);
   if (id === 'vault') {
     const address = await ask('Vault address (empty uses VAULT_ADDR)', '');
     const mount = await ask('KV version 2 mount', 'secret');
@@ -103,9 +101,9 @@ async function providerSettings(id, opts, project) {
 }
 
 // Non-interactive provider from options: --provider infisical needs KETTE_WALLET_PROJECT and so on, kept small on purpose
-function providerFromEnv(id, project) {
+function providerFromEnv(id, project, root) {
   const e = process.env;
-  if (id === 'infisical') return { id, project: e.KETTE_WALLET_PROJECT || '', ...(e.KETTE_WALLET_DOMAIN ? { domain: e.KETTE_WALLET_DOMAIN } : {}) };
+  if (id === 'infisical') return { id, project: e.KETTE_WALLET_PROJECT || linkedProject(root) || '', ...(e.KETTE_WALLET_DOMAIN ? { domain: e.KETTE_WALLET_DOMAIN } : {}) };
   if (id === 'vault') return { id, path: e.KETTE_WALLET_PATH || `apps/${project}` };
   if (id === 'aws-secrets-manager') return { id, prefix: e.KETTE_WALLET_PREFIX || project };
   if (id === 'azure-key-vault') return { id, vault: e.KETTE_WALLET_VAULT || '' };
@@ -134,7 +132,7 @@ async function init(root, opts) {
   let id = opts.provider || DEFAULT_PROVIDER;
   if (!PROVIDER_IDS.includes(id)) throw new ExitError(`--provider must be one of ${PROVIDER_IDS.join(', ')}`);
   if (!opts.yes && !opts.provider) [id] = await choose('Where do the secrets live?', PROVIDERS, '1');
-  const provider = opts.yes ? providerFromEnv(id, project) : await providerSettings(id, opts, project);
+  const provider = opts.yes ? providerFromEnv(id, project, root) : await providerSettings(id, root, project);
   const environments = list(opts.env) || (opts.yes ? DEFAULT_ENVIRONMENTS : list(await ask('Environments', DEFAULT_ENVIRONMENTS.join(','))));
   const folders = Object.values(profile?.apps || {}).filter((v) => typeof v === 'string');
   const names = exampleNames(root, folders);
@@ -148,8 +146,61 @@ async function init(root, opts) {
   line('ok', `${file(WALLET_PATH)} written ${dim(`(${id}, ${environments.join(', ')}, ${names.length} name${names.length === 1 ? '' : 's'}${names.length ? ' from .env.example' : ''})`)}`);
   if (syncProfile(root, id)) line('ok', `.kette/profile.json: platform.secrets set to ${id}`);
   if (!providerVersion(provider)) line('warn', `${providerFor(provider).bin} not found on this machine, ${cmd('kette wallet status')} explains how to install it`);
-  console.log(`\nNext: ${cmd('kette wallet status')} shows what is missing, ${cmd('kette wallet set NAME --env dev')} stores a value.`);
+  else checkEnvironments(wallet);
+  const local = ['.env', '.env.local'].find((f) => fs.existsSync(path.join(root, f)));
+  console.log(`\nNext: ${local ? `${cmd(`kette wallet import ${local} --env dev`)} moves the values of ${local} into the wallet, ` : ''}${cmd('kette wallet status')} shows what is missing, ${cmd('kette wallet set NAME --env dev')} stores a value, ${cmd('kette wallet run --env dev -- <command>')} starts with them.`);
   console.log(dim('Commit .kette/wallet.json. It holds names only, the values stay in the provider.'));
+  return 0;
+}
+
+// Every environment once against the provider, so a missing environment or folder shows up now and not at the first run
+function checkEnvironments(wallet) {
+  const provider = providerFor(wallet.provider);
+  for (const env of wallet.environments) {
+    try {
+      provider.read(env, []);
+      line('ok', `${env} reachable ${dim(`(${provider.where(env)})`)}`);
+    } catch (err) {
+      const hint = /environment|folder|not found/i.test(err.message) ? ' Create it in the provider (Infisical: Project settings, Environments) or remove it from environments in .kette/wallet.json.' : '';
+      line('warn', `${env}: ${err.message}.${hint}`);
+    }
+  }
+}
+
+// Values of a .env file into the wallet: undeclared names are declared, nothing is printed but names, the file can go afterwards
+async function importCmd(root, wallet, file, opts) {
+  if (!file) throw new ExitError('Usage: kette wallet import <file> --env <env>');
+  const env = checkEnv(wallet, opts.env);
+  const target = path.resolve(root, file);
+  if (!fs.existsSync(target)) throw new ExitError(`${file} not found`, 1);
+  const entries = [...parseDotenv(fs.readFileSync(target, 'utf8'))];
+  const bad = entries.filter(([k]) => !NAME_PATTERN.test(k)).map(([k]) => k);
+  const empty = entries.filter(([k, v]) => NAME_PATTERN.test(k) && v === '').map(([k]) => k);
+  const values = entries.filter(([k, v]) => NAME_PATTERN.test(k) && v !== '');
+  if (bad.length) line('warn', `Skipped, not an environment variable name: ${bad.join(', ')}`);
+  if (empty.length) line('info', `Skipped, empty: ${empty.join(', ')}`);
+  if (!values.length) { line('info', `No values to import from ${file}.`); return 0; }
+  const declared = new Set(namesFor(wallet, env));
+  const fresh = values.map(([k]) => k).filter((k) => !wallet.secrets.some((s) => s.name === k));
+  const blocked = values.map(([k]) => k).filter((k) => !declared.has(k) && !fresh.includes(k));
+  if (blocked.length) throw new ExitError(`Declared for other environments only: ${blocked.join(', ')}. Add ${env} to them in ${WALLET_PATH} first.`, 1);
+  const provider = providerFor(wallet.provider);
+  console.log(`Imports ${values.length} value${values.length === 1 ? '' : 's'} from ${file} into ${provider.where(env)}:\n  ${values.map(([k]) => k).join(', ')}`);
+  if (fresh.length) console.log(`Not declared yet, ${WALLET_PATH} gets: ${fresh.join(', ')}`);
+  if (opts.dryRun) { console.log(dim('--dry-run: nothing imported.')); return 0; }
+  if (!(await confirm('Import now? Existing values with the same name are replaced.', opts.yes))) throw new ExitError('Not confirmed, nothing imported.', 1);
+  await trust(root, wallet);
+  if (fresh.length) writeWallet(root, { ...wallet, secrets: [...wallet.secrets, ...fresh.map((name) => ({ name }))] });
+  for (const [name, value] of values) {
+    try { await provider.write(env, name, value); } catch (err) { throw asExit(err); }
+    line('ok', name);
+  }
+  const tracked = spawnSync('git', ['ls-files', '--error-unmatch', file], { cwd: root, encoding: 'utf8' }).status === 0;
+  if (tracked) line('warn', `${file} is in git. Remove it from the repo and rotate these values, the history still holds them.`);
+  if (!opts.yes && process.stdin.isTTY && (await confirm(`Delete ${file} now? The values are in the wallet.`))) {
+    fs.rmSync(target);
+    line('ok', `${file} deleted. Start with ${cmd(`kette wallet run --env ${env} -- <command>`)}`);
+  } else console.log(`Delete ${file} once everything starts with ${cmd(`kette wallet run --env ${env} -- <command>`)}`);
   return 0;
 }
 
@@ -273,6 +324,20 @@ async function syncGithub(root, wallet, opts) {
   return 0;
 }
 
+export const hasWallet = (root) => fs.existsSync(walletFile(root));
+
+// Offer after kette init and kette add (Enterprise, terminal, no wallet yet); a failure here never fails the setup
+export async function offerWallet(root, opts, tier) {
+  if (tier !== ENTERPRISE || opts.yes || opts.dryRun || hasWallet(root) || !process.stdin.isTTY) return;
+  if (!(await confirm('\nSet up the secret wallet for credentials now? (Infisical by default, names in the repo, values never)'))) return;
+  try {
+    await wallet('init', { ...opts, provider: undefined }, { tier, root });
+  } catch (err) {
+    if (!(err instanceof ExitError)) throw err;
+    console.log(`${status('warn', 'WARN')} ${err.message} Later with: ${cmd('kette wallet init')}`);
+  }
+}
+
 export async function wallet(sub, opts, { tier, root = '.' }) {
   if (!sub || sub === 'help') { console.log(`Secret wallet (Enterprise): names in ${WALLET_PATH}, values in your provider.\n\n  ${WALLET_HELP}`); return 0; }
   requireEnterprise(tier);
@@ -284,6 +349,7 @@ export async function wallet(sub, opts, { tier, root = '.' }) {
   if (sub === 'add') return await addCmd(root, w, name, opts);
   if (sub === 'set') return await setCmd(root, w, name, opts);
   if (sub === 'remove') return removeCmd(root, w, name);
+  if (sub === 'import') return await importCmd(root, w, name, opts);
   if (sub === 'run') return await runCmd(root, w, opts);
   if (sub === 'sync') {
     if (name !== 'github') throw new ExitError('Usage: kette wallet sync github --env <env> [--github-env name] [--repo owner/name]');
@@ -293,8 +359,11 @@ export async function wallet(sub, opts, { tier, root = '.' }) {
 }
 
 // One line for kette doctor; never reads a value, only whether the wallet file is valid and confirmed here
-export function walletDoctor(root, tier, { line: check, warn, info }) {
-  if (!fs.existsSync(walletFile(root))) return;
+export function walletDoctor(root, tier, { line: check, warn, info }, { project = false } = {}) {
+  if (!fs.existsSync(walletFile(root))) {
+    if (tier === ENTERPRISE && project) info(`No secret wallet in this project yet. Credentials per environment, Infisical by default: ${cmd('kette wallet init')}`);
+    return;
+  }
   let w;
   try { w = readWallet(root); } catch (err) { check(false, '', err.message); return; }
   check(true, `Secret wallet ${dim(`(${w.provider.id}, ${w.secrets.length} name${w.secrets.length === 1 ? '' : 's'}, ${w.environments.join(', ')})`)}`);

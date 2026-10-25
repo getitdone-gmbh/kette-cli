@@ -9,10 +9,10 @@ export const SCHEMA_URL = 'https://kette.itdone.de/schema/wallet.schema.json';
 export const DEFAULT_PROVIDER = 'infisical';
 export const DEFAULT_ENVIRONMENTS = ['dev', 'staging', 'prod'];
 export const PROVIDERS = [
-  { value: 'infisical', label: 'Infisical (default, cloud or self-hosted)' },
-  { value: 'vault', label: 'HashiCorp Vault or OpenBao (KV version 2)' },
-  { value: 'aws-secrets-manager', label: 'AWS Secrets Manager' },
-  { value: 'azure-key-vault', label: 'Azure Key Vault' },
+  { value: 'infisical', label: 'Infisical (default, cloud or self-hosted, guided sign-in and project choice)' },
+  { value: 'vault', label: 'HashiCorp Vault or OpenBao (KV version 2, preview)' },
+  { value: 'aws-secrets-manager', label: 'AWS Secrets Manager (preview)' },
+  { value: 'azure-key-vault', label: 'Azure Key Vault (preview)' },
   { value: 'command', label: 'Your own wallet through commands (1Password, Doppler, pass, ...)' },
 ];
 export const PROVIDER_IDS = PROVIDERS.map((p) => p.value);
@@ -127,6 +127,37 @@ export function exampleNames(root, folders = []) {
     }
   }
   return [...names];
+}
+
+// KEY=value lines of a .env file: export prefix, comments, single quotes literal, double quotes with \n \" \\ escapes (may span lines)
+export function parseDotenv(text) {
+  const out = new Map();
+  const src = text.replace(/\r\n/g, '\n');
+  const re = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*=[ \t]*/gm;
+  let m;
+  while ((m = re.exec(src))) {
+    let i = re.lastIndex;
+    let value;
+    if (src[i] === '"') {
+      let v = '';
+      for (i++; i < src.length && src[i] !== '"'; i++) {
+        if (src[i] === '\\' && i + 1 < src.length) { const n = src[++i]; v += n === 'n' ? '\n' : n === 'r' ? '\r' : n === 't' ? '\t' : n; } else v += src[i];
+      }
+      value = v;
+      i = src.indexOf('\n', i);
+    } else if (src[i] === "'") {
+      const end = src.indexOf("'", i + 1);
+      value = end < 0 ? src.slice(i + 1, src.indexOf('\n', i) < 0 ? undefined : src.indexOf('\n', i)) : src.slice(i + 1, end);
+      i = src.indexOf('\n', end < 0 ? i : end);
+    } else {
+      const end = src.indexOf('\n', i);
+      value = src.slice(i, end < 0 ? undefined : end).replace(/[ \t]+#.*$/, '').trim();
+      i = end;
+    }
+    out.set(m[1], value);
+    re.lastIndex = i < 0 ? src.length : i;
+  }
+  return out;
 }
 
 // Fingerprint of the provider block; a machine trusts exactly this block, any change asks again

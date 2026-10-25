@@ -108,14 +108,17 @@ Credentials and access (database passwords, API keys, SMTP logins, deploy keys) 
 
 | Command | Purpose |
 |---|---|
-| `kette wallet init` | Create `.kette/wallet.json`: provider (default Infisical), environments (default dev, staging, prod), names from `.env.example` in the root and the app folders; sets `platform.secrets` in the profile. `--yes` takes `--provider` and `KETTE_WALLET_PROJECT`, `KETTE_WALLET_DOMAIN` (Infisical), `KETTE_WALLET_PATH` (Vault), `KETTE_WALLET_PREFIX` (AWS), `KETTE_WALLET_VAULT` (Azure), `KETTE_WALLET_READ` and `KETTE_WALLET_WRITE` (command) |
+| `kette wallet init` | Create `.kette/wallet.json`. Infisical is guided: checks the Infisical CLI, asks for the region (EU, US, own instance), starts `infisical login` when not signed in, picks the project through `infisical init` (or takes `.infisical.json`), then reaches every environment once. Provider (default Infisical), environments (default dev, staging, prod), names from `.env.example` in the root and the app folders; sets `platform.secrets` in the profile. `--yes` takes `--provider` and `KETTE_WALLET_PROJECT`, `KETTE_WALLET_DOMAIN` (Infisical), `KETTE_WALLET_PATH` (Vault), `KETTE_WALLET_PREFIX` (AWS), `KETTE_WALLET_VAULT` (Azure), `KETTE_WALLET_READ` and `KETTE_WALLET_WRITE` (command) |
 | `kette wallet status` | Per environment: which declared names are set and which are missing; names only, exit code 1 while something is missing (`--env`, `--app`) |
 | `kette wallet add <name>` | Declare a name (`--env a,b`, `--app name`, `--note text`) and, in a terminal, set its value right away |
 | `kette wallet set <name> --env <env>` | Store a value: hidden prompt, or `--stdin` |
+| `kette wallet import <file> --env <env>` | Move the values of a `.env` file into the wallet: declares new names, prints names only, warns when the file is in git, offers to delete it (`--dry-run`, `--yes` keeps the file) |
 | `kette wallet remove <name>` | Remove the declaration; the value stays in the provider |
 | `kette wallet run --env <env> [--app name] -- <command>` | Start a command with exactly the declared secrets of that environment (and app) as environment variables; stops before the start when one is missing |
 | `kette wallet sync github --env <env>` | Copy them into GitHub environment secrets after a yes (`gh secret set` with the value on stdin, `--github-env name`, `--repo owner/name`, `--dry-run`) |
 | `kette wallet trust` | Confirm the provider block on this machine |
+
+Onboarding: `kette init` and `kette add` (Enterprise) offer the wallet at the end in a terminal and name `kette wallet init` in the next steps while the project has none; `kette doctor` shows the same hint as INFO.
 
 Trust: a repo decides which provider and which commands run, so every machine confirms the provider block once (like `direnv allow`). Any change to it asks again. `kette wallet init` confirms for the machine that creates it. In CI set `KETTE_WALLET_TRUST=1`.
 

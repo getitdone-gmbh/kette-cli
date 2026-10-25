@@ -41,7 +41,24 @@ npm install @getitdone-gmbh/kette-design-enterprise
 
 The registry also serves `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/zero` and `@getitdone-gmbh/zero-pages`.
 
-## 5. Check
+## 5. Secret wallet
+
+`kette init` and `kette add` offer it at the end. Later, or in another repo:
+
+```sh
+kette wallet init
+```
+
+Infisical by default: kette checks the Infisical CLI, asks for the region (EU, US or your own instance), starts `infisical login` if needed and lets you pick the project with `infisical init`. The repo gets `.kette/wallet.json` with the names only.
+
+Existing `.env` file? Move it over and start without it:
+
+```sh
+kette wallet import .env --env dev
+kette wallet run --env dev -- npm run dev
+```
+
+## 6. Check
 
 ```sh
 kette doctor
