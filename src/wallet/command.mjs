@@ -31,6 +31,8 @@ export const WALLET_HELP = `kette wallet init     Secret wallet (Enterprise): cr
 const line = (kind, text) => console.log(`${status(kind, { ok: 'OK  ', warn: 'WARN', info: 'INFO', fail: 'FAIL' }[kind])} ${text}`);
 const list = (s) => (s ? s.split(',').map((x) => x.trim()).filter(Boolean) : null);
 const TRUST_ENV = 'KETTE_WALLET_TRUST';
+// The customer owns vault and credentials; kette and Get IT Done only pass values between this machine and that vault
+export const OWNERSHIP = 'Your credentials live in your own Infisical (Cloud EU preselected, self-hosted possible) or another vault. Get IT Done never sees or stores a value and does not manage credentials for you (terms, section 10 (5)).';
 
 // Provider block of a profile platform, kept in step when the wallet uses a store the schema knows
 const PROFILE_SECRETS = { infisical: 'infisical', vault: 'vault', 'aws-secrets-manager': 'aws-secrets-manager', 'azure-key-vault': 'azure-key-vault' };
@@ -150,6 +152,7 @@ async function init(root, opts) {
   const local = ['.env', '.env.local'].find((f) => fs.existsSync(path.join(root, f)));
   console.log(`\nNext: ${local ? `${cmd(`kette wallet import ${local} --env dev`)} moves the values of ${local} into the wallet, ` : ''}${cmd('kette wallet status')} shows what is missing, ${cmd('kette wallet set NAME --env dev')} stores a value, ${cmd('kette wallet run --env dev -- <command>')} starts with them.`);
   console.log(dim('Commit .kette/wallet.json. It holds names only, the values stay in the provider.'));
+  console.log(dim(OWNERSHIP));
   return 0;
 }
 
@@ -339,7 +342,7 @@ export async function offerWallet(root, opts, tier) {
 }
 
 export async function wallet(sub, opts, { tier, root = '.' }) {
-  if (!sub || sub === 'help') { console.log(`Secret wallet (Enterprise): names in ${WALLET_PATH}, values in your provider.\n\n  ${WALLET_HELP}`); return 0; }
+  if (!sub || sub === 'help') { console.log(`Secret wallet (Enterprise): names in ${WALLET_PATH}, values in your provider.\n${OWNERSHIP}\n\n  ${WALLET_HELP}`); return 0; }
   requireEnterprise(tier);
   if (sub === 'init') return await init(root, opts);
   const w = requireWallet(root);

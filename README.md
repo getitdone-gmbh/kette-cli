@@ -117,6 +117,7 @@ Credentials and access (database passwords, API keys, SMTP logins, deploy keys) 
 
 - `.kette/wallet.json` lives in the repo and holds only the provider, the environments and the names (optionally per app and with a note). Schema: `https://kette.itdone.de/schema/wallet.schema.json`.
 - The values stay in the provider. Default is **Infisical** (Infisical Cloud or self-hosted, `domain`). Your own wallet can be added instead: HashiCorp Vault or OpenBao (KV v2), AWS Secrets Manager, Azure Key Vault, or any tool through two commands (`command`: `read` prints one value, `write` takes it on stdin, `{env}` and `{name}` are filled in; works with 1Password `op`, Doppler, pass and the like).
+- The vault is yours: your own Infisical account (Infisical Cloud EU is preselected), your own Infisical instance, or another provider. Values only travel between your machine and that vault. Get IT Done never sees or stores a value and does not manage credentials for you (terms, section 10).
 - kette calls the official CLI of the provider (`infisical`, `vault`, `aws`, `az`) without a shell and uses your existing sign-in there (`infisical login` or `INFISICAL_TOKEN`, `vault login`, AWS profile, `az login`). Values travel through stdin, a private temp file (mode 600, removed right away) or memory.
 
 | Command | Purpose |
