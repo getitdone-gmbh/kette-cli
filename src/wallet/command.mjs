@@ -238,12 +238,12 @@ async function runCmd(root, wallet, opts) {
   const absent = names.filter((n) => !values.has(n));
   if (absent.length) throw new ExitError(`Missing in ${env}: ${absent.join(', ')}. Set them with ${cmd(`kette wallet set NAME --env ${env}`)}`, 1);
   const secrets = Object.fromEntries(names.map((n) => [n, values.get(n)]));
-  const opts = { stdio: 'inherit', env: { ...process.env, ...secrets } };
-  let r = spawnSync(bin, args, opts);
+  const spawnOpts = { stdio: 'inherit', env: { ...process.env, ...secrets } };
+  let r = spawnSync(bin, args, spawnOpts);
   // npm, npx and other .cmd shims on Windows only start through cmd.exe, with the same safety rules as claude.cmd
   if (r.error?.code === 'ENOENT' && process.platform === 'win32') {
     const line = cmdLine(args, `${bin}.cmd`);
-    if (line) r = spawnSync(line, { ...opts, shell: true });
+    if (line) r = spawnSync(line, { ...spawnOpts, shell: true });
   }
   if (r.error) throw new ExitError(`${bin} could not start: ${r.error.code || r.error.message}`, 127);
   return r.status ?? 1;
