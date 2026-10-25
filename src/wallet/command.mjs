@@ -237,7 +237,7 @@ async function readValue(name, env, opts) {
     if (!value) throw new ExitError('stdin was empty, nothing stored.', 1);
     return value;
   }
-  const value = await askSecret(`Value for ${name} in ${env} (input hidden)`);
+  const value = await askSecret(`Value for ${name} in ${env} (input hidden)`, `No terminal for the hidden prompt. Pipe the value in: kette wallet set ${name} --env ${env} --stdin`);
   if (!value) throw new ExitError('Empty value, nothing stored.', 1);
   return value;
 }

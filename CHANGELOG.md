@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.3
+- Hidden prompts (`kette login`, `kette wallet set`) accept pasted values: bracketed-paste markers and other control characters are removed (iTerm sent them with the key, so a pasted licence key was refused).
+- Without a terminal the hidden prompts say how to pass the value instead (`kette login <key>` or `KETTE_LICENSE_KEY`, `kette wallet set … --stdin`), not the init hint about `--yes`.
+
 ## 0.9.2
 - `kette wallet help` and the end of `kette wallet init` say who owns the credentials: your own Infisical or vault; Get IT Done never sees or stores a value and does not manage credentials. Same in the README.
 

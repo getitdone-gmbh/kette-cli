@@ -359,3 +359,9 @@ test('helpers: linked Infisical project, sign-in through a machine identity toke
   assert.equal(linkedProject(d), null);
   assert.equal(signedIn('', { INFISICAL_TOKEN: 'x' }), true);
 });
+
+test('hidden prompts drop bracketed-paste markers and control characters', async () => {
+  const { cleanSecret } = await import('../src/prompt.mjs');
+  assert.equal(cleanSecret('\x1b[200~CDP-AB12C-11111-22222-33333\x1b[201~'), 'CDP-AB12C-11111-22222-33333');
+  assert.equal(cleanSecret('  p@ss "w0rd" #1\x07 '), 'p@ss "w0rd" #1');
+});
