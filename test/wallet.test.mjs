@@ -190,7 +190,10 @@ test('an unconfirmed provider is refused without a terminal', async () => {
   await assert.rejects(run('wallet', 'run', '--env', 'dev', '--', 'true'), /Run kette wallet trust in a terminal/);
 });
 
-test('sync github copies values on stdin after a yes, dry run copies nothing', async () => {
+// Windows runners ship real gh, aws and az executables, which a stand-in .cmd cannot shadow
+const REAL_TOOLS = process.platform === 'win32';
+
+test('sync github copies values on stdin after a yes, dry run copies nothing', { skip: REAL_TOOLS }, async () => {
   enterprise();
   wallet();
   fs.writeFileSync(store, JSON.stringify({ dev: {}, prod: { DATABASE_URL: 'db', API_KEY: 'k' } }));
@@ -249,7 +252,7 @@ test('helpers: names per app and environment, example names, Azure names, templa
   assert.equal(reason({ code: 1, err: '\x1b[90mtime\x1b[0m INF No valid login session found\nerror: ^D\n' }), 'time INF No valid login session found');
 });
 
-test('Vault, AWS and Azure: values round-trip through their CLIs without showing up as arguments', async () => {
+test('Vault, AWS and Azure: values round-trip through their CLIs without showing up as arguments', { skip: REAL_TOOLS }, async () => {
   enterprise();
   fakeBin('vault', `
 if (args[0] === '--version') { console.log('Vault v1.17.0'); process.exit(0); }
