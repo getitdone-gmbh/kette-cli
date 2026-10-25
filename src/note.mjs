@@ -23,7 +23,7 @@ const DEFAULT_GATES = `4. Required gates, independent of the implementation:
    - \`kette-engineering:code-reviewer\` checks the diff against core rules, patterns and the project profile.
    - \`design-system-agents:qa-engineer\` verifies every requirement with evidence.
    - For UI changes also \`design-review-pack:design-reviewer\` and \`design-review-pack:ux-reviewer\`, and where keyboard, contrast, focus or screen readers are affected, \`design-system-agents:accessibility-manager\`.`;
-const DEFAULT_TRAIN = `Several branches in the same round (release train): \`/feature-loop train <name> <branch...>\`. Builders check themselves against the rules and the probes in \`.review/probes/\`, without gates per branch or per fix. All branches go onto one release branch, the gates from step 4 run once on it, in parallel (the train takes \`codeReviewer: kette-engineering:code-reviewer\` and \`gates: [qa, accessibility]\` next to design and UX review), then one fix round and a re-check of only the failed findings. At most 4 heavy agents (browsers, simulators, builds) run at once. The round is done when the review on the release branch passes.`;
+const DEFAULT_BATCH = `Several branches in the same round (batch review): describe the round to \`/feature-loop\`, for example \`/feature-loop filter and export done, review at the end\`. Builders check themselves against the rules and the probes in \`.review/probes/\`, without gates per branch or per fix. All branches go onto one release branch, the gates from step 4 run once on it, in parallel (the batch takes \`codeReviewer: kette-engineering:code-reviewer\` and \`gates: [qa, accessibility]\` next to design and UX review), then one fix round and a re-check of only the failed findings. At most 4 heavy agents (browsers, simulators, builds) run at once. The round is done when the review on the release branch passes.`;
 const DEFAULT_COMMUNITY_STEP4 = `4. Several branches in the same round: build and self-check each branch, merge them onto one release branch, run \`kette-check\` once on that branch, fix, then have it re-check only the open findings.`;
 
 // Reviewer IDs of flow.review in the profile and the agents they stand for
@@ -47,7 +47,8 @@ function flowOf(flow) {
   const f = flow && typeof flow === 'object' ? flow : {};
   const int = (v, min, max, def) => (Number.isInteger(v) && v >= min && v <= max ? v : def);
   return {
-    mode: ['per-change', 'train'].includes(f.mode) ? f.mode : null,
+    // train is the old name of batch
+    mode: f.mode === 'train' ? 'batch' : ['per-change', 'batch'].includes(f.mode) ? f.mode : null,
     cap: int(f.maxParallel, 1, 16, 4),
     rounds: int(f.fixRounds, 0, 5, 1),
     ui: listOf(f.review?.ui),
@@ -55,7 +56,7 @@ function flowOf(flow) {
   };
 }
 
-function trainSteps({ cap, rounds }) {
+function batchSteps({ cap, rounds }) {
   const fix = rounds === 0 ? 'open findings go to a person' : `${rounds === 1 ? 'one fix round' : `up to ${rounds} fix rounds`} and a re-check of only the failed findings`;
   return `Builders check themselves against the rules and the probes in \`.review/probes/\`. All branches go onto one release branch, the gates from step 4 run once on it, in parallel, then ${fix}. At most ${cap} heavy agents (browsers, simulators, builds) run at once. The round is done when the review on the release branch passes.`;
 }
@@ -66,20 +67,20 @@ function enterpriseParts(f) {
   if (f.ui.length) lines.push(`   - UI changes also: ${agentList(f.ui)} (\`flow.review.ui\`).`);
   const gates = lines.length ? `4. Required gates, independent of the implementation:\n${lines.join('\n')}` : DEFAULT_GATES;
   const takes = '`/feature-loop` takes mode, agent cap, fix rounds and reviewers from `flow` in `.kette/profile.json`.';
-  let train = DEFAULT_TRAIN;
-  if (f.mode === 'train') train = `Default for this project (\`flow.mode: train\`): several branches or many small fixes in a round always run as a release train, \`/feature-loop train <name> <branch...>\`, never with gates per branch, pull request or fix. ${trainSteps(f)} ${takes} A single feature runs with \`/feature-loop start\`.`;
-  if (f.mode === 'per-change') train = `Default for this project (\`flow.mode: per-change\`): the gates from step 4 run on every change and branch. A release train with one review at the end (\`/feature-loop train <name> <branch...>\`) runs only when asked for. ${takes}`;
-  return { gates, train };
+  let batch = DEFAULT_BATCH;
+  if (f.mode === 'batch') batch = `Default for this project (\`flow.mode: batch\`): several branches or many small fixes in a round always get one batch review, started by describing the round to \`/feature-loop\` (for example \`/feature-loop filter and export done, review at the end\`), never with gates per branch, pull request or fix. ${batchSteps(f)} ${takes} A single feature runs with \`/feature-loop start\`.`;
+  if (f.mode === 'per-change') batch = `Default for this project (\`flow.mode: per-change\`): the gates from step 4 run on every change and branch. A batch review with one review at the end (\`/feature-loop\` with a description of the round) runs only when asked for. ${takes}`;
+  return { gates, batch };
 }
 
 function communityParts(f) {
   let step4 = DEFAULT_COMMUNITY_STEP4;
-  if (f.mode === 'train') step4 = '4. Default for this project (`flow.mode: train`): several branches or many small fixes in a round are built and self-checked per branch, merged onto one release branch, checked once there by `kette-check`, fixed, then re-checked on only the open findings. No `kette-check` per branch or pull request.';
+  if (f.mode === 'batch') step4 = '4. Default for this project (`flow.mode: batch`): several branches or many small fixes in a round are built and self-checked per branch, merged onto one release branch, checked once there by `kette-check`, fixed, then re-checked on only the open findings. No `kette-check` per branch or pull request.';
   if (f.mode === 'per-change') step4 = '4. Default for this project (`flow.mode: per-change`): `kette-check` runs on every change and branch. Several branches get one check on a release branch only when asked for.';
   return { step4 };
 }
 
-const enterpriseFlow = ({ gates, train }) => `## Flow for every change
+const enterpriseFlow = ({ gates, batch }) => `## Flow for every change
 Apply small fixes (a typo, one line) directly and check them with step 4. Everything else runs like this, each role as its own subagent:
 
 1. Requirements: \`design-system-agents:requirements-engineer\` writes testable requirements with IDs.
@@ -90,7 +91,7 @@ ${gates}
 
 A whole feature with all roles, fix loop and run log: \`/feature-loop start <feature>\` (in Claude Code \`/design-system-agents:feature-loop\`).
 
-${train}
+${batch}
 
 The agents, gates and \`/feature-loop\` need Die Kette on the machine (\`kette login <key>\`). Without them, patterns and ADRs, \`engineering-rules\` while building and the check with \`kette-engineering-core:kette-check\` still apply, and \`kette doctor\` shows what is missing.
 

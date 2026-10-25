@@ -402,7 +402,7 @@ function summary(described, tier, pluginsOk, rulesDir, root) {
   const changed = described.filter((d) => d.action !== 'keep').map((d) => `${file(d.path)}${label[d.action] || ''}`);
   const steps = [...cdStep(root), cmd('kette doctor'), 'Open Claude Code in the project and ask: "Check this code against the Die Kette rules"'];
   if (tier === ENTERPRISE && !hasWallet(root)) steps.push(`Credentials per environment in the secret wallet (Infisical by default): ${cmd('kette wallet init')}`);
-  if (tier === ENTERPRISE) steps.push(`A whole feature with all roles and gates: ${cmd('/feature-loop start <feature>')}, several branches with one review at the end: ${cmd('/feature-loop train <name> <branch...>')}`);
+  if (tier === ENTERPRISE) steps.push(`A whole feature with all roles and gates: ${cmd('/feature-loop start <feature>')}, several branches with one review at the end: ${cmd('/feature-loop <description of the round>')}`);
   const numbered = steps.map((s, i) => `  ${num(`${i + 1}.`)} ${s}`);
   // The only Enterprise hint for Community, dimmed as the last step
   if (tier === COMMUNITY) numbered.push(dim(`  ${steps.length + 1}. kette login <key> for agents, gates, profiles and checks (Enterprise)`));

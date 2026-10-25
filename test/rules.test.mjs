@@ -447,7 +447,7 @@ test('doctor: flow in the profile with an installed schema without flow is a WAR
   write(d, 'schema/profile.schema.json', JSON.stringify({ type: 'object', additionalProperties: false, properties: { version: {}, project: {}, stack: {}, platform: {}, patterns: {}, tier: {} } }));
   const project = tmp();
   const base = { version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community' };
-  write(project, '.kette/profile.json', JSON.stringify({ ...base, flow: { mode: 'train' } }));
+  write(project, '.kette/profile.json', JSON.stringify({ ...base, flow: { mode: 'batch' } }));
   write(project, 'CLAUDE.md', '@.kette/README.md\n');
   const cwd = process.cwd();
   process.chdir(project);
@@ -457,7 +457,7 @@ test('doctor: flow in the profile with an installed schema without flow is a WAR
     assert.doesNotMatch(out, /FAIL/);
     assert.equal(result, 0);
     write(d, 'schema/profile.schema.json', JSON.stringify({ type: 'object', additionalProperties: false, properties: { version: {}, project: {}, stack: {}, platform: {}, patterns: {}, tier: {}, flow: {} } }));
-    write(project, '.kette/profile.json', JSON.stringify({ ...base, flow: { mode: 'train', review: { ui: ['design'], code: ['kette-check', 'qa'] } } }));
+    write(project, '.kette/profile.json', JSON.stringify({ ...base, flow: { mode: 'batch', review: { ui: ['design'], code: ['kette-check', 'qa'] } } }));
     const second = await run('doctor', '--ci');
     assert.match(second.out, /^WARN flow\.review names design, qa, these are agents of Die Kette \(Enterprise\)\. On Community only kette-check runs\. Unlock with: kette login <key>$/m);
     assert.equal(second.result, 0);
