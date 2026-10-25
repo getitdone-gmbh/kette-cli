@@ -400,7 +400,7 @@ function summary(described, tier, pluginsOk, rulesDir, root) {
   const label = { append: ' (appended)', update: ' (updated)' };
   const changed = described.filter((d) => d.action !== 'keep').map((d) => `${file(d.path)}${label[d.action] || ''}`);
   const steps = [...cdStep(root), cmd('kette doctor'), 'Open Claude Code in the project and ask: "Check this code against the Die Kette rules"'];
-  if (tier === ENTERPRISE) steps.push(`A whole feature with all roles and gates: ${cmd('/feature-loop start <feature>')}`);
+  if (tier === ENTERPRISE) steps.push(`A whole feature with all roles and gates: ${cmd('/feature-loop start <feature>')}, several branches with one review at the end: ${cmd('/feature-loop train <name> <branch...>')}`);
   const numbered = steps.map((s, i) => `  ${num(`${i + 1}.`)} ${s}`);
   // The only Enterprise hint for Community, dimmed as the last step
   if (tier === COMMUNITY) numbered.push(dim(`  ${steps.length + 1}. kette login <key> for agents, gates, profiles and checks (Enterprise)`));
