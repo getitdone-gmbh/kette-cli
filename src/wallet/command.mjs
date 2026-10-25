@@ -14,8 +14,8 @@ import {
 import { linkedProject, setupInfisical } from './infisical.mjs';
 import { ProviderError, installHint, providerFor, providerVersion, spawnTool } from './providers.mjs';
 
-export const WALLET_HELP = `kette wallet init     Secret wallet (Enterprise): create .kette/wallet.json with the provider (default Infisical,
-                        or Vault, AWS, Azure, your own commands), environments and the names from .env.example
+export const WALLET_HELP = `kette wallet init     Secret wallet (Enterprise): create .kette/wallet.json. Infisical (default) is guided: sign-in,
+                        project, environment check; previews: Vault, AWS, Azure; or your own commands
   kette wallet status   Which declared secrets are missing per environment (names only, never values)
   kette wallet add <name> | set <name> | remove <name>
                         Declare a secret (--env a,b --app name --note text), store its value (--env, hidden prompt

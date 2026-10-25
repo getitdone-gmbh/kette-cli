@@ -3,6 +3,7 @@
 ## 0.9.0
 - Secret wallet in the onboarding: `kette init` and `kette add` (Enterprise, in a terminal) offer `kette wallet init` at the end and list it in the next steps while the project has no wallet; `kette doctor` shows it as INFO.
 - `kette wallet init` guides Infisical: checks the Infisical CLI (install hint otherwise), region EU, US or own instance, starts `infisical login` when not signed in, picks the project with `infisical init` or takes `.infisical.json`, then reaches every environment once and says which one is missing. `--yes` also takes the project from `.infisical.json`.
+- Provider choice marks Vault, AWS Secrets Manager and Azure Key Vault as preview (tested with stand-ins only); Infisical is the verified default.
 - New `kette wallet import <file> --env <env>`: moves the values of a `.env` file into the wallet, declares new names, prints names only, warns when the file is tracked by git, offers to delete it. `--dry-run` shows the plan.
 
 ## 0.8.0

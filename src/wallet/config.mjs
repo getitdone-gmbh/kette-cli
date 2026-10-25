@@ -9,10 +9,10 @@ export const SCHEMA_URL = 'https://kette.itdone.de/schema/wallet.schema.json';
 export const DEFAULT_PROVIDER = 'infisical';
 export const DEFAULT_ENVIRONMENTS = ['dev', 'staging', 'prod'];
 export const PROVIDERS = [
-  { value: 'infisical', label: 'Infisical (default, cloud or self-hosted)' },
-  { value: 'vault', label: 'HashiCorp Vault or OpenBao (KV version 2)' },
-  { value: 'aws-secrets-manager', label: 'AWS Secrets Manager' },
-  { value: 'azure-key-vault', label: 'Azure Key Vault' },
+  { value: 'infisical', label: 'Infisical (default, cloud or self-hosted, guided sign-in and project choice)' },
+  { value: 'vault', label: 'HashiCorp Vault or OpenBao (KV version 2, preview)' },
+  { value: 'aws-secrets-manager', label: 'AWS Secrets Manager (preview)' },
+  { value: 'azure-key-vault', label: 'Azure Key Vault (preview)' },
   { value: 'command', label: 'Your own wallet through commands (1Password, Doppler, pass, ...)' },
 ];
 export const PROVIDER_IDS = PROVIDERS.map((p) => p.value);
