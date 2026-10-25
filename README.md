@@ -23,6 +23,7 @@ Quick start: [Community](docs/setup/community.md) · [Enterprise](docs/setup/ent
 | Plugin `design-system-agents@kette`: agents, skills and commands for the whole feature flow | | yes |
 | Plugin `design-review-pack@kette`: design reviewer with rulebook | | yes |
 | Private npm packages of the design system | | yes |
+| Secret wallet `kette wallet`: credentials and access per environment, Infisical by default or your own provider | | yes |
 | Live deploy to itdone.cloud (`kette cloud setup`) | yes | yes |
 | Access | free, no key | with a licence key of Die Kette (Solo or Team), `kette login <key>` |
 | Updates | any time | 12 months from purchase, the installed version stays usable for good |
@@ -43,10 +44,11 @@ The project profile names the edition in the field `tier`: `community` or `enter
 | `kette token ci create <name>` / `list` / `revoke <id>` | CI tokens for `npm ci` in pipelines: Solo 2, Team 5, take no device seat, shown only when created |
 | `kette figma` | Download the current Figma release of Die Kette, verify checksums, show the import order; `--out folder`. The Figma files follow as an update by 2026-11-30 |
 | `kette cloud setup` / `status` | Live deploy to itdone.cloud: account link and the itdone MCP server in Claude Code, see below |
+| `kette wallet …` | Secret wallet (Enterprise): names in `.kette/wallet.json`, values in Infisical or your own provider, see Secret wallet |
 | `kette theme` | Free theme generator: a theme.css for the Community components from your brand colour, light and dark, WCAG AA, see Theming |
 | `kette version` | Show the CLI version |
 
-Options: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out folder`, `--have-account`, `--primary`, `--accent`, `--neutral`, `--radius`, `--font`, `--name`, `--preview`, `--json`, `--color` / `--no-color` (default: on in a terminal, off in pipes, CI and with `NO_COLOR`).
+Options: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out folder`, `--have-account`, `--primary`, `--accent`, `--neutral`, `--radius`, `--font`, `--name`, `--preview`, `--json`, `--provider`, `--env`, `--app`, `--note`, `--stdin`, `--github-env`, `--repo`, `--color` / `--no-color` (default: on in a terminal, off in pipes, CI and with `NO_COLOR`).
 
 ## Templates by profile (Enterprise)
 CI, Docker and check templates follow the project profile: only the chosen stacks, each in its app folder (`apps` in the profile, otherwise `apps/web`, `apps/api`, `apps/mobile`, `apps/spa`). `kette add` detects app folders such as `backend/`, `frontend/` or `apps/*`. Only Enterprise writes `apps`; a Community project gets the folders from detection when it switches to Enterprise. An existing profile is never rewritten: `kette add` at most raises `tier` and adds `apps` when the field is missing and the installed schema knows it; all other fields stay. Existing files stay unchanged (`= keep`).
@@ -96,6 +98,28 @@ Available in Community and Enterprise. `kette cloud setup` prepares Claude Code 
 | `KETTE_CLOUD_AUTH_URL` | `https://auth.itdone.cloud/realms/itdone` | Keycloak realm for the preflight (https, plain http only for localhost or with `KETTE_INSECURE=1`) |
 
 The licence email comes from the delivery service (`/install/token` on `kette login`, `/install/latest` on `kette update`) and is kept in `~/.kette/state.json` (mode 600) next to the other licence fields. It is only shown in the setup line that opens or prints the link; `kette state` shows `(stored)` instead, `kette logout` removes it. A login made before CLI 0.6.4 gets it with the next `kette update`.
+
+## Secret wallet (Enterprise)
+Credentials and access (database passwords, API keys, SMTP logins, deploy keys) for every environment, without a value ever landing in the repo, the chat or a command line.
+
+- `.kette/wallet.json` lives in the repo and holds only the provider, the environments and the names (optionally per app and with a note). Schema: `https://kette.itdone.de/schema/wallet.schema.json`.
+- The values stay in the provider. Default is **Infisical** (Infisical Cloud or self-hosted, `domain`). Your own wallet can be added instead: HashiCorp Vault or OpenBao (KV v2), AWS Secrets Manager, Azure Key Vault, or any tool through two commands (`command`: `read` prints one value, `write` takes it on stdin, `{env}` and `{name}` are filled in; works with 1Password `op`, Doppler, pass and the like).
+- kette calls the official CLI of the provider (`infisical`, `vault`, `aws`, `az`) without a shell and uses your existing sign-in there (`infisical login` or `INFISICAL_TOKEN`, `vault login`, AWS profile, `az login`). Values travel through stdin, a private temp file (mode 600, removed right away) or memory.
+
+| Command | Purpose |
+|---|---|
+| `kette wallet init` | Create `.kette/wallet.json`: provider (default Infisical), environments (default dev, staging, prod), names from `.env.example` in the root and the app folders; sets `platform.secrets` in the profile. `--yes` takes `--provider` and `KETTE_WALLET_PROJECT`, `KETTE_WALLET_DOMAIN` (Infisical), `KETTE_WALLET_PATH` (Vault), `KETTE_WALLET_PREFIX` (AWS), `KETTE_WALLET_VAULT` (Azure), `KETTE_WALLET_READ` and `KETTE_WALLET_WRITE` (command) |
+| `kette wallet status` | Per environment: which declared names are set and which are missing; names only, exit code 1 while something is missing (`--env`, `--app`) |
+| `kette wallet add <name>` | Declare a name (`--env a,b`, `--app name`, `--note text`) and, in a terminal, set its value right away |
+| `kette wallet set <name> --env <env>` | Store a value: hidden prompt, or `--stdin` |
+| `kette wallet remove <name>` | Remove the declaration; the value stays in the provider |
+| `kette wallet run --env <env> [--app name] -- <command>` | Start a command with exactly the declared secrets of that environment (and app) as environment variables; stops before the start when one is missing |
+| `kette wallet sync github --env <env>` | Copy them into GitHub environment secrets after a yes (`gh secret set` with the value on stdin, `--github-env name`, `--repo owner/name`, `--dry-run`) |
+| `kette wallet trust` | Confirm the provider block on this machine |
+
+Trust: a repo decides which provider and which commands run, so every machine confirms the provider block once (like `direnv allow`). Any change to it asks again. `kette wallet init` confirms for the machine that creates it. In CI set `KETTE_WALLET_TRUST=1`.
+
+The Enterprise plugin `kette-engineering` brings the skill `secret-wallet`: agents declare new variables in the wallet, run commands through `kette wallet run` and never ask for a value in the chat. `kette doctor` shows whether the project has a wallet and whether this machine confirmed it.
 
 ## Theming
 `kette theme` generates a complete theme for the free Community components (`@getitdone-gmbh/kette-design-community`) from your brand colour. The result is a drop-in replacement for the Community theme file:
@@ -196,6 +220,7 @@ The files in the project (`.kette/`, reference line in `CLAUDE.md`, ADR template
 | `NPM_CONFIG_USERCONFIG` | `~/.npmrc` | User npmrc that `kette login` writes the block into (like npm) |
 | `KETTE_NO_MODIFY_PATH` | not set | `1` leaves the shell startup file unchanged, the installer then shows the line to add yourself |
 | `KETTE_INSECURE` | not set | `1` allows plain http for mirror, delivery service and registry, only for a trusted test server (localhost is always allowed) |
+| `KETTE_WALLET_TRUST` | not set | `1` trusts the wallet provider of the project without asking, for CI |
 | `KETTE_THEME` | not set | `dark` or `light` for the terminal colors, otherwise taken from `COLORFGBG` |
 | `NO_COLOR` | not set | Turns colors off unless `--color` is given |
 

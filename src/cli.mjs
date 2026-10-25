@@ -20,6 +20,7 @@ import { othersCanRead, privateHint } from './files.mjs';
 import { ExitError } from './errors.mjs';
 import { cloud, doctorLine } from './cloud.mjs';
 import { theme } from './theme/command.mjs';
+import { WALLET_HELP, wallet, walletDoctor } from './wallet/command.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -73,6 +74,7 @@ Commands:
   kette theme           Generate a theme.css for the Community components from your brand colour (light and dark, WCAG AA)
                         Questions in a terminal, otherwise --primary <hex> [--accent <hex>] [--neutral warm|cool|neutral|<hex>]
                         [--radius none|sm|md|lg|full|<px>] [--font "<family>"] [--name <id>] [--out <path>] [--preview] [--json]
+  ${WALLET_HELP}
   kette version
 
 Options:
@@ -96,10 +98,18 @@ Options:
   --json                With kette theme, print the tokens and the contrast report as JSON
   --have-account        With kette cloud setup, do not open the itdone.cloud registration
   --dcr                 With kette cloud setup, sign in through dynamic client registration instead of the fixed client
+  --provider id         With kette wallet init: infisical (default), vault, aws-secrets-manager, azure-key-vault, command
+  --env name            With kette wallet, the environment (with add a comma separated list)
+  --app name            With kette wallet, only the secrets of this app
+  --note text           With kette wallet add, what the secret is for
+  --stdin               With kette wallet set and add, read the value from stdin instead of a hidden prompt
+  --github-env name     With kette wallet sync github, the GitHub environment (default: the wallet environment)
+  --repo owner/name     With kette wallet sync github, another repo than the current one
   --color, --no-color   Force colors on or off (default: on in a terminal, off in pipes, CI and with NO_COLOR)
 
 kette theme writes a drop-in replacement for the Community theme.css. Enterprise extends the token source in kette-tokens instead.
 The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.
+kette wallet keeps names in .kette/wallet.json and values in your provider; it never prints a value and never takes one as an argument.
 kette cloud setup only registers the itdone MCP server; Claude Code deploys after you confirm, and kette never handles a password or token.`;
 
 // Brand line with version and edition, only on init and help
@@ -110,20 +120,22 @@ const help = () => [brand(), '', HELP.replace(/^ {2}((?:kette|--)\S*(?: \S+)*?)(
 const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
   '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--dcr': 'dcr', '--help': 'help', '-h': 'help', '--version': 'version',
-  '--preview': 'preview', '--json': 'json',
+  '--preview': 'preview', '--json': 'json', '--stdin': 'stdin',
 };
-const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out', '--primary', '--accent', '--neutral', '--radius', '--font'];
+const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out', '--primary', '--accent', '--neutral', '--radius', '--font', '--provider', '--env', '--app', '--note', '--github-env', '--repo'];
 
 // Unknown options and options without their value stop with exit code 2, so a typo never runs with defaults
 export function parse(argv) {
   const opts = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    // Everything after -- belongs to the command kette wallet run starts
+    if (a === '--') { opts.rest = argv.slice(i + 1); break; }
     if (Object.hasOwn(FLAGS, a)) opts[FLAGS[a]] = true;
     else if (a === '--color' || a === '--no-color') opts.color = a === '--color';
     else if (VALUES.includes(a)) {
       const value = argv[++i];
-      if (value === undefined || value.startsWith('-')) throw new ExitError(`${a} needs a value`);
+      if (value === undefined || (value.startsWith('-') && a !== '--note')) throw new ExitError(`${a} needs a value`);
       opts[a.slice(2)] = value;
     } else if (a.startsWith('-') && a !== '-') throw new ExitError(`Unknown option ${a}`);
     else opts._.push(a);
@@ -458,6 +470,7 @@ async function doctor(root, opts) {
   if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir, info);
   if (!opts.ci && hasClaude()) doctorLine(line, info);
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
+  walletDoctor(root, tier, { line, warn, info });
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules', `CLAUDE.md does not point to the Die Kette rules (line @.kette/README.md missing), add it with: ${cmd('kette add')}`);
   // Warnings never fail doctor, but the closing line counts them so "all good" does not hide them
@@ -588,6 +601,7 @@ export async function main(argv) {
     if (command === 'figma') return await figma(opts);
     // The licence email only prefills the signup of an active Enterprise licence
     if (command === 'cloud') return await cloud(arg, opts, { email: tierOf() === ENTERPRISE ? loginState()?.email : null });
+    if (command === 'wallet') return await wallet(arg, opts, { tier: tierOf() });
     if (command === 'theme') return await theme(opts, { version: VERSION });
     if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...redactedState() }, null, 2)); return 0; }
     console.error(`Unknown command: ${command}\n`);

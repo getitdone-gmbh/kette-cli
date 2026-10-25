@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+- New secret wallet for Enterprise (Die Kette): `kette wallet init | status | add | set | remove | run | sync github | trust`. `.kette/wallet.json` in the repo holds provider, environments and names (per app, with a note), never a value. Values stay in the provider: Infisical by default (cloud or self-hosted), or Vault/OpenBao (KV v2), AWS Secrets Manager, Azure Key Vault, or your own commands (`command`, e.g. 1Password, Doppler, pass).
+- Values never travel as an argument: Infisical through a private temp YAML file, Vault and `gh` through stdin, AWS and Azure through a private temp file, removed right away. Output shows names only.
+- `kette wallet run --env <env> -- <command>` passes exactly the declared secrets (of one app with `--app`) and stops before the start when one is missing. `kette wallet sync github` copies them into a GitHub environment after a yes.
+- Every machine confirms the provider block once (`kette wallet trust`, CI: `KETTE_WALLET_TRUST=1`), so a cloned repo cannot run commands or point to another server unasked.
+- `kette wallet init` reads names from `.env.example` files and sets `platform.secrets` in the profile. `kette doctor` shows the wallet and whether this machine confirmed it.
+- `--` ends the kette options, everything after it belongs to the command of `kette wallet run`.
+
 ## 0.7.1
 - Theme generator follows Community 0.4.3: standalone-complete theme, new typography button variables, accent/destructive pairs in all scopes.
 - The generated file carries the 0.4.3 variable set per block (1401 variables: `:root` 1401, `.dark` and the dark media block 487 each, paper 487): light values for the 58 colour roles Community 0.4.2 left undefined in light mode, `--typo-button-*` with `.typography-button`, and `--colors-background-accent`, `--colors-background-destructive`, `--colors-foreground-accent`, `--colors-foreground-destructive` in `:root`, both dark blocks and paper.

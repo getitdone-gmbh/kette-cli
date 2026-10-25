@@ -35,6 +35,8 @@ A whole feature with all roles, fix loop and run log: \`/feature-loop start <fea
 
 The agents, gates and \`/feature-loop\` need Die Kette on the machine (\`kette login <key>\`). Without them, patterns and ADRs, \`engineering-rules\` while building and the check with \`kette-engineering-core:kette-check\` still apply, and \`kette doctor\` shows what is missing.
 
+Credentials and access go through the secret wallet (skill \`secret-wallet\`, \`.kette/wallet.json\`): declare new variables there, start commands with \`kette wallet run\`, never put a value into code, a file in the repo or the chat.
+
 Create infrastructure only as code and check it with plan or what-if. A human runs apply, deploys and destructive migrations.`;
 
 // Core topics named in the note; kept in the CLI so the block is the same for the whole team, whatever bundle each machine has
