@@ -8,6 +8,8 @@ import { exampleNames, namesFor, newWallet, validateWallet } from '../src/wallet
 import { azureName, fill, reason } from '../src/wallet/providers.mjs';
 
 const saved = { ...process.env };
+// process.env is case-insensitive on Windows, a copy is not (the key there is Path)
+const basePath = process.env.PATH;
 const cwd = process.cwd();
 let project;
 let bin;
@@ -53,7 +55,7 @@ beforeEach(() => {
   bin = tmp();
   store = path.join(bin, 'store.json');
   fs.writeFileSync(store, JSON.stringify({ dev: {}, prod: {} }));
-  process.env.PATH = `${bin}${path.delimiter}${saved.PATH}`;
+  process.env.PATH = `${bin}${path.delimiter}${basePath}`;
   process.env.KETTE_WALLET_TRUST = '1';
   process.chdir(project);
   fakeBin('infisical', `
@@ -75,6 +77,7 @@ afterEach(() => {
   process.chdir(cwd);
   for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
   Object.assign(process.env, saved);
+  process.env.PATH = basePath;
 });
 
 test('wallet needs Enterprise, help works without it', async () => {
