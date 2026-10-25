@@ -18,9 +18,9 @@ export const pluginId = (name, market = MARKETPLACE) => `${name}@${market}`;
 
 // npm installs Claude Code on Windows as claude.cmd, which only starts through cmd.exe; the command line is built here from fixed values,
 // arguments with quotes, percent signs, line breaks or a trailing backslash (it would escape the closing quote) are refused
-export function cmdLine(args) {
+export function cmdLine(args, bin = 'claude.cmd') {
   if (args.some((a) => /["%\r\n]|\\$/.test(a))) return null;
-  return ['claude.cmd', ...args.map((a) => (/[\s&|<>^()]/.test(a) ? `"${a}"` : a))].join(' ');
+  return [bin, ...args.map((a) => (/[\s&|<>^()]/.test(a) ? `"${a}"` : a))].join(' ');
 }
 export function runClaude(args) {
   if (process.platform !== 'win32') return spawnSync('claude', args, { encoding: 'utf8' });

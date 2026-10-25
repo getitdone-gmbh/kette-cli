@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+- New secret wallet for Enterprise (Die Kette): `kette wallet init | status | add | set | remove | run | sync github | trust`. `.kette/wallet.json` in the repo holds provider, environments and names (per app, with a note), never a value. Values stay in the provider: Infisical by default (cloud or self-hosted), or Vault/OpenBao (KV v2), AWS Secrets Manager, Azure Key Vault, or your own commands (`command`, e.g. 1Password, Doppler, pass).
+- Values never travel as an argument: Infisical through a private temp YAML file, Vault and `gh` through stdin, AWS and Azure through a private temp file, removed right away. Output shows names only.
+- `kette wallet run --env <env> -- <command>` passes exactly the declared secrets (of one app with `--app`) and stops before the start when one is missing. `kette wallet sync github` copies them into a GitHub environment after a yes.
+- Every machine confirms the provider block once (`kette wallet trust`, CI: `KETTE_WALLET_TRUST=1`), so a cloned repo cannot run commands or point to another server unasked.
+- `kette wallet init` reads names from `.env.example` files and sets `platform.secrets` in the profile. `kette doctor` shows the wallet and whether this machine confirmed it.
+- `--` ends the kette options, everything after it belongs to the command of `kette wallet run`.
+
 ## 0.7.2
 - Flow text in `.kette/README.md` (rewritten by `kette update` and `kette add`) describes two modes. Enterprise: one feature with `/feature-loop start`, or a release train with `/feature-loop train <name> <branch...>`: builders self-check against the rules and the probes in `.review/probes/`, all branches merge onto one release branch, the gates run once there in parallel, one fix round, then a re-check of only the failed findings, at most 4 heavy agents at once. The UI gate now names `design-review-pack:ux-reviewer` next to `design-reviewer`. Community: several branches get one `kette-check` on the release branch and a re-check of the open findings.
 - Definition of done for several branches: the review on the integrated release branch passes.

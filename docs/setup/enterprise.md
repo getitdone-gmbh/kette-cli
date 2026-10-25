@@ -55,6 +55,7 @@ Shows edition, version and update period.
 - Stack and platform profiles with CI, Docker and check templates
 - 132 UX/UI rules, 52 of them with do and don't examples, plus 17 consistency checkpoints
 - Private npm packages (tokens, component library, domain components, page templates)
+- Secret wallet for credentials and access: `kette wallet init` (Infisical by default, or Vault, AWS Secrets Manager, Azure Key Vault, your own commands)
 - 12 months of updates
 
 ## Useful
@@ -65,5 +66,7 @@ Shows edition, version and update period.
 | `kette logout` | Hand over the machine: removes key, bundle and npm access |
 | `kette token ci create <name>` | CI token for `npm ci` in your pipeline |
 | `kette doctor --ci` | Check in your pipeline |
+| `kette wallet init` | Secret wallet: names in `.kette/wallet.json`, values in Infisical or your own provider |
+| `kette wallet run --env dev -- npm run dev` | Start with the secrets of an environment, nothing in a `.env` file |
 
 More: [kette.itdone.de/en/enterprise](https://kette.itdone.de/en/enterprise) · Without a licence: [Community](community.md)
