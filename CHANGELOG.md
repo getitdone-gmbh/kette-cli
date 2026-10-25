@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1
+- Theme generator follows Community 0.4.3: standalone-complete theme, new typography button variables, accent/destructive pairs in all scopes.
+- The generated file carries the 0.4.3 variable set per block (1401 variables: `:root` 1401, `.dark` and the dark media block 487 each, paper 487): light values for the 58 colour roles Community 0.4.2 left undefined in light mode, `--typo-button-*` with `.typography-button`, and `--colors-background-accent`, `--colors-background-destructive`, `--colors-foreground-accent`, `--colors-foreground-destructive` in `:root`, both dark blocks and paper.
+- Every pair variable of `color-pairs.js` (kette-tokens 5.23.2, 51 pairs, unchanged from 5.23.1) is declared in every scope, as the new Community standalone test asks. Still 94 contrast checks; the base blue reproduces Community 0.4.3 exactly, with no adjustment.
+- Community 0.4.3 or newer recommended. 0.4.2 works too: the extra variables are harmless and fill the light error and accent colours 0.4.2 left undefined.
+
 ## 0.7.0
 - New `kette theme` (Community and Enterprise, free): generates a theme.css for `@getitdone-gmbh/kette-design-community` from a brand colour, a drop-in replacement for `@import '@getitdone-gmbh/kette-design-community/theme.css'`. Questions in a terminal, otherwise `--primary <hex>` (required) with `--accent`, `--neutral warm|cool|neutral|<hex>`, `--radius none|sm|md|lg|full|<px>`, `--font`, `--name`, `--out` (default `./theme.css`), `--preview` (self-contained `theme-preview.html` with components in light and dark, palettes and contrast table), `--dry-run` and `--json`. Without a terminal and without `--primary` it stops with exit code 2. A file it did not write is only replaced after a yes or with `--yes`.
 - Light and dark in one file with exactly the variables of Community 0.4.2 per block (1343 variables, same selectors): OKLCH tonal palettes from the primary, neutral family, accent surfaces, chart series, radius scale, font, elevation. Status and data colours keep their meaning.
