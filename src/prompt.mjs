@@ -38,9 +38,16 @@ export async function ask(question, fallback = '') {
   return answer || fallback;
 }
 
-// Hidden input for secrets: raw mode, no echo, Enter ends, Ctrl+C cancels
-export async function askSecret(question) {
-  const keys = terminal();
+// Bracketed paste (iTerm, most terminals) wraps pasted text in ESC[200~ ... ESC[201~; those and other control characters are no part of a secret
+export const cleanSecret = (raw) => raw.replace(/\x1b\[[0-9;]*[~A-Za-z]/g, '').replace(/[\x00-\x1f\x7f]/g, '').trim();
+
+// Hidden input for secrets: raw mode, no echo, Enter ends, Ctrl+C cancels; without a terminal noTerminal says how to pass the value instead
+export async function askSecret(question, noTerminal = NO_TERMINAL) {
+  let keys;
+  try { keys = terminal(); } catch (err) {
+    if (err instanceof ExitError && err.message === NO_TERMINAL) throw new ExitError(noTerminal);
+    throw err;
+  }
   rl?.close();
   rl = null;
   process.stdout.write(`${question}: `);
@@ -51,7 +58,7 @@ export async function askSecret(question) {
       keys.setRawMode(false);
       keys.pause();
       process.stdout.write('\n');
-      if (err) reject(err); else resolve(value.trim());
+      if (err) reject(err); else resolve(cleanSecret(value));
     };
     const onData = (chunk) => {
       for (const ch of chunk) {

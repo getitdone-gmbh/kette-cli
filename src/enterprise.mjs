@@ -55,7 +55,7 @@ function plugins(dir, opts) {
 
 // Key from the argument, KETTE_LICENSE_KEY or a hidden prompt, so it does not have to land in the shell history
 export async function login(rawKey, opts, cli) {
-  const given = rawKey || process.env.KETTE_LICENSE_KEY || (await askSecret('License key (input hidden)'));
+  const given = rawKey || process.env.KETTE_LICENSE_KEY || (await askSecret('License key (input hidden)', 'No terminal for the hidden prompt. Pass the key with kette login <key> or set KETTE_LICENSE_KEY.'));
   const key = given.trim().toUpperCase();
   if (!KEY_PATTERN.test(key)) throw new Error('Enter the license key in the format CDP-XXXXX-XXXXX-XXXXX-XXXXX, e.g. kette login CDP-AB12C-...');
   console.log(`Checking license with ${delivery()} ...`);

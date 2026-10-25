@@ -9,6 +9,8 @@ export const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kette-test-'));
 
 // Tests schreiben nie in die echte ~/.npmrc
 process.env.NPM_CONFIG_USERCONFIG = path.join(tmp(), 'user.npmrc');
+// Tests never read or write the real ~/.kette (a machine signed in to Enterprise changed the help line)
+process.env.KETTE_HOME = tmp();
 delete process.env.npm_config_userconfig;
 // Output assertions expect plain text, even when the shell running the tests forces colors
 delete process.env.FORCE_COLOR;
