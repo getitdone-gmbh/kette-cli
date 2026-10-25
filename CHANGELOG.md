@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.1
+## 0.9.2
 - `kette wallet help` and the end of `kette wallet init` say who owns the credentials: your own Infisical or vault; Get IT Done never sees or stores a value and does not manage credentials. Same in the README.
 
 ## 0.9.1
