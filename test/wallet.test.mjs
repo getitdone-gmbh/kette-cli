@@ -41,7 +41,7 @@ function enterprise(on = true) {
   const kh = process.env.KETTE_HOME;
   if (!on) return;
   write(kh, 'credentials', JSON.stringify({ key: 'CDP-AAAAA-BBBBB-CCCCC-00001' }));
-  fs.mkdirSync(path.join(kh, 'bundle'), { recursive: true });
+  write(path.join(kh, 'bundle'), 'schema/profile.schema.json', JSON.stringify({ type: 'object' }));
   fs.writeFileSync(path.join(kh, 'state.json'), JSON.stringify({ bundle_enterprise: { version: '0.1.0', dir: path.join(kh, 'bundle') } }));
 }
 
@@ -298,4 +298,63 @@ s.dev[n] = fs.readFileSync(opt('--file'), 'utf8'); save(); process.exit(0);`);
     assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), ['k "1" #x', 'postgres://u:p@h/d'], provider.id);
     assert.doesNotMatch(calls(), /postgres|#x/, provider.id);
   }
+});
+
+test('import moves .env values into the wallet, declares new names, prints names only', async () => {
+  enterprise();
+  wallet();
+  write(project, '.env', '# local\nDATABASE_URL="postgres://u:p@h/d"\nexport NEW_TOKEN=tok-1 # comment\nEMPTY=\nlower=x\n');
+  const { result, out } = await run('wallet', 'import', '.env', '--env', 'dev', '--yes');
+  assert.equal(result, 0);
+  assert.deepEqual(readStore().dev, { DATABASE_URL: 'postgres://u:p@h/d', NEW_TOKEN: 'tok-1' });
+  const w = JSON.parse(fs.readFileSync('.kette/wallet.json', 'utf8'));
+  assert.ok(w.secrets.some((s) => s.name === 'NEW_TOKEN'));
+  assert.match(out, /Skipped, not an environment variable name: lower/);
+  assert.match(out, /Skipped, empty: EMPTY/);
+  assert.doesNotMatch(out, /postgres:|tok-1/);
+  assert.equal(fs.existsSync('.env'), true);
+  assert.match(out, /Delete \.env once everything starts with kette wallet run --env dev/);
+});
+
+test('import --dry-run changes nothing, a name limited to other environments stops it', async () => {
+  enterprise();
+  wallet({ id: 'infisical', project: 'p1' }, [{ name: 'PROD_ONLY', environments: ['prod'] }]);
+  write(project, '.env', 'A=1\n');
+  const dry = await run('wallet', 'import', '.env', '--env', 'dev', '--dry-run');
+  assert.match(dry.out, /nothing imported/);
+  assert.deepEqual(readStore().dev, {});
+  write(project, '.env', 'PROD_ONLY=1\n');
+  await assert.rejects(run('wallet', 'import', '.env', '--env', 'dev', '--yes'), /Declared for other environments only: PROD_ONLY/);
+});
+
+test('init --yes takes the Infisical project from .infisical.json and checks every environment', async () => {
+  enterprise();
+  write(project, '.infisical.json', JSON.stringify({ workspaceId: 'ws-42', defaultEnvironment: '' }));
+  write(project, '.env', 'A=1\n');
+  const { result, out } = await run('wallet', 'init', '--yes', '--env', 'dev,prod');
+  assert.equal(result, 0);
+  assert.equal(JSON.parse(fs.readFileSync('.kette/wallet.json', 'utf8')).provider.project, 'ws-42');
+  assert.match(out, /dev reachable/);
+  assert.match(out, /prod reachable/);
+  assert.match(out, /kette wallet import \.env --env dev/);
+});
+
+test('doctor suggests the wallet in an Enterprise project without one, says nothing for Community', async () => {
+  write(project, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'enterprise' }));
+  let r = await run('doctor');
+  assert.doesNotMatch(r.out, /No secret wallet/);
+  enterprise();
+  r = await run('doctor');
+  assert.match(r.out, /INFO No secret wallet in this project yet/);
+});
+
+test('helpers: linked Infisical project, sign-in through a machine identity token', async () => {
+  const { linkedProject, signedIn } = await import('../src/wallet/infisical.mjs');
+  const d = tmp();
+  assert.equal(linkedProject(d), null);
+  write(d, '.infisical.json', '{"workspaceId":" ws-1 "}');
+  assert.equal(linkedProject(d), 'ws-1');
+  write(d, '.infisical.json', 'not json');
+  assert.equal(linkedProject(d), null);
+  assert.equal(signedIn('', { INFISICAL_TOKEN: 'x' }), true);
 });

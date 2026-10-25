@@ -20,7 +20,7 @@ import { othersCanRead, privateHint } from './files.mjs';
 import { ExitError } from './errors.mjs';
 import { cloud, doctorLine } from './cloud.mjs';
 import { theme } from './theme/command.mjs';
-import { WALLET_HELP, wallet, walletDoctor } from './wallet/command.mjs';
+import { WALLET_HELP, hasWallet, offerWallet, wallet, walletDoctor } from './wallet/command.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -377,6 +377,7 @@ async function setup(root, opts, isNew) {
     plugins = installEdition(rulesDir, tier, otherEditionPlugins(tier));
     for (const l of editionHints(plugins, rulesDir)) console.log(l);
   }
+  await offerWallet(root, opts, tier);
   console.log(summary(described, tier, plugins.ok, rulesDir, root));
   return 0;
 }
@@ -400,6 +401,7 @@ function summary(described, tier, pluginsOk, rulesDir, root) {
   const label = { append: ' (appended)', update: ' (updated)' };
   const changed = described.filter((d) => d.action !== 'keep').map((d) => `${file(d.path)}${label[d.action] || ''}`);
   const steps = [...cdStep(root), cmd('kette doctor'), 'Open Claude Code in the project and ask: "Check this code against the Die Kette rules"'];
+  if (tier === ENTERPRISE && !hasWallet(root)) steps.push(`Credentials per environment in the secret wallet (Infisical by default): ${cmd('kette wallet init')}`);
   if (tier === ENTERPRISE) steps.push(`A whole feature with all roles and gates: ${cmd('/feature-loop start <feature>')}, several branches with one review at the end: ${cmd('/feature-loop train <name> <branch...>')}`);
   const numbered = steps.map((s, i) => `  ${num(`${i + 1}.`)} ${s}`);
   // The only Enterprise hint for Community, dimmed as the last step
@@ -470,7 +472,7 @@ async function doctor(root, opts) {
   if (!opts.ci && bundle) printPluginDetails(tier, bundle.dir, info);
   if (!opts.ci && hasClaude()) doctorLine(line, info);
   if (tier === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
-  walletDoctor(root, tier, { line, warn, info });
+  walletDoctor(root, tier, { line, warn, info }, { project: Boolean(profile) });
   const md = path.join(root, 'CLAUDE.md');
   if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules', `CLAUDE.md does not point to the Die Kette rules (line @.kette/README.md missing), add it with: ${cmd('kette add')}`);
   // Warnings never fail doctor, but the closing line counts them so "all good" does not hide them
