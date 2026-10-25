@@ -2,14 +2,27 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { cmdLine } from '../claude.mjs';
 
 // Every provider runs the official CLI of the wallet without a shell; values travel through stdin, a private temp file or memory, never as an argument
 export class ProviderError extends Error {}
 
 const MAX_BUFFER = 16 * 1024 * 1024;
 
+// On Windows a CLI may be a .cmd shim (az, npm installs), which only starts through cmd.exe; same safety rules as for claude.cmd
+export function spawnTool(bin, args, { input, env } = {}) {
+  const opts = { encoding: 'utf8', input, env: env ? { ...process.env, ...env } : process.env, maxBuffer: MAX_BUFFER, windowsHide: true };
+  const r = spawnSync(bin, args, opts);
+  if (process.platform !== 'win32' || r.error?.code !== 'ENOENT') return r;
+  const line = cmdLine(args, `${bin}.cmd`);
+  if (!line) return { status: 1, stdout: '', stderr: `Argument not safe for ${bin}.cmd`, error: null };
+  const shim = spawnSync(line, { ...opts, shell: true });
+  // cmd.exe reports a missing program with exit code 9009
+  return shim.status === 9009 ? r : shim;
+}
+
 function exec(bin, args, { input, env } = {}) {
-  const r = spawnSync(bin, args, { encoding: 'utf8', input, env: env ? { ...process.env, ...env } : process.env, maxBuffer: MAX_BUFFER, windowsHide: true });
+  const r = spawnTool(bin, args, { input, env });
   if (r.error?.code === 'ENOENT') throw new ProviderError(`${bin} not found. ${installHint(bin)}`);
   if (r.error) throw new ProviderError(`${bin} failed: ${r.error.message}`);
   return { code: r.status, out: r.stdout || '', err: (r.stderr || '').trim() };

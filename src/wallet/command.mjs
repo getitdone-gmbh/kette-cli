@@ -10,7 +10,7 @@ import {
   DEFAULT_ENVIRONMENTS, DEFAULT_PROVIDER, PROVIDERS, PROVIDER_IDS, WALLET_PATH, checkEnv, checkName, exampleNames,
   namesFor, newWallet, providerHash, readWallet, walletFile, writeWallet,
 } from './config.mjs';
-import { ProviderError, installHint, providerFor, providerVersion } from './providers.mjs';
+import { ProviderError, installHint, providerFor, providerVersion, spawnTool } from './providers.mjs';
 
 export const WALLET_HELP = `kette wallet init     Secret wallet (Enterprise): create .kette/wallet.json with the provider (default Infisical,
                         or Vault, AWS, Azure, your own commands), environments and the names from .env.example
@@ -258,7 +258,7 @@ async function syncGithub(root, wallet, opts) {
   if (absent.length) throw new ExitError(`Missing in ${env}: ${absent.join(', ')}. Nothing copied.`, 1);
   for (const name of names) {
     // gh reads the value from stdin when --body is not given
-    const r = spawnSync('gh', ['secret', 'set', name, '--env', target, ...repo], { input: values.get(name), encoding: 'utf8' });
+    const r = spawnTool('gh', ['secret', 'set', name, '--env', target, ...repo], { input: values.get(name) });
     if (r.error?.code === 'ENOENT') throw new ExitError('gh not found. Install the GitHub CLI and sign in with gh auth login.', 1);
     if (r.status !== 0) throw new ExitError(`gh secret set ${name} failed: ${(r.stderr || '').trim().split('\n')[0]}`, 1);
     line('ok', `${name} → ${target}`);

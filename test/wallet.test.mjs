@@ -31,6 +31,8 @@ const stdin = () => fs.readFileSync(0, 'utf8');
 ${body}
 `);
   fs.chmodSync(path.join(bin, name), 0o755);
+  // Windows starts neither shebang nor extensionless files; the CLI then falls back to <name>.cmd
+  write(bin, `${name}.cmd`, `@node "${path.join(bin, name)}" %*\r\n`);
 }
 
 function enterprise(on = true) {
