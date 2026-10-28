@@ -1,6 +1,6 @@
 # kette-cli
 
-Sets up the rulebook and the agents of Die Kette from the terminal. Current version: 0.7.1.
+Sets up the rulebook and the agents of Die Kette from the terminal. Current version: 0.9.4 (the installer always takes the version in [manifest.json](https://kette.itdone.de/dl/manifest.json)).
 
 ```sh
 curl -fsSL https://kette.itdone.de/install | sh          # macOS, Linux
@@ -8,6 +8,8 @@ irm https://kette.itdone.de/install.ps1 | iex              # Windows
 ```
 
 Quick start: [Community](docs/setup/community.md) · [Enterprise](docs/setup/enterprise.md) · Website: [kette.itdone.de/en](https://kette.itdone.de/en/)
+
+Read the rules without installing: the Community bundle (MIT) is a plain tarball with the plugins, skills and the `kette-check` agent as Markdown, [kette-community-0.20261025.92.tgz](https://kette.itdone.de/dl/kette-community-0.20261025.92.tgz). The current file name is under `bundles.community.url` in [manifest.json](https://kette.itdone.de/dl/manifest.json). To list it: `curl -fsSL https://kette.itdone.de/dl/kette-community-0.20261025.92.tgz | tar -tz`.
 
 ## Editions
 | | Community | Enterprise (Die Kette) |
