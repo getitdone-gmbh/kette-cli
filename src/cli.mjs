@@ -7,9 +7,11 @@ import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { renderTemplates, TemplateError } from './templates.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
-import { MARKETPLACE, hasClaude, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
-import { SETTINGS_PATH, enableHints, enableProjectPlugins, machineBundles, settingsItems, settingsStatus, userScopePlugins, writeProjectSettings } from './project-plugins.mjs';
-import { activeBundleLink, credentialsFile, delivery, home, mirror } from './paths.mjs';
+import { hasClaude, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
+import { LOCAL_SETTINGS_PATH, SETTINGS_PATH, enableHints, enableProjectPlugins, settingsItems, settingsStatus, userScopePlugins, writeProjectSettings } from './project-plugins.mjs';
+import { marketName } from './marketplace.mjs';
+import { RECORD_PATH, enterpriseLeftovers, recordTemplates, removeLeftovers } from './leftovers.mjs';
+import { credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginContents, pluginDetails, pluginsFor, pluginSummary } from './editions.mjs';
 import { NOTE_PATH, COMMUNITY_REVIEWERS, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
@@ -22,8 +24,8 @@ import { ExitError } from './errors.mjs';
 import { cloud, doctorLine } from './cloud.mjs';
 import { theme } from './theme/command.mjs';
 import { WALLET_HELP, hasWallet, offerWallet, wallet, walletDoctor } from './wallet/command.mjs';
-import { INSTANCE_HELP, addRepo, askInstance, doctorInstance, instance as instanceCommand, requireEdition } from './instance/command.mjs';
-import { inherit, instanceSource, readInstance } from './instance/config.mjs';
+import { INSTANCE_HELP, askInstance, doctorInstance, instance as instanceCommand, joinInstance, prepareJoin, requireEdition } from './instance/command.mjs';
+import { inherit, instanceSource, printable, readInstance } from './instance/config.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -270,7 +272,8 @@ function planFor(root, profile, bundleDir, tier, noteTier, templates, apps, { in
     // Only the scope line, never a token: the file may be committed, the token comes from ~/.npmrc or the CI secret
     // No line without npm access, otherwise the project points to a registry that does not answer yet
     if (npmGranted()) plan.push({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'design system packages via Die Kette, no token' });
-    for (const f of templates?.files || []) plan.push({ path: f.path, content: f.content, note: f.note });
+    // template: recorded with its hash in .kette/templates.json, so a later switch to Community can remove it again
+    for (const f of templates?.files || []) plan.push({ path: f.path, content: f.content, note: f.note, template: true });
   }
   return plan;
 }
@@ -345,14 +348,37 @@ function detectFor(root, isNew, schema) {
   return { folders, detected: { stack: stacks.filter(keep), platform: detectPlatform(root), apps: folders.apps }, unknown: stacks.filter((s) => !keep(s)) };
 }
 
+const notFound = (name) => `Instance ${printable(name)} not found on this machine. Create it with ${cmd(`kette instance create ${printable(name)}`)} or clone it with ${cmd(`kette instance create ${printable(name)} --from <git-url>`)}`;
+
 // The instance a project belongs to: --instance on init and add, otherwise the name in its profile; null without one
 function projectInstance(root, opts = {}) {
   if (opts.instance === true) throw new ExitError('--instance needs a name with kette init and kette add');
   const name = opts.instance || existingProfile(root)?.instance;
   if (!name) return null;
-  const instance = readInstance(name);
-  if (!instance) throw new ExitError(`Instance ${name} not found on this machine. Create it with ${cmd(`kette instance create ${name}`)} or clone it with ${cmd(`kette instance create ${name} --from <git-url>`)}`, 1);
+  let instance;
+  try { instance = readInstance(name); } catch (err) { throw new ExitError(err.message, 1); }
+  if (!instance) throw new ExitError(notFound(name), 1);
   return instance;
+}
+
+// The edition every gate of a project uses (plugins, templates, npm, wallet, rules); problem names why an instance the profile names
+// cannot be used: such a project counts as Community, never as the edition of the machine (docs/adr/0002, decision 10)
+function resolveProject(root) {
+  const profile = existingProfile(root);
+  if (!profile) return { profile: null, instance: null, edition: null, problem: null };
+  if (!profile.instance) return { profile, instance: null, edition: Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY, problem: null };
+  let instance = null;
+  let problem = null;
+  try { instance = readInstance(profile.instance); } catch (err) { problem = err.message; }
+  if (!instance && !problem) problem = notFound(profile.instance);
+  return { profile, instance, edition: instance ? instance.edition : COMMUNITY, problem };
+}
+
+// Leaving Enterprise: the template files kette created unchanged and the registry scope line go, changed files stay for doctor
+function leaveEnterprise(root) {
+  const { removed, kept } = removeLeftovers(root);
+  for (const r of removed) console.log(`  ${status('ok', '- remove')} ${file(r)} ${dim('(Enterprise, not part of a Community project)')}`);
+  for (const k of kept) console.log(`${status('warn', 'WARN')} ${file(k)} is an Enterprise template that was changed, it stays. Delete it if the project does not need it; ${cmd('kette doctor')} lists it until then.`);
 }
 
 // Profiles name their instance; a rulebook whose schema does not know the field yet checks the profile without it
@@ -394,6 +420,8 @@ async function setup(root, opts, isNew) {
   const workspace = isNew && rendered.templates ? workspaceManifest(bundleDir, target, rendered.templates) : null;
   const templates = workspace?.templates || rendered.templates || null;
   const noteTier = projectTier(root, tier, instance);
+  // Everything that can stop the join is checked before a file of the project is written (QA-09)
+  if (instance && !opts.dryRun) prepareJoin(instance.name, root);
   const plan = planFor(root, profile, bundleDir, tier, noteTier, templates, target.apps, { instance, plugins: !opts.noPlugins });
   const described = describe(workspace ? [...plan, workspace.item] : plan, root);
   console.log(`\n${opts.dryRun ? 'Would create' : 'Plan'} in ${file(path.resolve(root))} (edition ${editionLabel(tier)}${instance ? `, instance ${instance.name}` : ''}):`);
@@ -408,11 +436,12 @@ async function setup(root, opts, isNew) {
 
   if (isNew && !fs.existsSync(path.join(root, '.git'))) spawnSync('git', ['init', '-q', root]);
   apply(described, root);
-
-  if (instance) addRepo(instance.name, root);
+  recordTemplates(root, described);
+  if (noteTier === COMMUNITY) leaveEnterprise(root);
+  if (instance) for (const l of joinInstance(instance.name, root)) console.log(l);
   let plugins = { ok: false };
   if (!opts.noPlugins) {
-    plugins = enableProjectPlugins(root, noteTier, machineBundles(installedBundle));
+    plugins = enableProjectPlugins(root, noteTier, installedBundle(noteTier));
     for (const l of enableHints(plugins, noteTier)) console.log(l);
   }
   await offerWallet(root, opts, tier);
@@ -442,7 +471,7 @@ function summary(described, tier, pluginsOk, rulesDir, root) {
   const numbered = steps.map((s, i) => `  ${num(`${i + 1}.`)} ${s}`);
   // The only Enterprise hint for Community, dimmed as the last step
   if (tier === COMMUNITY) numbered.push(dim(`  ${steps.length + 1}. kette login <key> for agents, gates, profiles and checks (Enterprise)`));
-  const plugins = pluginSummary(tier, MARKETPLACE, rulesDir);
+  const plugins = pluginSummary(tier, marketName(tier), rulesDir);
   return [
     '',
     `${bold(accent('Done.'))} In the project: ${changed.length ? changed.join(', ') : 'nothing changed, everything already in place'}`,
@@ -453,9 +482,11 @@ function summary(described, tier, pluginsOk, rulesDir, root) {
   ].join('\n');
 }
 
-// kette instance use: profile names the instance and takes its edition, the note follows, the project enables only its plugins
+// kette instance use: profile names the instance and takes its edition, the note follows, the project enables only its plugins,
+// the repo joins the instance and leaves every other one; everything that can stop the join is checked before a file is written
 async function useInstance(root, instance, opts) {
   const edition = instance.edition;
+  if (!opts.dryRun) prepareJoin(instance.name, root);
   await ensureBundle(edition);
   const profile = existingProfile(root);
   const plan = [
@@ -466,11 +497,18 @@ async function useInstance(root, instance, opts) {
   const described = describe(plan, root);
   console.log(`${opts.dryRun ? 'Would change' : 'Plan'} in ${file(path.resolve(root))} (instance ${instance.name}, ${editionLabel(edition)}):`);
   print(described);
+  if (edition === COMMUNITY) {
+    const left = enterpriseLeftovers(root);
+    for (const f of left.files) console.log(`  ${dim(f.changed ? '= keep    ' : '- remove  ')}${f.path}  ${dim(f.changed ? '(Enterprise template, changed by hand)' : '(Enterprise template)')}`);
+    if (left.npmrc) console.log(`  ${dim('- remove  ')}.npmrc scope line  ${dim('(Enterprise registry)')}`);
+  }
   if (opts.dryRun) return 0;
   apply(described, root);
+  if (edition === COMMUNITY) leaveEnterprise(root);
+  for (const l of joinInstance(instance.name, root)) console.log(l);
   if (!opts.noPlugins) {
-    const r = enableProjectPlugins(root, edition, machineBundles(installedBundle));
-    if (r.ok) console.log(`Claude Code plugins enabled for this project: ${r.present.map((p) => pluginId(p)).join(', ')}`);
+    const r = enableProjectPlugins(root, edition, installedBundle(edition));
+    if (r.ok && r.present.length) console.log(`Claude Code plugins enabled for this project: ${r.present.map((p) => pluginId(p, r.market)).join(', ')}`);
     for (const l of enableHints(r, edition)) console.log(l);
   }
   console.log(`${bold(accent('Done.'))} This repo now uses instance ${instance.name} (${editionLabel(edition)}). Check with: ${cmd('kette doctor')}`);
@@ -507,7 +545,7 @@ async function doctor(root, opts, { machine = true, project = true } = {}) {
     }
     edition(tier, { line, warn });
     line(Boolean(bundle), `Rulebook installed ${dim(`(${editionLabel(tier)}${bundle ? `, version ${bundle.version}` : ''})`)}`, `Rulebook not installed (${editionLabel(tier)}). Load it with: ${cmd('kette update')}`);
-    if (bundle) info(`Rulebook lives in ${file(tilde(fs.existsSync(activeBundleLink()) ? activeBundleLink() : bundle.dir))}`);
+    if (bundle) info(`Rulebook of this machine in ${file(tilde(path.dirname(bundle.dir)))}`);
     const legacy = opts.ci ? [] : userScopePlugins();
     // Plugins of CLI versions before 0.10 stay usable; they load in every project that has no .claude/settings.json of its own
     if (legacy.length) warn(`Claude Code has Kette plugins on for all projects (user scope, set up by an older kette): ${legacy.join(', ')}. Projects now enable their own plugins in ${SETTINGS_PATH}. Once each project ran ${cmd('kette add')}, switch them off with: ${cmd(legacy.map((id) => `claude plugin uninstall ${id}`).join(' && '))}`);
@@ -515,34 +553,47 @@ async function doctor(root, opts, { machine = true, project = true } = {}) {
   }
   let editionHere = tier;
   if (project) {
-    const raw = readProfile(root);
+    let raw = null;
+    let broken = null;
+    try { raw = readProfile(root); } catch (err) { broken = err.message; }
     const profile = normalizeProfile(raw);
     // Outside a project only --ci counts a missing profile, a person just gets told where to go
-    if (profile || opts.ci) line(Boolean(profile), '.kette/profile.json present', '.kette/profile.json missing');
+    if (broken) line(false, '', `.kette/profile.json is not readable (${broken}). Fix the file, then run ${cmd('kette doctor')} again`);
+    else if (profile || opts.ci) line(Boolean(profile), '.kette/profile.json present', '.kette/profile.json missing');
     else info(`No kette project in this folder. cd into your project or run ${cmd('kette init')}. Plugins are enabled per project.`);
     if (raw && isLegacyTier(raw.tier)) warn(`Profile uses the old value tier "${raw.tier}", read as "${profile.tier}". Change it to "${profile.tier}" in .kette/profile.json.`);
-    const inst = profile?.instance ? instanceChecks(profile, bundle, { line, warn }) : null;
-    if (profile) editionHere = inst ? inst.edition : Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
-    if (profile && bundle) {
-      const schema = loadSchema(bundle.dir);
+    const inst = profile?.instance ? instanceChecks(profile, { line, warn }) : null;
+    // An instance that cannot be used counts as Community for every check (fail closed)
+    if (profile) editionHere = profile.instance ? (inst ? inst.edition : COMMUNITY) : Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
+    const own = profile ? installedBundle(editionHere) : null;
+    if (profile && editionHere !== tier) {
+      if (own) info(`Rulebook of this project in ${file(tilde(path.dirname(own.dir)))} ${dim(`(${editionLabel(editionHere)}, version ${own.version})`)}`);
+      else if (editionHere === COMMUNITY) warn(`The Community rulebook for this project is not on this machine. Load it with: ${cmd('kette update')}`);
+    }
+    // The schema of the project edition, otherwise of this machine (an Enterprise project on a Community machine still gets checked)
+    const checkWith = own || bundle;
+    if (profile && checkWith) {
+      const schema = loadSchema(checkWith.dir);
       const errs = validate(schema, forSchema(schema, profile));
       // A profile written by a newer CLI may name app folders the installed rulebook does not know yet: that needs an update, not a fix
       if (errs.length === 1 && errs[0] === '$: unknown field apps' && !schema.properties?.apps) warn(`The profile names app folders (apps), the installed rulebook does not know them yet. Load the current one with: ${cmd('kette update')}`);
       // Same for the review flow: a profile with flow needs a rulebook that knows it
       else if (errs.length === 1 && errs[0] === '$: unknown field flow' && !schema.properties?.flow) warn(`The profile sets the review flow (flow), the installed rulebook does not know it yet. Load the current one with: ${cmd('kette update')}`);
       else line(errs.length === 0, 'Profile valid', `Profile not valid: ${errs.join('; ')}`);
-      if (PREVIEW.includes(platformStatus(bundle.dir, profile.platform?.id))) warn(`Platform ${profile.platform.id} is still a preview ${dim('(no verified reference project)')}`);
+      if (PREVIEW.includes(platformStatus(checkWith.dir, profile.platform?.id))) warn(`Platform ${profile.platform.id} is still a preview ${dim('(no verified reference project)')}`);
       // With an instance the edition is the instance's choice, instanceChecks reports a missing licence
       if (!inst && profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn(`Profile requires the Enterprise edition (Die Kette), only Community is installed here. Agents, gates, /feature-loop, platform profiles and checks from .kette/README.md are missing. Unlock with: ${cmd('kette login <key>')}`);
       if (!profile.instance && profile.tier !== ENTERPRISE && tier === ENTERPRISE) warn(`Enterprise (Die Kette) is installed here, the project is on Community. Switch to the flow with agents and gates: ${cmd('kette add')}`);
-      for (const o of profile.overlays || []) warn(`Overlay ${o.source} is loaded by the agents, not checked here`);
+      // Overlays the project inherits from its instance count the same as its own
+      for (const o of inherit(profile, inst).overlays || []) warn(`Overlay ${printable(o.source)}${profile.overlays?.some((x) => x.source === o.source) ? '' : ` (from instance ${inst.name})`} is loaded by the agents, not checked here`);
       // Community has kette-check only; other reviewers in flow.review are Enterprise agents
       const reviewers = [...(profile.flow?.review?.ui || []), ...(profile.flow?.review?.code || [])];
       const enterpriseOnly = reviewers.filter((r) => !COMMUNITY_REVIEWERS.includes(r));
       if (editionHere !== ENTERPRISE && enterpriseOnly.length) warn(`flow.review names ${enterpriseOnly.join(', ')}, these are agents of Die Kette (Enterprise). On Community only kette-check runs. Unlock with: ${cmd('kette login <key>')}`);
     }
+    if (profile && editionHere === COMMUNITY) leftoverChecks(root, profile.instance, { line });
     if (profile && !opts.ci) projectPluginChecks(root, editionHere, profile.instance, { line, warn });
-    if (!opts.ci && bundle && profile) printPluginDetails(editionHere, info);
+    if (!opts.ci && own && profile) printPluginDetails(editionHere, info);
     if (tier === ENTERPRISE && editionHere === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
     walletDoctor(root, editionHere === ENTERPRISE ? tier : COMMUNITY, { line, warn, info }, { project: Boolean(profile) });
     const md = path.join(root, 'CLAUDE.md');
@@ -555,39 +606,65 @@ async function doctor(root, opts, { machine = true, project = true } = {}) {
 }
 
 // The instance named in the profile: present, edition matches the profile, licence for Enterprise, bundle pin
-function instanceChecks(profile, bundle, { line, warn }) {
+function instanceChecks(profile, { line, warn }) {
   let inst;
-  try { inst = readInstance(profile.instance); } catch (err) { line(false, '', err.message); return null; }
-  if (!inst) { line(false, '', `Instance ${profile.instance} not found on this machine. Clone it with ${cmd(`kette instance create ${profile.instance} --from <git-url>`)} or create it with ${cmd(`kette instance create ${profile.instance}`)}`); return null; }
+  try { inst = readInstance(profile.instance); } catch (err) { line(false, '', `${err.message} The project counts as Community until it is fixed.`); return null; }
+  if (!inst) { line(false, '', `${notFound(profile.instance)}. The project counts as Community until then.`); return null; }
   line(true, `Instance ${inst.name} ${dim(`(${editionLabel(inst.edition)}, ${instanceSource(inst.name).kind})`)}`);
   if (inst.edition === ENTERPRISE) line(tierOf() === ENTERPRISE, 'Licence for the Enterprise instance', `Instance ${inst.name} is Enterprise, this machine has no valid licence. Sign in with: ${cmd('kette login <key>')}`);
   if (profile.tier !== inst.edition) warn(`Profile says tier ${profile.tier}, instance ${inst.name} is ${inst.edition}. Align with: ${cmd(`kette instance use ${inst.name}`)}`);
-  if (inst.bundle && bundle && inst.edition === tierOf() && inst.bundle !== bundle.version) warn(`Instance ${inst.name} pins bundle ${inst.bundle}, this machine has ${bundle.version}. kette keeps one active bundle per edition; the pin is a check, not a switch (docs/instances.md).`);
+  const bundle = installedBundle(inst.edition);
+  if (inst.bundle && bundle && inst.bundle !== bundle.version) warn(`Instance ${inst.name} pins bundle ${inst.bundle}, this machine has ${bundle.version}. kette keeps one active bundle per edition; the pin is a check, not a switch (docs/instances.md).`);
   return inst;
+}
+
+// A Community project holds nothing kette wrote for Enterprise: no registry scope line, no Enterprise template it recorded
+function leftoverChecks(root, instanceName, { line }) {
+  const { files, npmrc } = enterpriseLeftovers(root);
+  const fix = cmd(instanceName ? `kette instance use ${instanceName}` : 'kette add');
+  if (npmrc) line(false, '', `.npmrc of this Community project points ${SCOPE} to the Enterprise registry. Remove the line with: ${fix}`);
+  const changed = files.filter((f) => f.changed).map((f) => f.path);
+  const unchanged = files.filter((f) => !f.changed).map((f) => f.path);
+  if (unchanged.length) line(false, '', `Enterprise templates in this Community project: ${unchanged.join(', ')}. Remove them with: ${fix}`);
+  if (changed.length) line(false, '', `Enterprise templates changed by hand in this Community project: ${changed.join(', ')}. Delete them or keep them on purpose, then remove their entries from ${RECORD_PATH}`);
 }
 
 // The project settings switch on exactly the plugins of its edition; Claude Code has them installed when it is there
 function projectPluginChecks(root, edition, instanceName, { line, warn }) {
   const fix = cmd(instanceName ? `kette instance use ${instanceName}` : 'kette add');
+  const market = marketName(edition);
   const s = settingsStatus(root, edition);
   if (s.state === 'ok') line(true, `${SETTINGS_PATH} enables the ${editionLabel(edition)} plugins only`);
-  else if (s.state === 'broken') line(false, '', `${SETTINGS_PATH} is not a JSON object. Fix the file, then run ${fix}`);
-  else line(false, '', s.state === 'missing' ? `${SETTINGS_PATH} missing, Claude Code has no Kette plugins for this project. Enable them with: ${fix}` : `${SETTINGS_PATH} does not match ${editionLabel(edition)} (${s.wrong.join(', ')}). Fix with: ${fix}`);
+  else if (s.state === 'broken') line(false, '', `${s.file} is not a JSON object. Fix the file, then run ${fix}`);
+  else if (s.state === 'missing') line(false, '', `${SETTINGS_PATH} missing, Claude Code has no Kette plugins for this project. Enable them with: ${fix}`);
+  else line(false, '', `${s.local.length ? `${LOCAL_SETTINGS_PATH} overrides` : `${SETTINGS_PATH} does not match`} ${editionLabel(edition)} (${s.wrong.join(', ')}). Fix with: ${fix}`);
   if (!hasClaude()) return;
   const list = installedPlugins(root);
   if (list === null) { line(false, 'Claude Code plugin list not readable (claude plugin list fails)'); return; }
-  const bundles = machineBundles(installedBundle);
+  const bundle = installedBundle(edition);
   for (const p of pluginsFor(edition)) {
-    if (!bundles.some((b) => pluginContents(b.dir, p))) warn(`Plugin ${pluginId(p)} is not in a bundle on this machine${edition === ENTERPRISE ? `, it needs the licence: ${cmd('kette login <key>')}` : `, load it with: ${cmd('kette update')}`}`);
-    else line(pluginInstalled(p, list), `Plugin ${pluginId(p)} installed`, `Plugin ${pluginId(p)} not installed. Install with: ${fix}`);
+    if (!bundle || !pluginContents(bundle.dir, p)) warn(`Plugin ${pluginId(p, market)} is not in the ${editionLabel(edition)} bundle on this machine${edition === ENTERPRISE ? `, it needs the licence: ${cmd('kette login <key>')}` : `, load it with: ${cmd('kette update')}`}`);
+    else line(pluginInstalled(p, list, market), `Plugin ${pluginId(p, market)} installed`, `Plugin ${pluginId(p, market)} not installed. Install with: ${fix}`);
   }
 }
 
-// --effective adds what the project inherits from its instance; repo values win, the edition comes from the instance
+// Wallet gate: a repo without instance as before (edition of the machine), a repo of an instance only with an usable Enterprise instance
+function walletTier(root) {
+  let project;
+  try { project = resolveProject(root); } catch { return COMMUNITY; }
+  if (!project.profile?.instance) return tierOf();
+  return project.edition === ENTERPRISE ? tierOf() : COMMUNITY;
+}
+
+// --effective adds what the project inherits from its instance; repo values win, the edition comes from the instance;
+// an instance that cannot be read stops with its name instead of printing the profile as if nothing was inherited
 function showProfile(root, opts) {
   const p = readProfile(root);
   if (!p) { console.log('No .kette/profile.json in this folder.'); return 1; }
-  console.log(JSON.stringify(opts.effective && p.instance ? inherit(p, readInstance(p.instance)) : p, null, 2));
+  if (!opts.effective || !p.instance) { console.log(JSON.stringify(p, null, 2)); return 0; }
+  const { instance, problem } = resolveProject(root);
+  if (problem) throw new ExitError(problem, 1);
+  console.log(JSON.stringify(inherit(p, instance), null, 2));
   return 0;
 }
 
@@ -598,7 +675,7 @@ const PREVIEW = ['preview', 'vorschau'];
 function printPluginDetails(tier, info) {
   info('Plugin contents:');
   const { tee, end, bar } = symbols();
-  const details = pluginDetails(tier, MARKETPLACE, installedBundle(tier)?.dir || installedBundle(ENTERPRISE)?.dir);
+  const details = pluginDetails(tier, marketName(tier), installedBundle(tier)?.dir);
   details.forEach(({ id, lines }, i) => {
     const last = i === details.length - 1;
     console.log(`      ${dim(last ? end : tee)} ${id}`);
@@ -606,11 +683,12 @@ function printPluginDetails(tier, info) {
   });
 }
 
-// Renews the kette block in .kette/README.md when kette update runs inside a project
+// Renews the kette block in .kette/README.md when kette update runs inside a project; left alone when its instance cannot be used
 function renewProjectNote(root) {
-  const profile = existingProfile(root);
-  if (!profile) return;
-  const tier = Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
+  const project = resolveProject(root);
+  if (!project.profile || project.problem) return;
+  const { profile } = project;
+  const tier = project.instance ? project.edition : Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
   const [d] = describe([noteItem(tier, profile.flow)], root);
   if (d.unmarked) { console.log(staleNote([d])); return; }
   if (d.action === 'keep') return;
@@ -618,42 +696,39 @@ function renewProjectNote(root) {
   console.log(`${file(NOTE_PATH)} ${d.action === 'create' ? 'created' : 'updated'} (flow for ${editionLabel(tier)}).`);
 }
 
-// Edition of the project in a folder for its plugins: its instance, otherwise its profile; null outside a project
-function projectEdition(root) {
-  const profile = existingProfile(root);
-  if (!profile) return null;
-  if (profile.instance) {
-    const inst = readInstance(profile.instance);
-    if (!inst) throw new ExitError(`Instance ${profile.instance} not found on this machine, plugins of this project left as they are. See ${cmd('kette doctor')}`, 1);
-    return inst.edition;
-  }
-  return Object.hasOwn(RANK, profile.tier) ? profile.tier : COMMUNITY;
-}
-
 // After a bundle changed: the plugins of the project in this folder; outside a project nothing, plugins are enabled per project
-function refreshProjectPlugins(root, opts) {
+// An instance that cannot be used only warns: login and update finish, nothing is enabled for that project (fail closed)
+async function refreshProjectPlugins(root, opts) {
   if (opts.noPlugins || opts.dryRun) return;
-  let edition;
-  try { edition = projectEdition(root); } catch (err) { if (!(err instanceof ExitError)) throw err; console.log(`${status('warn', 'WARN')} ${err.message}`); return; }
-  if (!edition) { console.log(dim(`Claude Code plugins are enabled per project: run ${cmd('kette add')} in each project.`)); return; }
-  for (const d of writeProjectSettings(root, edition).filter((x) => x.action !== 'keep')) console.log(`${file(d.path)} ${d.action === 'create' ? 'created' : 'updated'}`);
-  const r = enableProjectPlugins(root, edition, machineBundles(installedBundle));
-  if (r.ok) console.log(`Claude Code plugins enabled for this project: ${r.present.map((p) => pluginId(p)).join(', ')}`);
-  for (const l of enableHints(r, edition)) console.log(l);
+  let project;
+  try { project = resolveProject(root); } catch (err) { console.log(`${status('warn', 'WARN')} .kette/profile.json not readable (${err.message}), plugins of this project left as they are.`); return; }
+  if (!project.profile) { console.log(dim(`Claude Code plugins are enabled per project: run ${cmd('kette add')} in each project.`)); return; }
+  if (project.problem) { console.log(`${status('warn', 'WARN')} ${project.problem}. Plugins of this project left as they are, see ${cmd('kette doctor')}`); return; }
+  const { edition } = project;
+  try {
+    if (edition === COMMUNITY && !installedBundle(COMMUNITY)) await ensureBundle(COMMUNITY);
+    for (const d of writeProjectSettings(root, edition).filter((x) => x.action !== 'keep')) console.log(`${file(d.path)} ${d.action === 'create' ? 'created' : 'updated'}`);
+    const r = enableProjectPlugins(root, edition, installedBundle(edition));
+    if (r.ok && r.present.length) console.log(`Claude Code plugins enabled for this project: ${r.present.map((p) => pluginId(p, r.market)).join(', ')}`);
+    for (const l of enableHints(r, edition)) console.log(l);
+  } catch (err) {
+    console.log(`${status('warn', 'WARN')} Plugins of this project not updated (${err.message}). Try again with: ${cmd('kette add')}`);
+  }
 }
 
 async function update(opts) {
   let code = await (credentialsStatus() === 'valid' ? updateEnterprise(opts, VERSION) : updateCommunity(opts));
-  // A Community project on a machine with a licence needs the Community bundle as well
+  // A Community project on a machine with a licence needs the Community bundle as well; an instance that cannot be used counts as Community
   if (code === 0 && credentialsStatus() === 'valid' && safeEdition('.') === COMMUNITY) code = await updateCommunity(opts, { activate: false });
   if (code === 0 && !opts.dryRun) {
     renewProjectNote('.');
-    refreshProjectPlugins('.', opts);
+    await refreshProjectPlugins('.', opts);
   }
   return code;
 }
 
-const safeEdition = (root) => { try { return projectEdition(root); } catch { return null; } };
+// The edition of the project in a folder for every gate, null outside a project or with an unreadable profile
+const safeEdition = (root) => { try { return resolveProject(root).edition; } catch { return null; } };
 
 // activate: point the rulebook link to it (the edition of this machine), not for the extra Community bundle on an Enterprise machine
 async function updateCommunity(opts, { activate = true } = {}) {
@@ -723,7 +798,8 @@ export async function main(argv) {
     if (command === 'doctor') return opts.instance ? await doctorInstance(opts, { doctor }) : await doctor('.', opts);
     if (command === 'update') return await update(opts);
     if (command === 'rules') {
-      const tier = tierOf();
+      // In a project the rules of its edition, a Community project never sees the Enterprise bundle
+      const tier = safeEdition('.') === COMMUNITY ? COMMUNITY : tierOf();
       return rules(arg, opts, { bundle: installedBundle(tier), tier, stackIds: STACKS.map((x) => x.value) });
     }
     if (command === 'profile') return showProfile('.', opts);
@@ -738,8 +814,8 @@ export async function main(argv) {
     if (command === 'figma') return await figma(opts);
     // The licence email only prefills the signup of an active Enterprise licence
     if (command === 'cloud') return await cloud(arg, opts, { email: tierOf() === ENTERPRISE ? loginState()?.email : null });
-    // The wallet is Enterprise: in a Community instance it stays locked, even on a machine with a licence; a repo without instance as before
-    if (command === 'wallet') return await wallet(arg, opts, { tier: existingProfile('.')?.instance && safeEdition('.') === COMMUNITY ? COMMUNITY : tierOf() });
+    // The wallet is Enterprise: in a Community instance, or one that cannot be used, it stays locked even on a machine with a licence
+    if (command === 'wallet') return await wallet(arg, opts, { tier: walletTier('.') });
     if (command === 'theme') return await theme(opts, { version: VERSION });
     if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...redactedState() }, null, 2)); return 0; }
     console.error(`Unknown command: ${command}\n`);

@@ -3,7 +3,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { instancesDir } from '../paths.mjs';
 import { COMMUNITY, ENTERPRISE } from '../editions.mjs';
-import { readState, validVersion, writeState } from '../manifest.mjs';
+import { readState, updateState, validVersion } from '../manifest.mjs';
+import { writeAtomic } from '../files.mjs';
+import { withLock } from '../lock.mjs';
 import { ENV_PATTERN, PROVIDER_IDS } from '../wallet/config.mjs';
 
 // instance.json describes one Kette instance: edition, repos, members and the shared settings its repos inherit
@@ -11,20 +13,59 @@ export const INSTANCE_FILE = 'instance.json';
 export const SCHEMA_URL = 'https://kette.itdone.de/schema/instance.schema.json';
 export const EDITIONS = [COMMUNITY, ENTERPRISE];
 export const ROLES = ['owner', 'member'];
-// A name becomes a folder under ~/.kette/instances, so only lowercase letters, digits and dashes
+// A name becomes a folder under ~/.kette/instances, so only lowercase letters, digits and dashes, and no name Windows reserves
 export const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
-const REPO_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const REPO_MAX = 100;
+const REPO_PATTERN = new RegExp(`^[A-Za-z0-9][A-Za-z0-9._-]{0,${REPO_MAX - 1}}$`);
 const TEXT_MAX = 200;
 const FIELDS = ['$schema', 'version', 'name', 'edition', 'bundle', 'repos', 'members', 'ticketing', 'wallet', 'overlays', 'stations'];
 
 const isObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
-const isText = (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= TEXT_MAX && !/[\r\n]/.test(v);
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+const isText = (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= TEXT_MAX && !CONTROL.test(v);
 const unknown = (obj, allowed, at) => Object.keys(obj).filter((k) => !allowed.includes(k)).map((k) => `unknown field ${at}${k}`);
 
-export const validName = (name) => typeof name === 'string' && NAME_PATTERN.test(name);
+export const validName = (name) => typeof name === 'string' && NAME_PATTERN.test(name) && !RESERVED.test(name);
 export const instanceDir = (name) => path.join(instancesDir(), name);
 export const instanceFile = (name) => path.join(instanceDir(name), INSTANCE_FILE);
+
+// Text from instance.json, git or a profile before it is printed: no escape sequences, no control characters
+export const printable = (s) => String(s).replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
+// User info in a URL (a token or a password) never reaches the screen
+export const redact = (s) => printable(s).replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, '$1');
+
+const SCP = /^(?:([^@/\s]+)@)?([^:/\s]+):(?!\/\/)(.+)$/;
+const trimPath = (p) => p.replace(/\/+$/, '').replace(/\.git$/, '').replace(/^\/+/, '');
+
+// Origin of a repo in two forms: url to store and show (no user info), key to compare (ssh, https and scp forms of a repo are equal)
+export function normalizeUrl(raw) {
+  const text = String(raw).trim();
+  const scp = !/^[a-z][a-z0-9+.-]*:\/\//i.test(text) && !/^[a-z]:[\\/]/i.test(text) && text.match(SCP);
+  if (scp) {
+    const [, user, host, rest] = scp;
+    const h = host.toLowerCase();
+    return { url: `${user === 'git' ? 'git@' : ''}${h}:${rest}`, key: `${h}/${trimPath(rest)}` };
+  }
+  let u;
+  try { u = new URL(text); } catch { u = null; }
+  if (!u || u.protocol === 'file:') {
+    const local = path.resolve(u ? decodeURIComponent(u.pathname) : text);
+    return { url: local, key: `path:${trimPath(local.split(path.sep).join('/'))}` };
+  }
+  // The ssh user git is no secret and needed to clone; any other user info is dropped
+  const keepGit = u.protocol === 'ssh:' && u.username === 'git' && !u.password;
+  u.username = keepGit ? 'git' : '';
+  u.password = '';
+  u.hash = '';
+  u.search = '';
+  const host = u.host.toLowerCase();
+  const p = trimPath(decodeURIComponent(u.pathname));
+  return { url: `${u.protocol}//${keepGit ? 'git@' : ''}${host}/${p}`, key: `${host.replace(/:\d+$/, '')}/${p}` };
+}
+
+const repoKey = (r) => (r.url ? normalizeUrl(r.url).key : null);
 
 // Entries of a list field, each checked by check(entry, at) which returns its errors; key(entry) must be unique
 function listErrors(value, field, check, key) {
@@ -44,8 +85,9 @@ function listErrors(value, field, check, key) {
 const repoErrors = (r, at) => {
   if (!isObject(r)) return [`${at} must be an object`];
   const errs = unknown(r, ['name', 'url'], `${at}.`);
-  if (typeof r.name !== 'string' || !REPO_PATTERN.test(r.name)) errs.push(`${at}.name must be a folder name (letters, digits, . _ -)`);
+  if (typeof r.name !== 'string' || !REPO_PATTERN.test(r.name)) errs.push(`${at}.name must be a folder name (letters, digits, . _ -, at most ${REPO_MAX})`);
   if ('url' in r && !isText(r.url)) errs.push(`${at}.url must be one line`);
+  else if ('url' in r && /^[a-z][a-z0-9+.-]*:\/\/[^/\s]*@/i.test(r.url)) errs.push(`${at}.url must not hold user info (a token or password)`);
   return errs;
 };
 
@@ -88,7 +130,7 @@ export function validateInstance(i) {
   if (!isObject(i)) return ['the instance must be a JSON object'];
   const errs = unknown(i, FIELDS, '');
   if (i.version !== 1) errs.push('version must be 1');
-  if (!validName(i.name)) errs.push('name must be lowercase letters, digits and dashes');
+  if (!validName(i.name)) errs.push('name must be lowercase letters, digits and dashes, and no name Windows reserves');
   if (!EDITIONS.includes(i.edition)) errs.push(`edition must be ${EDITIONS.join(' or ')}`);
   if ('bundle' in i && !validVersion(i.bundle)) errs.push('bundle must be a bundle version, e.g. 0.20261025.92');
   errs.push(...listErrors(i.repos, 'repos', repoErrors, (r) => r.name));
@@ -101,76 +143,150 @@ export function newInstance(name, edition) {
   return { $schema: SCHEMA_URL, version: 1, name, edition, repos: [], members: [] };
 }
 
+const nameError = (name) => new Error(`Invalid instance name ${JSON.stringify(printable(name))}. Use lowercase letters, digits and dashes.`);
+
 // null when the instance does not exist; a damaged file throws with the reason
 export function readInstance(name) {
-  if (!validName(name)) throw new Error(`Invalid instance name ${JSON.stringify(name)}. Use lowercase letters, digits and dashes.`);
+  if (!validName(name)) throw nameError(name);
   const f = instanceFile(name);
   if (!fs.existsSync(f)) return null;
   let instance;
   try { instance = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (err) { throw new Error(`${f} is not valid JSON: ${err.message}`); }
   const errs = validateInstance(instance);
-  if (errs.length) throw new Error(`${f} is not valid: ${errs.join('; ')}`);
-  if (instance.name !== name) throw new Error(`${f} names the instance "${instance.name}", its folder is "${name}". Use the same name for both.`);
+  if (errs.length) throw new Error(`${f} is not valid: ${errs.map(printable).join('; ')}`);
+  if (instance.name !== name) throw new Error(`${f} names the instance "${printable(instance.name)}", its folder is "${name}". Use the same name for both.`);
   return instance;
 }
 
-export function writeInstance(instance) {
+function saveInstance(instance) {
   const errs = validateInstance(instance);
   if (errs.length) throw new Error(`Instance not valid: ${errs.join('; ')}`);
-  fs.mkdirSync(instanceDir(instance.name), { recursive: true });
-  fs.writeFileSync(instanceFile(instance.name), `${JSON.stringify(instance, null, 2)}\n`);
+  writeAtomic(instanceFile(instance.name), `${JSON.stringify(instance, null, 2)}\n`);
 }
+
+export function writeInstance(instance) {
+  withLock(`instance-${instance.name}`, () => saveInstance(instance));
+}
+
+// Read, change and write instance.json under its lock, so parallel kette processes never drop each other's changes
+export function updateInstance(name, change) {
+  return withLock(`instance-${name}`, () => {
+    const current = readInstance(name);
+    if (!current) throw new Error(`Instance ${name} not found on this machine.`);
+    const next = change(current);
+    if (next !== current) saveInstance(next);
+    return next;
+  });
+}
+
+// An instance folder, also a link whose target is gone
+export const instanceExists = (name) => { try { fs.lstatSync(instanceDir(name)); return true; } catch { return false; } };
 
 export function listInstances() {
   if (!fs.existsSync(instancesDir())) return [];
-  return fs.readdirSync(instancesDir()).filter((n) => validName(n) && fs.existsSync(instanceFile(n))).sort();
+  return fs.readdirSync(instancesDir()).filter((n) => validName(n) && instanceExists(n)).sort();
 }
 
-// local: a plain folder; clone: a git checkout of an instance repo; link: a link to an instance repo elsewhere
+// local: a plain folder; clone: a git checkout of an instance repo; link: a link to an instance repo elsewhere (dangling when its target is gone)
 export function instanceSource(name) {
   const dir = instanceDir(name);
-  if (fs.lstatSync(dir).isSymbolicLink()) return { kind: 'link', path: fs.realpathSync(dir) };
+  if (fs.lstatSync(dir).isSymbolicLink()) {
+    const target = path.resolve(path.dirname(dir), fs.readlinkSync(dir));
+    return { kind: 'link', path: target, dangling: !fs.existsSync(target) };
+  }
   if (fs.existsSync(path.join(dir, '.git'))) return { kind: 'clone', path: dir };
   return { kind: 'local', path: dir };
 }
 
-// Local checkouts of instance repos live in state.json, never in instance.json: paths differ per machine
+// Local checkouts of an instance live in state.json, never in instance.json: path to { repo, key }, paths differ per machine
 export const checkouts = (name) => readState().instances?.[name]?.checkouts || {};
 
-export function setCheckout(name, repo, dir) {
-  const all = readState().instances || {};
+const withCheckouts = (state, name, change) => {
+  const all = state.instances || {};
   const entry = all[name] || {};
-  writeState({ instances: { ...all, [name]: { ...entry, checkouts: { ...entry.checkouts, [repo]: dir } } } });
+  return { ...state, instances: { ...all, [name]: { ...entry, checkouts: change(entry.checkouts || {}) } } };
+};
+
+export function setCheckout(name, dir, repo, key) {
+  updateState((state) => withCheckouts(state, name, (c) => ({ ...c, [dir]: { repo, key } })));
 }
 
-export function dropCheckout(name, repo) {
-  const all = readState().instances || {};
-  const { [repo]: _gone, ...rest } = all[name]?.checkouts || {};
-  writeState({ instances: { ...all, [name]: { ...all[name], checkouts: rest } } });
+export function dropCheckouts(name, keep) {
+  updateState((state) => withCheckouts(state, name, (c) => Object.fromEntries(Object.entries(c).filter(([dir, v]) => keep(dir, v)))));
 }
 
 export function forgetInstance(name) {
-  const all = { ...readState().instances };
-  delete all[name];
-  writeState({ instances: all });
+  updateState((state) => {
+    const { [name]: _gone, ...rest } = state.instances || {};
+    return { ...state, instances: rest };
+  });
 }
 
-// Name and origin URL of a repo folder; the URL is what other machines match a checkout by
+const git = (dir, ...args) => {
+  const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  return r.status === 0 ? r.stdout.trim() : '';
+};
+
+// A repo folder name for instance.json: unsafe characters become dashes, at most REPO_MAX, never a name Windows reserves
+export function repoName(dir) {
+  const base = path.basename(dir).replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, REPO_MAX) || 'repo';
+  return RESERVED.test(base.split('.')[0]) ? `${base.slice(0, REPO_MAX - 5)}-repo` : base;
+}
+
+// Identity of a repo folder: its normalised origin; without origin the real path of its git common folder, so a worktree and its main
+// checkout are one repo; a folder inside another repo or without git counts as its own repo (docs/adr/0002, decision 12)
 export function repoIdentity(dir) {
   const abs = fs.realpathSync(dir);
-  const r = spawnSync('git', ['-C', abs, 'remote', 'get-url', 'origin'], { encoding: 'utf8' });
-  const url = r.status === 0 ? r.stdout.trim() : '';
-  return { name: path.basename(abs).replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[^A-Za-z0-9]+/, '') || 'repo', url: url || null, path: abs };
+  const top = git(abs, 'rev-parse', '--show-toplevel');
+  const own = top && fs.realpathSync(top) === abs;
+  const origin = own ? git(abs, 'remote', 'get-url', 'origin') : '';
+  if (origin) {
+    const { url, key } = normalizeUrl(origin);
+    return { name: repoName(abs), url, key, path: abs };
+  }
+  const common = own ? git(abs, 'rev-parse', '--git-common-dir') : '';
+  const gitDir = common ? path.resolve(abs, common) : path.join(abs, '.git');
+  const real = fs.existsSync(gitDir) ? fs.realpathSync(gitDir) : gitDir;
+  return { name: repoName(abs), url: null, key: `local:${real.split(path.sep).join('/')}`, path: abs };
 }
 
-// Adds the repo to the instance unless it is there already (same URL, or same name without URL); a name taken by another URL is refused
-export function withRepo(instance, { name, url }) {
-  const repos = instance.repos || [];
-  const same = repos.find((r) => (url && r.url === url) || (!url && !r.url && r.name === name));
+// The repo entry of an identity in an instance: by origin key, or for a repo without origin by a local checkout with the same key
+function findRepo(instance, id, local) {
+  if (id.url) return instance.repos.find((r) => repoKey(r) === id.key) || null;
+  const names = new Set(Object.values(local).filter((c) => c.key === id.key).map((c) => c.repo));
+  return instance.repos.find((r) => !r.url && names.has(r.name)) || null;
+}
+
+// A free name: the folder name, or with -2, -3 when another repo has it already
+function freeName(instance, name) {
+  const taken = new Set(instance.repos.map((r) => r.name));
+  if (!taken.has(name)) return name;
+  for (let n = 2; ; n++) {
+    const candidate = `${name.slice(0, REPO_MAX - String(n).length - 1)}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+// The instance with the repo of this identity in it; added false when it was there already
+export function withRepo(instance, id, local = {}) {
+  const same = findRepo(instance, id, local);
   if (same) return { instance, repo: same, added: false };
-  if (repos.some((r) => r.name === name)) throw new Error(`Instance ${instance.name} already has a repo named ${name} with another origin. Rename the folder or remove the entry from ${INSTANCE_FILE}.`);
-  const repo = url ? { name, url } : { name };
-  return { instance: { ...instance, repos: [...repos, repo] }, repo, added: true };
+  const repo = id.url ? { name: freeName(instance, id.name), url: id.url } : { name: freeName(instance, id.name) };
+  return { instance: { ...instance, repos: [...instance.repos, repo] }, repo, added: true };
+}
+
+// Removes the repo of this identity and every local checkout of it from an instance; the names it removed
+export function withoutRepo(name, id) {
+  const local = checkouts(name);
+  let removed = null;
+  updateInstance(name, (instance) => {
+    const same = findRepo(instance, id, local);
+    if (!same) return instance;
+    removed = same.name;
+    return { ...instance, repos: instance.repos.filter((r) => r !== same) };
+  });
+  dropCheckouts(name, (_dir, c) => c.key !== id.key);
+  return removed;
 }
 
 // Effective project settings: the instance gives edition and shared settings, values the repo sets itself win

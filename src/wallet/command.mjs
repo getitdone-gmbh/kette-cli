@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { NO_TERMINAL, ask, askSecret, choose, confirm } from '../prompt.mjs';
-import { readState, writeState } from '../manifest.mjs';
+import { readState, updateState } from '../manifest.mjs';
 import { ENTERPRISE } from '../editions.mjs';
 import { bold, cmd, dim, file, status } from '../out.mjs';
 import { readInstance } from '../instance/config.mjs';
@@ -52,7 +52,7 @@ function requireWallet(root) {
 const trustKey = (root) => path.resolve(root);
 export const isTrusted = (root, wallet) => process.env[TRUST_ENV] === '1' || readState().wallet_trust?.[trustKey(root)] === providerHash(wallet.provider);
 function remember(root, wallet) {
-  writeState({ wallet_trust: { ...(readState().wallet_trust || {}), [trustKey(root)]: providerHash(wallet.provider) } });
+  updateState((state) => ({ ...state, wallet_trust: { ...(state.wallet_trust || {}), [trustKey(root)]: providerHash(wallet.provider) } }));
 }
 
 function describeProvider(p) {

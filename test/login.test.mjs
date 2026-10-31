@@ -62,6 +62,8 @@ beforeEach(() => {
 
 const run = (...argv) => capture(() => main(argv));
 const ENTERPRISE_IDS = ['kette-engineering', 'design-system-agents', 'design-review-pack'].map((p) => `${p}@kette`);
+// Plugins an older kette switched on for all projects, in the user settings of the sandboxed Claude Code config
+const legacyUserScope = (ids) => write(process.env.CLAUDE_CONFIG_DIR, 'settings.json', JSON.stringify({ enabledPlugins: Object.fromEntries(ids.map((id) => [id, true])) }));
 const creds = () => path.join(kh, 'credentials');
 
 test('login 200: Schlüssel mit Rechten 600, Paket geprüft und entpackt, Edition Enterprise', async () => {
@@ -230,8 +232,9 @@ test('cloud setup with an active licence opens the signup with the licence email
   }
 });
 
-test('logout entfernt die Enterprise-Plugins', { skip: process.platform === 'win32' }, async () => {
+test('logout entfernt die Enterprise-Plugins, die ein älteres kette im User-Scope eingeschaltet hat', { skip: process.platform === 'win32' }, async () => {
   await run('login', KEYS.ok, '--no-plugins');
+  legacyUserScope(['kette-engineering-core@kette', ...ENTERPRISE_IDS]);
   const claude = fakeClaude([]);
   try { await run('logout'); } finally { claude.restore(); }
   const calls = claude.calls();
@@ -241,29 +244,32 @@ test('logout entfernt die Enterprise-Plugins', { skip: process.platform === 'win
 
 test('logout entfernt Enterprise-Plugins vor dem Umschalten, prüft per Liste und meldet, was bleibt', { skip: process.platform === 'win32' }, async () => {
   await run('login', KEYS.ok, '--no-plugins');
+  legacyUserScope(['kette-engineering-core@kette', ...ENTERPRISE_IDS]);
   const claude = fakeClaude([], ['kette-engineering-core@kette', ...ENTERPRISE_IDS].join('\n'), { 'plugin uninstall design-system-agents@kette': { code: 1, out: 'Plugin not found' } });
   let out;
   try { ({ out } = await run('logout')); } finally { claude.restore(); }
-  assert.match(out, /Plugin design-system-agents not removed \(Plugin not found\)\. By hand: claude plugin uninstall design-system-agents@kette/);
-  assert.doesNotMatch(out, /Plugin kette-engineering not removed/);
+  assert.match(out, /Plugin design-system-agents@kette not removed \(Plugin not found\)\. By hand: claude plugin uninstall design-system-agents@kette/);
+  assert.doesNotMatch(out, /Plugin kette-engineering@kette not removed/);
   assert.deepEqual(claude.installed(), ['kette-engineering-core@kette', 'design-system-agents@kette']);
 });
 
 test('logout meldet den Fehler, wenn weder die Plugin-Liste noch das Entfernen gelingt', { skip: process.platform === 'win32' }, async () => {
   await run('login', KEYS.ok, '--no-plugins');
+  legacyUserScope(ENTERPRISE_IDS);
   const claude = fakeClaude([], ['kette-engineering-core@kette', ...ENTERPRISE_IDS].join('\n'), {
     'plugin list': { code: 1, out: 'list kaputt' },
     'plugin uninstall kette-engineering@kette': { code: 1, out: 'gesperrt' },
   });
   let out;
   try { ({ out } = await run('logout')); } finally { claude.restore(); }
-  assert.match(out, /Plugin kette-engineering not removed \(gesperrt\)\. By hand: claude plugin uninstall kette-engineering@kette/);
-  assert.doesNotMatch(out, /Plugin design-system-agents not removed/);
+  assert.match(out, /Plugin kette-engineering@kette not removed \(gesperrt\)\. By hand: claude plugin uninstall kette-engineering@kette/);
+  assert.doesNotMatch(out, /Plugin design-system-agents@kette not removed/);
   assert.ok(claude.installed().includes('kette-engineering@kette'));
 });
 
 test('ohne lesbare Plugin-Liste gilt "not found in installed plugins" als schon entfernt', { skip: process.platform === 'win32' }, async () => {
   await run('login', KEYS.ok, '--no-plugins');
+  legacyUserScope(ENTERPRISE_IDS);
   const missing = (id) => ({ code: 1, out: `✘ Failed to uninstall plugin "${id}": Plugin "${id}" not found in installed plugins` });
   const claude = fakeClaude([], 'kette-engineering-core@kette\nkette-engineering@kette\n', {
     'plugin list': { code: 1, out: 'list kaputt' },
@@ -308,7 +314,7 @@ async function inProject(tier, fn) {
     if (config === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = config;
   }
 }
-const market = () => path.join(kh, 'bundles', 'marketplace');
+const market = (edition = 'enterprise') => path.join(kh, 'bundles', `marketplace-${edition}`);
 const readJson = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
 
 test('login in a project enables the Enterprise plugins for that project only, never in the user scope', { skip: process.platform === 'win32' }, async () => {
@@ -317,15 +323,18 @@ test('login in a project enables the Enterprise plugins for that project only, n
     try { await run('login', KEYS.ok, '--no-npm'); } finally { claude.restore(); }
     const calls = claude.calls();
     assert.ok(calls.includes(`plugin marketplace add --scope local ${market()}`));
-    for (const p of ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack']) assert.ok(calls.includes(`plugin install ${p}@kette --scope project`), p);
+    for (const p of ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack']) assert.ok(calls.includes(`plugin install ${p}@kette-enterprise --scope project`), p);
     const cwds = claude.cwds();
     assert.ok(calls.every((c, i) => !c.includes('--scope') || fs.realpathSync(cwds[i]) === project), 'project and local scope run in the project folder');
     assert.equal(fs.existsSync(path.join(config, 'settings.json')), false, 'no plugin in the user settings');
     const enabled = readJson(path.join(project, '.claude', 'settings.json')).enabledPlugins;
-    assert.equal(enabled['design-system-agents@kette'], true);
-    assert.equal(enabled['ui-laws@kette'], false);
+    assert.equal(enabled['design-system-agents@kette-enterprise'], true);
+    assert.equal(enabled['kette-engineering-core@kette-community'], false, 'the Community copy of a shared plugin stays off');
+    assert.equal(enabled['ui-laws@kette-community'], false);
+    assert.equal(enabled['design-system-agents@kette'], false, 'legacy IDs are off in the project');
     assert.match(fs.readFileSync(path.join(project, '.gitignore'), 'utf8'), /^\.claude\/settings\.local\.json$/m);
-    assert.equal(readJson(path.join(market(), '.claude-plugin', 'marketplace.json')).name, 'kette');
+    assert.equal(readJson(path.join(market(), '.claude-plugin', 'marketplace.json')).name, 'kette-enterprise');
+    assert.equal(readJson(path.join(project, '.claude', 'settings.local.json')).extraKnownMarketplaces['kette-enterprise'].source.path, market());
     assert.ok(!calls.some((c) => c.startsWith('plugin uninstall')));
   });
 });
@@ -339,16 +348,16 @@ test('login outside a project enables no plugin and says plugins are enabled per
 });
 
 test('login: a failing install names the commands for the project folder', { skip: process.platform === 'win32' }, async () => {
-  const claude = fakeClaude([], '', { 'plugin install design-system-agents@kette --scope project': { code: 1, out: 'boom' } });
+  const claude = fakeClaude([], '', { 'plugin install design-system-agents@kette-enterprise --scope project': { code: 1, out: 'boom' } });
   await inProject('enterprise', async () => {
     let out;
     try { ({ out } = await run('login', KEYS.ok, '--no-npm')); } finally { claude.restore(); }
-    assert.match(out, /Plugins not enabled for this project \(design-system-agents@kette: boom\)\. By hand in the project folder:\n  claude plugin marketplace add --scope local "[^"]+marketplace"\n  claude plugin install kette-engineering-core@kette --scope project\n/);
-    assert.ok(!claude.installed().includes('design-review-pack@kette'));
+    assert.match(out, /Plugins not enabled for this project \(design-system-agents@kette-enterprise: boom\)\. By hand in the project folder:\n  claude plugin marketplace add --scope local "[^"]+marketplace-enterprise"\n  claude plugin install kette-engineering-core@kette-enterprise --scope project\n/);
+    assert.ok(!claude.installed().includes('design-review-pack@kette-enterprise'));
   });
 });
 
-test('logout drops the Enterprise plugins from the marketplace and installs nothing', { skip: process.platform === 'win32' }, async () => {
+test('logout removes the Enterprise marketplace from Claude Code and its folder, installs nothing', { skip: process.platform === 'win32' }, async () => {
   const community = path.join(kh, 'bundles', 'community', '0.20261022.46');
   write(community, '.claude-plugin/marketplace.json', '{"name":"kette","plugins":[]}');
   for (const p of ['kette-engineering-core', 'ui-laws']) write(community, `plugins/${p}/.claude-plugin/plugin.json`, '{}');
@@ -362,8 +371,10 @@ test('logout drops the Enterprise plugins from the marketplace and installs noth
       const before = claude.calls().length;
       ({ out } = await run('logout'));
       assert.ok(!claude.calls().slice(before).some((c) => c.startsWith('plugin install')));
+      assert.ok(claude.calls().slice(before).includes('plugin marketplace remove kette-enterprise'));
+      assert.ok(!claude.calls().slice(before).some((c) => c.startsWith('plugin uninstall')), 'nothing in the user scope, so nothing to uninstall (QA-15)');
     } finally { claude.restore(); }
-    assert.deepEqual(fs.readdirSync(path.join(market(), 'plugins')).sort(), ['kette-engineering-core', 'ui-laws']);
+    assert.equal(fs.existsSync(market()), false, 'no Enterprise copy left in ~/.kette');
     assert.match(out, /Enterprise projects keep their settings, their Enterprise plugins no longer load here\./);
     assert.equal(fs.realpathSync(path.join(kh, 'bundles', 'active')), fs.realpathSync(community));
   });
@@ -386,28 +397,46 @@ test('Enterprise update that is up to date enables the plugins of the project in
     let out;
     try { ({ out } = await run('update', '--no-npm')); } finally { claude.restore(); }
     assert.match(out, /Up to date \(Enterprise \(Die Kette\) 0\.20261020\.9\)\./);
-    assert.match(out, /Claude Code plugins enabled for this project: kette-engineering-core@kette, kette-engineering@kette, design-system-agents@kette, design-review-pack@kette/);
+    assert.match(out, /Claude Code plugins enabled for this project: kette-engineering-core@kette-enterprise, kette-engineering@kette-enterprise, design-system-agents@kette-enterprise, design-review-pack@kette-enterprise/);
     assert.ok(!claude.calls().includes('plugin uninstall ui-gesetze@kette'), 'the user scope stays as it is');
-    assert.equal(readJson(path.join(project, '.claude', 'settings.json')).enabledPlugins['design-review-pack@kette'], true);
+    assert.equal(readJson(path.join(project, '.claude', 'settings.json')).enabledPlugins['design-review-pack@kette-enterprise'], true);
   });
 });
 
-test('a marketplace kette on an old bundle under ~/.kette is declared again for the project, nothing removed', { skip: process.platform === 'win32' }, async () => {
-  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: path.join(kh, 'bundles', 'community', '0.20261020.7') }]);
+test('CR-MIG-1: a registration of kette-enterprise in another folder under ~/.kette is removed and added again, the legacy kette stays', { skip: process.platform === 'win32' }, async () => {
+  const old = path.join(kh, 'bundles', 'marketplace');
+  const legacy = path.join(kh, 'bundles', 'active');
+  const claude = fakeClaude([{ name: 'kette-enterprise', source: 'directory', path: old }, { name: 'kette', source: 'directory', path: legacy }]);
   await inProject('enterprise', async () => {
     try { await run('login', KEYS.ok, '--no-npm'); } finally { claude.restore(); }
     const calls = claude.calls();
-    assert.ok(!calls.includes('plugin marketplace remove kette'));
-    assert.ok(calls.includes(`plugin marketplace add --scope local ${market()}`));
+    const rm = calls.indexOf('plugin marketplace remove kette-enterprise');
+    assert.ok(rm >= 0, calls.join('\n'));
+    assert.ok(calls.indexOf(`plugin marketplace add --scope local ${market()}`) > rm);
+    assert.ok(!calls.includes('plugin marketplace remove kette'), 'the legacy marketplace of older versions stays');
+    assert.ok(calls.includes('plugin install design-system-agents@kette-enterprise --scope project'));
   });
 });
 
-test('ein fremder Marketplace kette bleibt unangetastet', { skip: process.platform === 'win32' }, async () => {
-  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: '/repos/kette' }]);
+test('a registration of kette-enterprise in the right folder is updated, not added again (the fake answers already)', { skip: process.platform === 'win32' }, async () => {
+  await run('login', KEYS.ok, '--no-plugins', '--no-npm');
+  const claude = fakeClaude([{ name: 'kette-enterprise', source: 'directory', path: market() }]);
+  await inProject('enterprise', async () => {
+    let out;
+    try { ({ out } = await run('update', '--no-npm')); } finally { claude.restore(); }
+    const calls = claude.calls();
+    assert.ok(!calls.some((c) => c.startsWith('plugin marketplace add')), calls.join('\n'));
+    assert.ok(calls.includes('plugin marketplace update kette-enterprise'));
+    assert.doesNotMatch(out, /not enabled/);
+  });
+});
+
+test('ein fremder Marketplace kette-enterprise bleibt unangetastet, ein fremdes altes kette stört nicht', { skip: process.platform === 'win32' }, async () => {
+  const claude = fakeClaude([{ name: 'kette-enterprise', source: 'directory', path: '/repos/kette' }, { name: 'kette', source: 'directory', path: '/repos/old' }]);
   await inProject('enterprise', async () => {
     let out;
     try { ({ out } = await run('login', KEYS.ok, '--no-npm')); } finally { claude.restore(); }
-    assert.match(out, /Plugins not enabled for this project \(Marketplace kette points to \/repos\/kette\./);
+    assert.match(out, /Plugins not enabled for this project \(Marketplace kette-enterprise points to \/repos\/kette\./);
     assert.ok(!claude.calls().some((c) => /marketplace (remove|add)|plugin install/.test(c)));
   });
 });
@@ -422,7 +451,7 @@ test('Migration: der alte, selbst angelegte Marketplace kette-engineering wird d
     assert.ok(calls.indexOf('plugin uninstall kette-engineering-core@kette-engineering') < rm);
     assert.ok(calls.indexOf('plugin uninstall kette-engineering@kette-engineering') < rm);
     assert.ok(rm >= 0 && calls.indexOf(`plugin marketplace add --scope local ${market()}`) > rm);
-    assert.ok(calls.includes('plugin install kette-engineering@kette --scope project'));
+    assert.ok(calls.includes('plugin install kette-engineering@kette-enterprise --scope project'));
     assert.doesNotMatch(out, /twice/);
   });
 });
@@ -436,7 +465,7 @@ test('Migration: kette-engineering auf ein Entwickler-Repo bleibt, kette kommt d
     const calls = claude.calls();
     assert.ok(!calls.some((c) => /marketplace remove|uninstall/.test(c)));
     assert.ok(calls.includes(`plugin marketplace add --scope local ${market()}`));
-    assert.ok(calls.includes('plugin install kette-engineering-core@kette --scope project'));
+    assert.ok(calls.includes('plugin install kette-engineering-core@kette-enterprise --scope project'));
     assert.match(out, /WARN Marketplace kette-engineering \(\/repos\/kette-engineering\) stays untouched\. .*skills show up twice\. Disable with: claude plugin disable kette-engineering-core@kette-engineering$/m);
   });
 });

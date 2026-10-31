@@ -64,7 +64,8 @@ function shortContents(contents) {
 export function pluginSummary(tier, market, bundleDir) {
   return pluginsFor(tier).map((p) => {
     const contents = pluginContents(bundleDir, p);
-    return contents ? `${p}@${market} (${shortContents(contents)})` : `${p}@${market}`;
+    const short = contents && shortContents(contents);
+    return short ? `${p}@${market} (${short})` : `${p}@${market}`;
   }).join(', ');
 }
 

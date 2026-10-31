@@ -1,38 +1,65 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { marketplaceDir } from './paths.mjs';
-import { MARKETPLACE } from './claude.mjs';
+import { bundlesDir } from './paths.mjs';
+import { COMMUNITY, ENTERPRISE } from './editions.mjs';
+import { withLock } from './lock.mjs';
+import { isInside } from './files.mjs';
 
-// Claude Code keeps one global path per marketplace name, so projects of both editions share one marketplace "kette"
-// built from the installed bundles; copies, not links: Claude Code refuses plugin entries that leave the marketplace folder
+// One Claude Code marketplace per edition, built only from that edition's bundle (docs/adr/0002, decision 8): a plugin ID resolves to
+// one copy for every project, so a Community repo must use IDs whose copies come from the Community bundle
+export const MARKETS = { [COMMUNITY]: 'kette-community', [ENTERPRISE]: 'kette-enterprise' };
+export const marketName = (edition) => MARKETS[edition];
+export const marketDir = (edition) => path.join(bundlesDir(), `marketplace-${edition}`);
+
 const STAMP = '.kette-sources.json';
 const MANIFEST = path.join('.claude-plugin', 'marketplace.json');
-
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-const pluginNames = (dir) => (fs.existsSync(path.join(dir, 'plugins')) ? fs.readdirSync(path.join(dir, 'plugins'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort() : []);
+export const pluginNames = (dir) => (fs.existsSync(path.join(dir, 'plugins')) ? fs.readdirSync(path.join(dir, 'plugins'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort() : []);
 
-// bundles: [{ tier, version, dir }] in rising priority, a later bundle wins for a plugin both have (Enterprise over Community)
-export function buildMarketplace(bundles) {
-  const dir = marketplaceDir();
-  const sources = bundles.filter(Boolean).map(({ tier, version, dir: d }) => ({ tier, version, dir: path.resolve(d) }));
-  const stamp = JSON.stringify(sources);
-  const current = readJson(path.join(dir, STAMP));
-  if (current && JSON.stringify(current) === stamp && fs.existsSync(path.join(dir, MANIFEST))) return { dir, plugins: pluginNames(dir) };
-  const owner = new Map();
-  for (const s of sources) for (const p of pluginNames(s.dir)) owner.set(p, s);
-  const temp = `${dir}.${process.pid}.tmp`;
-  fs.rmSync(temp, { recursive: true, force: true });
-  const entries = [...owner.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, s]) => {
-    fs.cpSync(path.join(s.dir, 'plugins', name), path.join(temp, 'plugins', name), { recursive: true });
-    const listed = readJson(path.join(s.dir, MANIFEST))?.plugins?.find((p) => p.name === name) || {};
-    return { ...listed, name, source: `./plugins/${name}`, version: listed.version || s.version };
+// Copies, not links (Claude Code refuses entries that leave the marketplace folder); a link inside a plugin is resolved,
+// one pointing outside the bundle is left out, so nothing from elsewhere on the machine lands in the marketplace
+function copyPlugin(bundleDir, from, to) {
+  const root = fs.realpathSync(bundleDir);
+  fs.cpSync(from, to, {
+    recursive: true,
+    dereference: true,
+    filter: (src) => {
+      let real;
+      try { real = fs.realpathSync(src); } catch { return false; }
+      return isInside(root, real);
+    },
   });
-  const base = readJson(path.join(sources.at(-1)?.dir || '', MANIFEST)) || {};
-  const manifest = { ...base, name: MARKETPLACE, owner: base.owner || { name: 'Get IT Done GmbH' }, plugins: entries };
-  fs.mkdirSync(path.join(temp, '.claude-plugin'), { recursive: true });
-  fs.writeFileSync(path.join(temp, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
-  fs.writeFileSync(path.join(temp, STAMP), `${stamp}\n`);
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.renameSync(temp, dir);
-  return { dir, plugins: entries.map((e) => e.name) };
+}
+
+// bundle: { version, dir } of the edition, or null to remove the folder (after kette logout); rebuilt only when the bundle changes
+export function buildMarketplace(edition, bundle) {
+  const dir = marketDir(edition);
+  return withLock(`marketplace-${edition}`, () => {
+    if (!bundle) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { dir, plugins: [] };
+    }
+    const source = { edition, version: bundle.version, dir: path.resolve(bundle.dir) };
+    const stamp = JSON.stringify(source);
+    if (JSON.stringify(readJson(path.join(dir, STAMP))) === stamp && fs.existsSync(path.join(dir, MANIFEST))) return { dir, plugins: pluginNames(dir) };
+    const temp = `${dir}.${process.pid}.tmp`;
+    fs.rmSync(temp, { recursive: true, force: true });
+    try {
+      const listed = readJson(path.join(source.dir, MANIFEST)) || {};
+      const entries = pluginNames(source.dir).map((name) => {
+        copyPlugin(source.dir, path.join(source.dir, 'plugins', name), path.join(temp, 'plugins', name));
+        const entry = listed.plugins?.find((p) => p.name === name) || {};
+        return { ...entry, name, source: `./plugins/${name}`, version: entry.version || source.version };
+      });
+      const manifest = { ...listed, name: marketName(edition), owner: listed.owner || { name: 'Get IT Done GmbH' }, plugins: entries };
+      fs.mkdirSync(path.join(temp, '.claude-plugin'), { recursive: true });
+      fs.writeFileSync(path.join(temp, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
+      fs.writeFileSync(path.join(temp, STAMP), `${stamp}\n`);
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.renameSync(temp, dir);
+      return { dir, plugins: entries.map((e) => e.name) };
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
 }

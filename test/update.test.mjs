@@ -55,10 +55,10 @@ test('Community update in a project enables ui-laws there and leaves the user sc
     let out;
     try { ({ out } = await run('update')); } finally { claude.restore(); }
     const calls = claude.calls();
-    assert.ok(calls.includes('plugin install ui-laws@kette --scope project'));
+    assert.ok(calls.includes('plugin install ui-laws@kette-community --scope project'));
     assert.ok(!calls.some((c) => c.startsWith('plugin uninstall')));
-    assert.equal(enabled(project)['ui-laws@kette'], true);
-    assert.equal(enabled(project)['design-system-agents@kette'], false);
+    assert.equal(enabled(project)['ui-laws@kette-community'], true);
+    assert.equal(enabled(project)['design-system-agents@kette-enterprise'], false);
     assert.doesNotMatch(out, /not enabled/);
   });
 });
@@ -93,8 +93,8 @@ test('a bundle without ui-laws names it as missing instead of failing', { skip: 
   await inProject(async () => {
     let out;
     try { ({ out } = await run('update')); } finally { claude.restore(); }
-    assert.match(out, /WARN ui-laws not enabled, the bundles on this machine do not contain them\. Reload with: kette update/);
-    assert.ok(claude.calls().includes('plugin install kette-engineering-core@kette --scope project'));
+    assert.match(out, /WARN ui-laws not enabled, the Community bundle on this machine does not contain them\. Load it with: kette update/);
+    assert.ok(claude.calls().includes('plugin install kette-engineering-core@kette-community --scope project'));
   });
 });
 
@@ -102,7 +102,7 @@ test('an old bundle that still has ui-gesetze enables it for the project until u
   const claude = fakeClaude([]);
   await inProject(async () => {
     try { await run('update'); } finally { claude.restore(); }
-    assert.ok(claude.calls().includes('plugin install ui-gesetze@kette --scope project'));
-    assert.ok(!claude.calls().includes('plugin install ui-laws@kette --scope project'));
+    assert.ok(claude.calls().includes('plugin install ui-gesetze@kette-community --scope project'));
+    assert.ok(!claude.calls().includes('plugin install ui-laws@kette-community --scope project'));
   });
 });

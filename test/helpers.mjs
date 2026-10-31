@@ -11,6 +11,8 @@ export const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kette-test-'));
 process.env.NPM_CONFIG_USERCONFIG = path.join(tmp(), 'user.npmrc');
 // Tests never read or write the real ~/.kette (a machine signed in to Enterprise changed the help line)
 process.env.KETTE_HOME = tmp();
+// Tests never read the real Claude Code settings either
+process.env.CLAUDE_CONFIG_DIR = tmp();
 delete process.env.npm_config_userconfig;
 // Output assertions expect plain text, even when the shell running the tests forces colors
 delete process.env.FORCE_COLOR;
@@ -119,15 +121,25 @@ else if (a === 'mcp' && b === 'add') {
 else if (a === 'plugin' && b === 'marketplace' && c === 'add') {
   const source = argv[argv.length - 1];
   const name = JSON.parse(fs.readFileSync(path.join(source, '.claude-plugin', 'marketplace.json'), 'utf8')).name;
+  // Claude Code refuses a second registration of a known name, whatever folder it points to
+  if (s.list.some((m) => m.name === name)) { console.error("Marketplace '" + name + "' is already installed"); process.exit(1); }
   s.list = [...s.list.filter((m) => m.name !== name), { name, source: 'directory', path: source }]; save();
   edit(scope, (cur) => { cur.extraKnownMarketplaces = { ...cur.extraKnownMarketplaces, [name]: { source: { source: 'directory', path: source } } }; });
   // The registry of marketplace names is global in Claude Code, also for a marketplace declared in a project
   if (process.env.CLAUDE_CONFIG_DIR) { const f = path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins', 'known_marketplaces.json'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(Object.fromEntries(s.list.map((m) => [m.name, m])), null, 2)); }
 }
+else if (a === 'plugin' && b === 'marketplace' && c === 'remove') {
+  const name = argv[3];
+  if (!s.list.some((m) => m.name === name)) { console.error('Marketplace ' + name + ' not found'); process.exit(1); }
+  s.list = s.list.filter((m) => m.name !== name); save();
+}
 else if (a === 'plugin' && b === 'install') { if (!s.plugins.includes(c)) s.plugins.push(c); save(); edit(scope, (cur) => { cur.enabledPlugins = { ...cur.enabledPlugins, [c]: true }; }); }
 else if (a === 'plugin' && b === 'uninstall') {
-  if (!s.plugins.includes(c)) { console.log('Plugin ' + c + ' is not installed'); process.exit(1); }
+  const userFile = settingsFile('user');
+  const inUser = userFile && fs.existsSync(userFile) && JSON.parse(fs.readFileSync(userFile, 'utf8')).enabledPlugins?.[c];
+  if (!s.plugins.includes(c) && !inUser) { console.log('Plugin ' + c + ' is not installed'); process.exit(1); }
   s.plugins = s.plugins.filter((id) => id !== c); save();
+  edit(scope, (cur) => { if (cur.enabledPlugins) delete cur.enabledPlugins[c]; });
 }
 `);
   fs.chmodSync(path.join(bin, 'claude'), 0o755);
