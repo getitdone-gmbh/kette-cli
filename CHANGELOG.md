@@ -13,6 +13,10 @@
 - `kette token ci revoke <id>` refuses an ID that is not a UUID before any request and exits 1 (KETTE-20).
 - A `kette ticket new` whose id a parallel run took before it wrote anything moves on to the next free id; after eight attempts it ends with "nothing was written, run it again" (KETTE-40).
 
+- Lock edge cases (KETTE-41): the process start is compared in the raw form of the system (Linux start ticks with boot id, macOS lstart text in UTC), so a clock jump or a DST hour never makes a live holder look gone; a claimant checks its own claim right before it unlinks; without hard links the name must lead to the file that was written; a lock that looks gone on Windows is retried after a pause; async holders renew their lock while they work.
+
+- A `kette ticket list` or `report` right after a killed `kette ticket new` says the run was interrupted until its decision shows as incomplete; `kette ticket repair` takes over the lock of the killed run. A claim whose lock is gone or holds another token is removed by the next kette run (KETTE-42). Windows allows 30 seconds between the start of Node and its process, Linux without a boot id compares the start ticks alone, drives without stable inodes recognise the own lock by its content (KETTE-41).
+
 ## 0.10.0
 - Kette instances (Workbase ZERO-538, ADR-0002): `kette instance create <name> [--edition enterprise|community] [--from <git-url|folder>] | list | show | use | add-repo | members | remove`. Each instance has its own scope in `~/.kette/instances/<name>/instance.json`: edition, bundle pin, repos, members, ticketing, wallet defaults, overlays, chain stations; it can live in its own git repo. One licence covers all instances, seats stay per device.
 - `.kette/profile.json` names the instance (`instance`); the repo inherits edition, ticketing, wallet defaults, overlays and stations, its own values win. `kette init` and `kette add` take `--instance <name>` and ask in a terminal; `kette profile --effective` shows the inherited values and `.kette/README.md` tells agents to read them; `kette doctor --instance [name]` checks every checkout of an instance.
