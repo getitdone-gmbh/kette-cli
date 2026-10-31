@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "files": {
+    ".dependency-cruiser.cjs": "e54a6118326d37f087139227b5bb1f9dceb4501be2373dc5a673c125ab1cb633",
+    ".env.example": "120046e1989e6854cc180e729e479f73d4da04bdc4691c650d0c654528f9072d",
+    ".github/workflows/deploy.yml": "5bc4f41f6091e0667c52d3cbba5cbf05c7c306d3c9c4042f6c6a34627c671006",
+    ".gitleaks.toml": "434942291a52cba56de531e4cfd22740d5c4f3e02af337c9383a79a67c3312bb",
+    "DEPLOY.md": "8930922dc92685513947ff5b8003354340bf9ebf75be5e8826c5d41af4f9c39b",
+    "apps/api/Dockerfile": "22f34a823418d46235b940dbea589d9c1d97a0b60639894356226ad942ab195c",
+    "apps/api/scripts/prune-runtime.mjs": "4f3c79f5b51276bbe6e3f27adcefcb182776fab5eccc376d19cdc3dc842faec8",
+    "apps/web/Dockerfile": "093ee1ec15a0c2ec8bff0e52d2b90de229cb255b35ee4239e166c2e94c14ce70",
+    "apps/web/playwright.config.ts": "63e220e911565b71e71144e8894d35f0bf7d81f24532fe02ca0e3f943b927e9c",
+    "compose.local.yaml": "2c0c0e62d552777bb06122532721ae4c5bb38f5e0a7ec434ff6df3e448691dfc",
+    "compose.yaml": "7eb0a308393e532d1c85e531c8660b5e02b6d868a9148b4369e9ae1df65c22dd",
+    "eslint.config.mjs": "602a58763f9b39ed364a3de2af6873dc97be439445af80ab3038868a77bf942b",
+    "tsconfig.base.json": "f97c5726e3231189479e3f4f52a6e922d26ccf54150038b532e269b37b9e8f51"
+  },
+  "npmrc": "@getitdone-gmbh:registry=https://npm.kette.itdone.de/"
+}

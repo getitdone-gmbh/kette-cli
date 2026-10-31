@@ -2,3 +2,5 @@ node_modules/
 .DS_Store
 dist/
 .dist-next/
+.claude/settings.local.json
+.*.[0-9]*.[0-9a-f]*.tmp

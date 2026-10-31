@@ -1,0 +1,23 @@
+{
+  "$schema": "https://kette.itdone.de/schema/profile.schema.json",
+  "version": 1,
+  "project": {
+    "name": "kette-cli"
+  },
+  "instance": "kette",
+  "stack": [
+    "nextjs-ts-tailwind",
+    "nestjs-prisma"
+  ],
+  "apps": {
+    "nextjs-ts-tailwind": "apps/web",
+    "nestjs-prisma": "apps/api"
+  },
+  "platform": {
+    "id": "github-docker"
+  },
+  "patterns": [
+    "modular-monolith"
+  ],
+  "tier": "enterprise"
+}

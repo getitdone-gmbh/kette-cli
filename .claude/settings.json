@@ -1,0 +1,18 @@
+{
+  "enabledPlugins": {
+    "kette-engineering-core@kette-community": false,
+    "ui-laws@kette-community": false,
+    "kette-engineering-core@kette-enterprise": true,
+    "kette-engineering@kette-enterprise": true,
+    "design-system-agents@kette-enterprise": true,
+    "design-review-pack@kette-enterprise": true,
+    "kette-ticketing@kette-enterprise": true,
+    "kette-engineering-core@kette": false,
+    "ui-laws@kette": false,
+    "kette-engineering@kette": false,
+    "design-system-agents@kette": false,
+    "design-review-pack@kette": false,
+    "kette-ticketing@kette": false,
+    "ui-gesetze@kette": false
+  }
+}
