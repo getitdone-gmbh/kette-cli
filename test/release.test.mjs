@@ -99,7 +99,7 @@ test('KETTE-32 (KT-N1): the bypasses from the review are found, in any case, URL
     assert.ok(forbiddenIn(dir).length > 0, `${f} must be refused: ${content}`);
   }
   const clean = tmp();
-  write(clean, 'ok.mjs', "const api = 'https://api.workbase.itdone.de/api/project-manager/api'; const spec = 'sparkle';");
+  write(clean, 'ok.mjs', "const api = 'https://api.workbase.itdone.de/api/project-manager/api'; const spec = 'spec';");
   assert.deepEqual(forbiddenIn(clean), []);
 });
 
@@ -131,4 +131,15 @@ test('KETTE-32 (KT-N1, KT-N4): the shipped routing holds only neutral fields and
   };
   const errs = routingErrors(bad, agents).join('\n');
   for (const re of [/members\.alex is human/, /members\.session:ds is session/, /currentName is not allowed/, /members\.theme-rollout-engineer is no agent of the Enterprise bundle/, /stations\.app\.repos is not allowed/, /stations\.app\.files/, /stations\.app\.hosts/, /stations\.app\.tooling/, /stations\.app\.storybook/, /routes\[0\]\.owner must be @owner/, /routes\[0\]\.approve is not allowed/]) assert.match(errs, re);
+});
+
+test('KETTE-39: fixed deny words match inside other names, Base64 in any case, the new private ranges, ordinary words by list', async () => {
+  const { ORDINARY_WORDS, denyWordsFrom, forbiddenIn } = await import('../scripts/ticketing-part.mjs');
+  const { tmp, write } = await import('./helpers.mjs');
+  const hit = (content, opts) => { const d = tmp(); write(d, 'f.txt', content); return forbiddenIn(d, opts).length > 0; };
+  for (const c of ['github.com/x/alexfriedl-portfolio', 'see spark-cockpit', 'repo x-kneier-web', 'ALEXFRIEDL', Buffer.from('AlexFriedl').toString('base64'), Buffer.from('ALEXFRIEDL').toString('base64'), Buffer.from('Spark-Cockpit').toString('base64'), 'http://100.64.3.4:11434', 'listen on 0.0.0.0', 'http://[fec0::7]/', 'http://[64:ff9b::c0a8:105]/']) assert.ok(hit(c), c);
+  assert.deepEqual(ORDINARY_WORDS.sort(), ['Admin', 'Community', 'Persönlich', 'Records', 'Settings']);
+  const words = denyWordsFrom({ targets: ['Records', 'Studio', 'Basic'] }, {});
+  assert.deepEqual(words.sort(), ['Basic', 'Studio'], 'only the listed ordinary words stay allowed');
+  assert.equal(hit('the design-tokens-maintainer records it', { denyWords: ['Design-Tokens'] }), false, 'dash rule for fragment words');
 });

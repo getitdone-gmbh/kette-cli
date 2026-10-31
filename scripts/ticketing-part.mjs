@@ -15,20 +15,25 @@ const FORBIDDEN = [
   ['session name', /alexanderfriedl-[0-9a-z]+/i],
   ['Figma URL', /figma\.com\/(?:file|design|board|proto|make|slides|deck|community\/file)\/[a-z0-9]{6,}/i],
   ['Figma file key', /"key"\s*:\s*"[a-z0-9]{20,24}"|file_?key['"]?\s*[:=]\s*['"`][a-z0-9]{10,}/i],
-  ['private address', /(?<![\d.])(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01])|169\.254)\.\d{1,3}\.\d{1,3}(?![\d.])/],
-  ['private IPv6 address', /\[?(?<![0-9a-f:])(?:f[cd][0-9a-f]{0,2}|fe[89ab][0-9a-f]?):[0-9a-f:]*\]?/i],
+  ['private address', /(?<![\d.])(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01])|169\.254|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7]))\.\d{1,3}\.\d{1,3}(?![\d.])|(?<![\d.])0\.0\.0\.0(?![\d.])/],
+  ['private IPv6 address', /\[?(?<![0-9a-f:])(?:f[cd][0-9a-f]{0,2}|fe[89abcdef][0-9a-f]?|64:ff9b):[0-9a-f:.]*\]?/i],
   ['e-mail address', /[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}/i],
   ['24-hex id', /(?<![0-9a-f])[0-9a-f]{24}(?![0-9a-f])/i],
 ];
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-// A dash belongs to the word, so design-tokens-maintainer is no hit for Design-Tokens
+// A word of the fragment: a dash belongs to the word, so design-tokens-maintainer is no hit for Design-Tokens; the fixed deny words
+// match anywhere (alexfriedl-portfolio, spark-cockpit, x-kneier-web, KETTE-39)
 const word = (w) => new RegExp(`(?<![a-z0-9-])${escape(w)}(?![a-z0-9-])`, 'i');
+const anywhere = (w) => new RegExp(escape(w), 'i');
+// Fragment strings that are ordinary words, named one by one (a Figma file called Settings), never a pattern
+export const ORDINARY_WORDS = ['Settings', 'Records', 'Admin', 'Community', 'Persönlich'];
 
 // The Base64 forms of a word at the three possible offsets, only the characters the word decides alone
 export function base64Forms(text) {
   const forms = [];
-  for (const variant of new Set([text, text.toLowerCase()])) {
+  const capital = (t) => t.replace(/(^|[^a-z])([a-z])/gi, (_, a, b) => a + b.toUpperCase());
+  for (const variant of new Set([text, text.toLowerCase(), text.toUpperCase(), capital(text.toLowerCase())])) {
     for (let off = 0; off < 3; off++) {
       const enc = Buffer.from('\0'.repeat(off) + variant).toString('base64');
       const form = enc.slice([0, 2, 3][off], Math.floor((off + variant.length) / 3) * 4);
@@ -45,15 +50,26 @@ const strings = (v, keys = false) => (typeof v === 'string' ? [v] : Array.isArra
 export function denyWordsFrom(fragment, neutral) {
   const known = new Set([...strings(neutral, true), 'owner', 'member'].map((s) => s.toLowerCase()));
   // A single capitalised word (a Figma file named Records or Settings) is ordinary language, not a secret
-  return [...new Set(strings(fragment).filter((s) => s.trim().length >= 4 && !known.has(s.toLowerCase()) && !/^\p{Lu}\p{Ll}+$/u.test(s)))];
+  return [...new Set(strings(fragment).filter((s) => s.trim().length >= 4 && !known.has(s.toLowerCase()) && !ORDINARY_WORDS.includes(s)))];
 }
 
 const decoded = (text) => text.replace(/%([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+// Every run that looks like Base64, decoded at each of the four alignments, so a word in any case is found inside it (KETTE-39)
+export function decodedBase64(text) {
+  const out = [];
+  for (const run of text.match(/[A-Za-z0-9+/_-]{8,}={0,2}/g) ?? []) {
+    for (let shift = 0; shift < 4; shift++) {
+      const part = run.slice(shift).replace(/=+$/, '');
+      if (part.length >= 8) out.push(Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('latin1'));
+    }
+  }
+  return out.join('\n');
+}
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
 
 // Every finding as "file: what (match)"; an empty list means the folder may ship
 export function forbiddenIn(dir, { denyWords = [] } = {}) {
-  const words = [...DENY_WORDS, ...denyWords];
+  const words = [...DENY_WORDS.map((w) => [w, anywhere(w)]), ...denyWords.map((w) => [w, word(w)])];
   const out = [];
   for (const f of walk(dir)) {
     const raw = fs.readFileSync(f, 'utf8');
@@ -64,8 +80,10 @@ export function forbiddenIn(dir, { denyWords = [] } = {}) {
       if (m) out.push(`${rel}: ${what} (${m[0].slice(0, 60)})`);
     }
     for (const host of text.match(/[a-z0-9.-]*\.itdone\.(?:de|cloud)/gi) ?? []) if (host.toLowerCase() !== PUBLIC_API) out.push(`${rel}: internal host (${host})`);
-    for (const w of words) {
-      if (word(w).test(text)) out.push(`${rel}: internal word (${w.slice(0, 60)})`);
+    const hidden = decodedBase64(raw);
+    for (const [w, re] of words) {
+      if (re.test(text)) out.push(`${rel}: internal word (${w.slice(0, 60)})`);
+      else if (anywhere(w).test(hidden)) out.push(`${rel}: internal word in Base64 (${w.slice(0, 60)})`);
       else if (base64Forms(w).some((b) => raw.includes(b))) out.push(`${rel}: internal word in Base64 (${w.slice(0, 60)})`);
     }
   }
