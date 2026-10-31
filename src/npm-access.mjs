@@ -188,6 +188,8 @@ GitLab and others, in the job before npm ci:
   npm config set ${authKey(registry)}:_authToken "$KETTE_NPM_TOKEN"`;
 
 const dateOf = (iso) => isoDate(iso, 'never');
+// The delivery service keys CI tokens by UUID; checked here, so a typo never reaches it and never ends with exit 0 (KETTE-20)
+const CI_TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // kette token ci create <label> | list | revoke <id>
 export async function ciToken(action, arg) {
@@ -207,6 +209,7 @@ export async function ciToken(action, arg) {
   }
   if (action === 'revoke') {
     if (!arg) throw new Error('Enter an ID, kette token ci list shows the IDs');
+    if (!CI_TOKEN_ID.test(arg)) throw new Error(`"${arg}" is not a CI token ID (a UUID like 00000000-0000-4000-8000-000000000000). kette token ci list shows the IDs.`);
     const { revoked } = await revokeCiToken({ ...auth, id: arg });
     console.log(revoked ? `CI token ${arg} revoked.` : `No active CI token with ID ${arg} (already revoked or unknown).`);
     return 0;
