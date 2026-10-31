@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { home } from './paths.mjs';
 import { linksKnownMissing, linksMissing } from './files.mjs';
 
-// Lock for machine files several kette processes change at once (docs/adr/0002, decisions 17, 21 and 22). Three rules make it correct:
+// Lock for machine files several kette processes change at once (docs/adr/0002, decisions 17, 21, 22 and 23). Three rules make it correct:
 // 1. The lock is a file that appears with its whole owner (pid, start, time, token): the owner is written to a temp file of this
 //    process, then hard-linked to the lock path; link fails when the path exists, so exactly one process wins and nobody sees a half
 //    owner. On a drive without hard links the lock is created exclusively and written at once; a reader may see it empty for a moment.
@@ -22,8 +22,9 @@ const STALE_MS = 120000;
 const REUSE_CHECK_MS = 2000;
 // An async holder renews the time of its lock this often, so a long board write is never judged older than STALE_MS (LK-6)
 const REFRESH_MS = 10000;
-// Windows: the stamped start of Node and the StartTime of the process differ by the start up of Node only
-const WINDOWS_SLACK_MS = 2000;
+// Windows: the stamped start of Node and the StartTime of the process differ by the start up of Node, which a cold start with a
+// virus scan can stretch to many seconds; a reused pid is still caught by STALE_MS
+const WINDOWS_SLACK_MS = 30000;
 const BUSY = ['EPERM', 'EBUSY', 'EACCES'];
 
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -46,7 +47,10 @@ function systemStart(pid) {
       // Field 22, after the name in field 2, which may hold spaces
       const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
       const ticks = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
-      return `${fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()}:${ticks}`;
+      // Some containers have no boot id: then the ticks alone (LK-7)
+      let boot = '';
+      try { boot = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(); } catch (err) { if (err.code !== 'ENOENT' && err.code !== 'EACCES') throw err; }
+      return boot ? `${boot}:${ticks}` : ticks;
     }
     const windows = process.platform === 'win32';
     const [cmd, args] = windows
@@ -122,10 +126,11 @@ function createOrTaken(file, content) {
   try {
     fs.writeFileSync(fd, content);
     fs.fsyncSync(fd);
-    // The name must still lead to the file this process wrote; otherwise it was removed and taken meanwhile (LK-4)
+    // The name must still lead to the file this process wrote; otherwise it was removed and taken meanwhile (LK-4). Some drives
+    // without hard links give no stable inode: then the content decides, which holds the own token or claimant (LK-8)
     const written = fs.fstatSync(fd);
     const named = statOf(file);
-    ours = Boolean(named) && named.ino === written.ino && named.dev === written.dev;
+    ours = Boolean(named) && ((named.ino === written.ino && named.dev === written.dev) || readRaw(file) === content);
   } catch (err) {
     fs.closeSync(fd);
     unlinkIfThere(file);
@@ -207,9 +212,31 @@ function removeAbandoned(file) {
   return removeClaimed(file, 'unreadable', () => { const now = statOf(file); return abandoned(now) && now.mtimeMs === seen.mtimeMs && now.size === seen.size; });
 }
 
-// Claims of claimants that are gone, left next to any lock (CR-NEW-11)
+// A claim only means something while its lock still holds the token it names (an unreadable lock for 'unreadable'): once the lock
+// is gone or carries another token, nobody can use the claim any more and a claimant that is still at work stops at its own check
+// of the claim (K16-03)
+function orphaned(dir, name) {
+  const m = name.match(/^(.+\.lck)\.([^.]+)\.claim$/);
+  if (!m) return false;
+  const lock = path.join(dir, m[1]);
+  if (!statOf(lock)) return true;
+  const owner = readOwner(lock);
+  return m[2] === 'unreadable' ? owner !== null : owner?.token !== m[2];
+}
+
+// Claims a killed kette left next to any lock: orphaned ones at once, those of claimants that are gone after STALE_MS (CR-NEW-11)
 function sweepClaims(dir) {
-  for (const name of fs.readdirSync(dir)) if (name.endsWith('.claim')) clearClaim(path.join(dir, name), STALE_MS);
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.claim')) continue;
+    if (orphaned(dir, name)) unlinkIfThere(path.join(dir, name));
+    else clearClaim(path.join(dir, name), STALE_MS);
+  }
+}
+
+// The last holder of the lock name died while holding it: a kette killed in the middle, whose work may be half done (K16-02)
+export function interrupted(name) {
+  const owner = readOwner(lockFile(name));
+  return Boolean(owner?.token) && gone(owner, Infinity);
 }
 
 // Runs fn while holding the lock; locks with different names never wait for each other, the same name must not be nested

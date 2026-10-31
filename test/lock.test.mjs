@@ -176,9 +176,12 @@ test('CR-NEW-11: claims of claimants that are gone and older than STALE_MS are s
   const dead = await deadPid();
   const put = (name, content, age) => { const f = path.join(locks, name); fs.writeFileSync(f, content); if (age) aged(f, age); return name; };
   const swept = [put('c.lck.orphan.claim', JSON.stringify({ pid: dead, start: 1, at: 0 }), 121000), put('other.lck.cut.claim', '', 121000)];
+  // Kept: claims whose lock still holds the token they name
+  put('held.lck', JSON.stringify({ pid: process.pid, at: Date.now(), token: 'fresh' }), 0);
+  put('live.lck', JSON.stringify({ pid: process.pid, at: Date.now(), token: 'live' }), 0);
   const kept = [
-    put('c.lck.fresh.claim', JSON.stringify({ pid: dead, start: 1, at: Date.now() }), 0),
-    put('c.lck.live.claim', JSON.stringify({ pid: process.pid, at: 0 }), 121000),
+    put('held.lck.fresh.claim', JSON.stringify({ pid: dead, start: 1, at: Date.now() }), 0),
+    put('live.lck.live.claim', JSON.stringify({ pid: process.pid, at: 0 }), 121000),
   ];
   assert.equal(withLock('c', () => 'ran'), 'ran');
   const left = fs.readdirSync(locks);
@@ -381,6 +384,71 @@ test('LK-6: a live holder whose lock time is old but renewed is not taken over',
   fs.writeFileSync(path.join(locksOf(home), 'c.lck'), JSON.stringify({ pid: process.pid, at: Date.now() - 130000, token: 'busy' }));
   const c = spawn(process.execPath, [overlapWorker(dir), log, '0'], { env: { ...process.env, KETTE_HOME: home }, stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 3000));
+  const entered = fs.readFileSync(log, 'utf8');
+  // Only the PID of the child this test started is stopped
+  c.kill();
+  await new Promise((r) => c.on('close', r));
+  assert.equal(entered, '', 'the waiter still waits');
+});
+
+test('K16-03: a claim whose lock is gone or holds another token is removed by the next lock, also when it is fresh', async () => {
+  const { withLock } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const locks = locksOf(process.env.KETTE_HOME);
+  const dead = await deadPid();
+  const put = (name, content) => { fs.writeFileSync(path.join(locks, name), content); return name; };
+  // What a kette killed between its claim and its unlink leaves on a drive without hard links (QA K16-03)
+  const orphans = [put('state.lck.db2a929e7222f998.claim', JSON.stringify({ pid: dead, at: Date.now() }))];
+  put('other.lck', JSON.stringify({ pid: process.pid, at: Date.now(), token: 'now' }));
+  orphans.push(put('other.lck.before.claim', JSON.stringify({ pid: dead, at: Date.now() })));
+  orphans.push(put('other.lck.unreadable.claim', JSON.stringify({ pid: dead, at: Date.now() })));
+  const kept = put('other.lck.now.claim', JSON.stringify({ pid: dead, at: Date.now() }));
+  assert.equal(withLock('x', () => 'ran'), 'ran');
+  const left = fs.readdirSync(locks);
+  for (const n of orphans) assert.ok(!left.includes(n), `${n} removed`);
+  assert.ok(left.includes(kept), 'the claim of the lock that is there stays');
+});
+
+test('LK-7: without a boot id (some containers) the start ticks alone still tell a reused pid', { timeout: 60000, skip: process.platform !== 'linux' && 'Linux /proc only' }, async () => {
+  const { home, counter, script, env } = setup();
+  const noBoot = hook('no-boot-id.mjs', `const read = fs.readFileSync;
+fs.readFileSync = function (p, ...rest) {
+  if (p === '/proc/sys/kernel/random/boot_id') throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  return read.call(this, p, ...rest);
+};`);
+  fs.writeFileSync(path.join(locksOf(home), 'c.lck'), JSON.stringify({ pid: process.pid, start: 'another process', at: Date.now() - 3000, token: 'reused' }));
+  const started = Date.now();
+  const r = await runNode(noBoot, script, [counter, '1'], env);
+  assert.equal(r.code, 0, r.out);
+  assert.ok(Date.now() - started < 25000, 'taken over long before the 30 s wait ends');
+});
+
+test('LK-8: without hard links and without stable inodes the own lock is still recognised by its content', { timeout: 60000 }, async () => {
+  const { home, counter, script, env } = setup();
+  const unstable = hook('unstable-ino.mjs', `const link = fs.linkSync;
+fs.linkSync = function (from, to) {
+  if (String(to).startsWith(process.env.KETTE_HOME)) throw Object.assign(new Error('ENOTSUP'), { code: 'ENOTSUP' });
+  return link.call(this, from, to);
+};
+const fstat = fs.fstatSync;
+fs.fstatSync = function (...args) { const s = fstat.apply(this, args); s.ino += 1; return s; };`);
+  const started = Date.now();
+  const r = await runNode(unstable, script, [counter, '3'], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(Number(fs.readFileSync(counter, 'utf8')), 3);
+  assert.ok(Date.now() - started < 25000, 'no wait on its own lock');
+  assert.deepEqual(leftovers(home), []);
+});
+
+test('Windows: a holder whose Node started many seconds after its process (cold start, virus scan) is not taken for a reused pid', { timeout: 60000, skip: process.platform !== 'win32' && 'Windows StartTime only' }, async () => {
+  const home = tmp();
+  const dir = tmp();
+  const log = path.join(dir, 'log');
+  fs.writeFileSync(log, '');
+  // This live test process as owner, its recorded start 10 s off the StartTime of the system
+  fs.writeFileSync(path.join(locksOf(home), 'c.lck'), JSON.stringify({ pid: process.pid, start: Math.round(performance.timeOrigin) - 10000, at: Date.now() - 3000, token: 'slow' }));
+  const c = spawn(process.execPath, [overlapWorker(dir), log, '0'], { env: { ...process.env, KETTE_HOME: home }, stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 6000));
   const entered = fs.readFileSync(log, 'utf8');
   // Only the PID of the child this test started is stopped
   c.kill();
