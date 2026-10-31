@@ -83,9 +83,11 @@ async function run(deps) {
   try {
     const input = JSON.parse(await readStdin());
     const project = ticketProject(deps.root, deps);
-    const t = await loadTicketing(project.bundleDir);
-    const routing = t.lib.projectRouting(t.routing, { ...contextOf(project), ticketing: project.effective.ticketing || { adapter: 'workload-zero', project: '' } });
-    const context = await t.hook.decide(String(input?.prompt ?? ''), { routing, lastAssistant: t.hook.lastAssistantText(input?.transcript_path) });
+    const { lib } = await loadTicketing(project.bundleDir);
+    const routing = lib.routingFor({ ...contextOf(project), ticketing: project.effective.ticketing || { adapter: 'workload-zero', project: '' } });
+    // A model is only asked when the instance names one (ticketing.intakeModel) or the environment does (KETTE-26)
+    const modelUrl = project.effective.ticketing?.intakeModel;
+    const context = await lib.decide(String(input?.prompt ?? ''), { routing, lastAssistant: lib.lastAssistantText(input?.transcript_path), ...(modelUrl ? { modelUrl } : {}) });
     if (context) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: EVENT, additionalContext: context } }));
   } catch {
     // A hook must never block or break a prompt
