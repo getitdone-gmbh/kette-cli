@@ -505,3 +505,41 @@ test('KETTE-43: an empty claim left next to a stale lock blocks for seconds, not
   assert.ok(Date.now() - started < 25000);
   assert.deepEqual(leftovers(home), []);
 });
+
+test('WC-1: a refused second read never turns a readable claim of a dead claimant into an unreadable one', async () => {
+  const { removeIfToken, lockFile } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const f = lockFile('c');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  const dead = await deadPid();
+  fs.writeFileSync(f, JSON.stringify({ pid: dead, at: Date.now(), token: 'gone' }));
+  // Fresh: as unreadable it would stay for REUSE_CHECK_MS; as the claim of a dead claimant it goes at once
+  fs.writeFileSync(`${f}.gone.claim`, JSON.stringify({ pid: dead, at: Date.now(), dead: true }));
+  const read = fs.readFileSync;
+  let seen = 0;
+  fs.readFileSync = function (p, ...rest) {
+    const out = read.call(this, p, ...rest);
+    if (String(out).includes('"dead":true') && ++seen > 1) throw Object.assign(new Error('EIO: read failed'), { code: 'EIO' });
+    return out;
+  };
+  try {
+    assert.equal(removeIfToken(f, 'gone'), true);
+  } finally {
+    fs.readFileSync = read;
+  }
+  assert.deepEqual(fs.readdirSync(path.dirname(f)), []);
+});
+
+test('WC-2: a claim of another thread of this process is not taken for an own leftover', async () => {
+  const { removeIfToken, lockFile } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const f = lockFile('c');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ pid: await deadPid(), at: Date.now(), token: 'gone' }));
+  // Locks hold per thread: a worker thread of this process may be at work with this claim
+  const claim = JSON.stringify({ pid: process.pid, thread: 7, at: Date.now() });
+  fs.writeFileSync(`${f}.gone.claim`, claim);
+  assert.equal(removeIfToken(f, 'gone'), false);
+  assert.equal(fs.readFileSync(`${f}.gone.claim`, 'utf8'), claim, 'the claim of the other thread stays');
+  assert.ok(fs.existsSync(f));
+});

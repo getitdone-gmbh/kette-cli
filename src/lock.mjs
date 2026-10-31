@@ -2,10 +2,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { threadId } from 'node:worker_threads';
 import { home } from './paths.mjs';
 import { linksKnownMissing, linksMissing } from './files.mjs';
 
-// Lock for machine files several kette processes change at once (docs/adr/0002, decisions 17, 21, 22 and 23). Three rules make it correct:
+// Lock for machine files several kette processes change at once (docs/adr/0002, decisions 17 and 21 to 24). Three rules make it correct:
 // 1. The lock is a file that appears with its whole owner (pid, start, time, token): the owner is written to a temp file of this
 //    process, then hard-linked to the lock path; link fails when the path exists, so exactly one process wins and nobody sees a half
 //    owner. On a drive without hard links the lock is created exclusively and written at once; a reader may see it empty for a moment.
@@ -161,9 +162,10 @@ function place(file, content) {
   }
 }
 
-const claimant = () => JSON.stringify({ pid: process.pid, start: ownStart(), at: Date.now() });
+// The thread is named too: locks hold per thread, so only a claim of this very thread can be a leftover of its own (WC-2)
+const claimant = () => JSON.stringify({ pid: process.pid, thread: threadId, start: ownStart(), at: Date.now() });
 
-// A claim whose claimant is gone is cleared; an unreadable one (cut short on a drive without hard links) only after STALE_MS.
+// A claim whose claimant is gone is cleared; an unreadable one (cut short, or put back empty by an older kette) after REUSE_CHECK_MS.
 // minAge keeps the sweep away from fresh claims. The claim is moved aside first, so of several processes only one clears it, and a
 // claim that a live claimant placed after the look goes back; the content tells them apart (pid, start and time in ms), not the
 // file times, which Windows reports differently for the names of one hard-linked file
@@ -171,13 +173,16 @@ function clearClaim(claim, minAge = 0) {
   const before = statOf(claim);
   if (!before) return;
   const raw = readRaw(claim);
-  const by = readOwner(claim);
+  // Parsed from that one read, which already waited out a refusal; a second read could fail and make a readable claim unreadable (WC-1)
+  let by = null;
+  try { by = raw === null ? null : JSON.parse(raw); } catch { by = null; }
   // The time a claimant wrote counts; the file time only for a claim cut short. A claimant writes its claim in microseconds, so one
   // still unreadable after REUSE_CHECK_MS is left over; even if a claimant were still at work, it stops at its own check (LK-3)
   const age = Date.now() - (Number.isFinite(by?.at) ? by.at : before.mtimeMs);
-  // A claim of this process is a leftover of its own earlier attempt: every lock step runs synchronously, so none of its claims is in
-  // use while it looks. A clearer that put back a claim this process had already given up leaves exactly that (KETTE-43)
-  const own = by?.pid === process.pid;
+  // A claim of this thread is a leftover of its own earlier attempt: every lock step runs synchronously, so none of its claims is in
+  // use while it looks. A clearer that put back a claim this thread had already given up leaves exactly that (KETTE-43). A claim
+  // without a thread comes from a kette before WC-2, which ran only in the main thread
+  const own = by?.pid === process.pid && (by.thread ?? 0) === threadId;
   if (!own && (age < minAge || !(by?.pid ? gone(by, age) : age > REUSE_CHECK_MS))) return;
   const aside = `${claim}.${process.pid}.${hex()}.tmp`;
   try { retry(() => fs.renameSync(claim, aside)); } catch (err) { if (err.code === 'ENOENT') return; throw err; }
