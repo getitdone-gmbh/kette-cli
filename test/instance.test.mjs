@@ -351,3 +351,38 @@ test('CR-AT-5: the .gitignore kette keeps ignores the temp files of a killed ket
   for (const f of ['.kette/.profile.json.4242.0a1b2c3d4e5f.tmp', '.claude/.settings.json.17.abcdef012345.tmp']) assert.equal(spawnSync('git', ['-C', d, 'check-ignore', '-q', f]).status, 0, f);
   assert.notEqual(spawnSync('git', ['-C', d, 'check-ignore', '-q', '.kette/profile.json']).status, 0, 'the real file is not ignored');
 });
+
+test('KETTE-24: a station may carry the definition of done the instance sets for it', () => {
+  assert.deepEqual(validateInstance({ ...full(), stations: ['tokens', { id: 'app', definitionOfDone: 'Live on acme.test, deploy run checked' }] }), []);
+  const errs = validateInstance({ ...full(), stations: [{ id: 'app', definitionOfDone: '' }, { id: 'Web' }, { id: 'zero', done: 'x' }, 'app'] });
+  for (const e of [/stations\[0\]\.definitionOfDone must be one line/, /stations\[1\] must be a station id .* or an object with id and definitionOfDone/, /unknown field stations\[2\]\.done/]) assert.ok(errs.some((x) => e.test(x)), `${e} in ${errs.join('; ')}`);
+  assert.deepEqual(validateInstance({ ...full(), stations: ['app', { id: 'app' }] }), ['stations[1] app is listed twice']);
+});
+
+test('KETTE-28: ticketing.project is one path segment, session and intake model are explicit, station objects carry routing', () => {
+  for (const project of ['../../tasks/deleted', 'a/b', 'x?y=1#z', '..', 'proj-acme/../../tasks/deleted', 'a b', '']) {
+    assert.ok(validateInstance({ ...full(), ticketing: { adapter: 'workload-zero', project } }).some((e) => /ticketing\.project must be a board project id/.test(e)), project);
+  }
+  assert.deepEqual(validateInstance({ ...full(), ticketing: { adapter: 'workload-zero', project: '6ae510fc15371242272a4278', session: true, intakeModel: 'https://model.example/v1' } }), []);
+  const bad = validateInstance({ ...full(), ticketing: { adapter: 'workload-zero', project: 'p1', session: 'yes', intakeModel: 'http://192.168.178.175:11434/v1' } });
+  assert.ok(bad.some((e) => /ticketing\.session must be true or false/.test(e)));
+  assert.ok(bad.some((e) => /ticketing\.intakeModel must be an https URL/.test(e)));
+  assert.deepEqual(validateInstance({ ...full(), stations: [{ id: 'prototype', owner: 'lead@acme.test', builder: 'ux-designer', approve: 'lead@acme.test', merge: 'release-team', targets: ['proto-site'] }] }), []);
+  assert.ok(validateInstance({ ...full(), stations: [{ id: 'app', targets: [] }] }).some((e) => /targets must be a list of distinct names/.test(e)));
+});
+
+test('KETTE-38: ticketing.intakeModel refuses private, link-local and unique-local addresses, also over https and IPv4-mapped', async () => {
+  const { isModelUrl } = await import('../src/instance/config.mjs');
+  for (const url of ['https://10.1.2.3/v1', 'https://172.16.0.1/v1', 'https://192.168.178.175/v1', 'https://169.254.169.254/x', 'https://[fd00::12]/v1', 'https://[fe80::1]/v1', 'https://[::ffff:10.0.0.1]/v1', 'http://model.example/v1', 'ftp://x.example/']) {
+    assert.equal(isModelUrl(url), false, url);
+    assert.ok(validateInstance({ ...full(), ticketing: { adapter: 'workload-zero', project: 'p1', intakeModel: url } }).some((e) => /intakeModel must be an https URL outside private/.test(e)), url);
+  }
+  for (const url of ['https://model.example/v1', 'http://localhost:11434/v1', 'http://127.0.0.1:11434/v1', 'http://[::1]:11434/v1']) assert.equal(isModelUrl(url), true, url);
+});
+
+test('KETTE-39: shared, site-local, NAT64 with a private target and unspecified addresses are refused for the intake model', async () => {
+  const { isModelUrl, isPrivateAddress } = await import('../src/instance/config.mjs');
+  for (const url of ['https://100.64.1.2/v1', 'https://0.0.0.0/v1', 'https://[fec0::1]/v1', 'https://[64:ff9b::c0a8:105]/v1', 'https://[::]/v1']) assert.equal(isModelUrl(url), false, url);
+  assert.equal(isPrivateAddress('100.128.0.1'), false);
+  assert.equal(isPrivateAddress('64:ff9b::808:808'), false);
+});

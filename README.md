@@ -66,6 +66,16 @@ kette doctor --instance acme            # every repo of the instance on this mac
 
 A repo names its instance in `.kette/profile.json` and inherits edition, ticketing, wallet defaults, overlays and stations; its own stack, platform and apps win. The whole team needs kette 0.10 or newer: the committed `.claude/settings.json` switches the plugin IDs of older versions (`<plugin>@kette`) off, so a teammate on 0.9 has no Kette plugins in such a repo until they update and run `kette add`. A Community instance never enables Enterprise plugins or features, even on a licensed machine; an Enterprise instance needs the licence. A repo without an instance works as before. Details, the verified list of what changes outside a project and the test matrix: [docs/instances.md](docs/instances.md), decision: [ADR-0002](docs/adr/0002-project-scoped-instances.md).
 
+### Ticketing (Enterprise)
+
+```sh
+kette ticket connect workload-zero --project <id>     # the board of this repo's instance
+kette ticket new "Save goes to the right" --by lead@acme.example --source chat:<session> --stations prototype:<repo>,app:<repo>
+kette ticket check KD-0001                            # follow-through per station
+```
+
+Board, stations and members come from the instance, the credential from the secret wallet; every write shows its plan first. Commands and gates: [docs/ticketing.md](docs/ticketing.md), decision: [ADR-0003](docs/adr/0003-ticketing-from-the-enterprise-bundle.md).
+
 ## Review flow (`flow` in the profile)
 How a team reviews changes is set once in `.kette/profile.json`; `kette add` and `kette update` write it into the flow text of `.kette/README.md`, which Claude Code reads in every session.
 

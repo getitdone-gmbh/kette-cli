@@ -106,15 +106,78 @@ const memberErrors = (m, at) => {
   return errs;
 };
 
+const DONE_MAX = 1000;
+const TARGETS_MAX = 50;
+const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
+const v4Private = (ip) => {
+  const p = ip.split('.').map(Number);
+  return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) && (p[0] === 0 || p[0] === 10 || (p[0] === 100 && p[1] >= 64 && p[1] <= 127) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 169 && p[1] === 254));
+};
+// The eight groups of an IPv6 address, with an embedded dotted IPv4 tail; null when it is none
+function v6Groups(ip) {
+  let s = ip;
+  const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(s);
+  if (dotted) {
+    const p = dotted[1].split('.').map(Number);
+    s = `${s.slice(0, -dotted[1].length)}${(p[0] * 256 + p[1]).toString(16)}:${(p[2] * 256 + p[3]).toString(16)}`;
+  }
+  const parts = s.split('::');
+  if (parts.length > 2) return null;
+  const head = parts[0] ? parts[0].split(':') : [];
+  const tail = parts.length === 2 ? (parts[1] ? parts[1].split(':') : []) : null;
+  const groups = tail === null ? head : [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail];
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return groups.map((g) => parseInt(g, 16));
+}
+const v4Of = (hi, lo) => [Math.floor(hi / 256), hi % 256, Math.floor(lo / 256), lo % 256].join('.');
+// Private, shared, link-local, site-local, unique-local and unspecified addresses, also IPv4-mapped and NAT64 forms (KETTE-38, KETTE-39);
+// names that resolve to them are refused by the hook before it connects
+export function isPrivateAddress(raw) {
+  const ip = String(raw).replace(/^\[|\]$/g, '').toLowerCase();
+  if (!ip.includes(':')) return v4Private(ip);
+  const g = v6Groups(ip);
+  if (!g) return false;
+  if (g.every((x) => x === 0)) return true;
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return v4Private(v4Of(g[6], g[7]));
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return v4Private(v4Of(g[6], g[7]));
+  return (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0;
+}
+// A model the intake hook may ask: https, http only on this machine, never a private, link-local or unique-local address
+export function isModelUrl(url) {
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  const host = u.hostname.toLowerCase();
+  if (LOOPBACK.includes(host)) return u.protocol === 'https:' || u.protocol === 'http:';
+  return u.protocol === 'https:' && !isPrivateAddress(host);
+}
+
+// A board project id is one URL path segment (KETTE-28)
+export const PROJECT_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+// A station is its id, or an object with the id and the definition of done this instance sets for it (KETTE-24)
+export const stationId = (s) => (isObject(s) ? s.id : s);
+function stationErrors(s, at) {
+  const bad = [`${at} must be a station id (lowercase letters, digits, dashes) or an object with id and definitionOfDone`];
+  if (typeof s === 'string') return ID_PATTERN.test(s) ? [] : bad;
+  if (!isObject(s) || typeof s.id !== 'string' || !ID_PATTERN.test(s.id)) return bad;
+  const errs = unknown(s, ['id', 'definitionOfDone', 'owner', 'builder', 'approve', 'merge', 'targets'], `${at}.`);
+  const done = s.definitionOfDone;
+  if ('definitionOfDone' in s && (typeof done !== 'string' || !done.trim() || done.length > DONE_MAX || CONTROL.test(done))) errs.push(`${at}.definitionOfDone must be one line of at most ${DONE_MAX} characters`);
+  for (const k of ['owner', 'builder', 'approve', 'merge']) if (k in s && !isText(s[k])) errs.push(`${at}.${k} must be one line (a member, session or agent id)`);
+  if ('targets' in s && (!Array.isArray(s.targets) || !s.targets.length || s.targets.length > TARGETS_MAX || s.targets.some((x) => !isText(x)) || new Set(s.targets).size !== s.targets.length)) errs.push(`${at}.targets must be a list of distinct names (repos, Figma files), at most ${TARGETS_MAX}`);
+  return errs;
+}
+
 function sectionErrors(i) {
   const errs = [];
   if ('ticketing' in i) {
     const t = i.ticketing;
     if (!isObject(t)) errs.push('ticketing must be an object');
     else {
-      errs.push(...unknown(t, ['adapter', 'project'], 'ticketing.'));
+      errs.push(...unknown(t, ['adapter', 'project', 'session', 'intakeModel'], 'ticketing.'));
       if (typeof t.adapter !== 'string' || !ID_PATTERN.test(t.adapter)) errs.push('ticketing.adapter must be an adapter id (lowercase letters, digits, dashes)');
-      if (!isText(t.project)) errs.push('ticketing.project must be one line');
+      if (typeof t.project !== 'string' || !PROJECT_PATTERN.test(t.project)) errs.push('ticketing.project must be a board project id (letters, digits, dash, underscore, at most 64)');
+      if ('session' in t && typeof t.session !== 'boolean') errs.push('ticketing.session must be true or false (true allows the shared Workbase session file)');
+      if ('intakeModel' in t && (!isText(t.intakeModel) || !isModelUrl(t.intakeModel))) errs.push('ticketing.intakeModel must be an https URL outside private, link-local and unique-local networks (http only on this machine)');
     }
   }
   if ('wallet' in i) {
@@ -128,7 +191,7 @@ function sectionErrors(i) {
     }
   }
   errs.push(...listErrors(i.overlays, 'overlays', (o, at) => (isObject(o) && isText(o.source) && !unknown(o, ['source'], '').length ? [] : [`${at} must be an object with source`]), (o) => o.source));
-  errs.push(...listErrors(i.stations, 'stations', (s, at) => (typeof s === 'string' && ID_PATTERN.test(s) ? [] : [`${at} must be a station id (lowercase letters, digits, dashes)`]), (s) => s));
+  errs.push(...listErrors(i.stations, 'stations', stationErrors, stationId));
   return errs;
 }
 

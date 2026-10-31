@@ -67,6 +67,25 @@ export function removeIfToken(file, token) {
 
 // Runs fn while holding the lock; locks with different names never wait for each other, the same name must not be nested
 export function withLock(name, fn) {
+  const { file, token } = acquire(name);
+  try {
+    return fn();
+  } finally {
+    release(file, token, name);
+  }
+}
+
+// The same lock around async work (a board write); released when the promise settles
+export async function withLockAsync(name, fn) {
+  const { file, token } = acquire(name);
+  try {
+    return await fn();
+  } finally {
+    release(file, token, name);
+  }
+}
+
+function acquire(name) {
   const file = lockFile(name);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   sweepDead(path.dirname(file), /\.(\d+)\.[0-9a-f]+\.tmp$/);
@@ -85,11 +104,7 @@ export function withLock(name, fn) {
   } finally {
     unlinkIfThere(temp);
   }
-  try {
-    return fn();
-  } finally {
-    release(file, owner.token, name);
-  }
+  return { file, token: owner.token };
 }
 
 // Never gives up silently: a release that keeps failing (Windows keeps a file busy) says so, the next run takes the lock over

@@ -184,7 +184,7 @@ test('login, update and logout with several instances keep every repo in its sco
   ok(await kette(box, ['update', '--no-npm'], { ...rec, cwd: ent, allow: CLAUDE_REGISTRY }));
   const market = (edition) => path.join(box.home, '.kette', 'bundles', `marketplace-${edition}`, 'plugins');
   assert.deepEqual(fs.readdirSync(market('community')).sort(), ['kette-engineering-core', 'ui-laws']);
-  assert.deepEqual(fs.readdirSync(market('enterprise')).sort(), ['design-review-pack', 'design-system-agents', 'kette-engineering', 'kette-engineering-core']);
+  assert.deepEqual(fs.readdirSync(market('enterprise')).sort(), ['design-review-pack', 'design-system-agents', 'kette-engineering', 'kette-engineering-core', 'kette-ticketing']);
   ok(await kette(box, ['doctor'], { ...rec, cwd: ent }));
   ok(await kette(box, ['doctor'], { ...rec, cwd: com }));
   ok(await kette(box, ['logout', '--no-npm'], { ...rec, cwd: com, allow: CLAUDE_REGISTRY }));

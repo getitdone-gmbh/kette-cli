@@ -99,3 +99,15 @@ test('CR-NEW-7: removing a lock that another process removed first is no error',
   fs.mkdirSync(path.dirname(lockFile('gone')), { recursive: true });
   assert.equal(removeIfToken(lockFile('gone'), 'any'), false);
 });
+
+test('KETTE-29: withLockAsync holds the lock until the async work is done', async () => {
+  const { withLockAsync, lockFile } = await import('../src/lock.mjs');
+  const fsMod = await import('node:fs');
+  let seen = null;
+  await withLockAsync('async-probe', async () => {
+    await new Promise((r) => setTimeout(r, 20));
+    seen = fsMod.existsSync(lockFile('async-probe'));
+  });
+  assert.equal(seen, true, 'the lock file exists while the work runs');
+  assert.equal(fsMod.existsSync(lockFile('async-probe')), false, 'released afterwards');
+});

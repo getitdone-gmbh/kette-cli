@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "chainOrder": ["prototype", "app"],
+  "offChain": [],
+  "members": {},
+  "stations": { "prototype": { "visible": true, "defaultArtifact": "screen" }, "app": { "visible": true, "defaultArtifact": "screen" } },
+  "routes": [],
+  "rules": {}
+}
