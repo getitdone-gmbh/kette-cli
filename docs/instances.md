@@ -152,7 +152,7 @@ After every command the test also checks that the user settings of Claude Code c
 
 ## Test matrix
 
-Result of `KETTE_MATRIX_OUT=<prefix> node --test test/sandbox.test.mjs test/sandbox-qa.test.mjs` on macOS, Node 24 (2026-10-31, fix round 3): 290 command runs in 30 scenarios, 0 changes outside the allowed list, 0 Kette plugins in the user scope (the migration scenario seeds one from an older kette on purpose; `kette logout` removes it). The CI runs the same suites on Linux, macOS and Windows with Node 20 and 22; on Windows the tests that need a pseudo terminal, POSIX file modes or symlinks are skipped. A cell names the exit codes; 1 or 2 is the expected refusal in that scenario. Green: exit code as expected, nothing global changed beyond the list above, no plugin in the user scope.
+Result of `KETTE_MATRIX_OUT=<prefix> node --test test/sandbox.test.mjs test/sandbox-qa.test.mjs` on macOS, Node 24 (2026-10-31, fix round 3): 290 command runs in 30 scenarios, 0 changes outside the allowed list, 0 Kette plugins in the user scope (the scenarios MIG and R1 seed plugins of an older kette in the user scope on purpose; `kette logout` removes the Enterprise one, `kette update` keeps the others). The CI runs the same suites on Linux, macOS and Windows with Node 20 and 22; on Windows the tests that need a pseudo terminal, POSIX file modes or symlinks are skipped. A cell names the exit codes; 1 or 2 is the expected refusal in that scenario. Green: exit code as expected, nothing global changed beyond the list above, no plugin in the user scope.
 
 ### Scenarios of the first round
 
@@ -216,9 +216,9 @@ D2 Community repo on a licensed machine loads and names only Community content Â
 | `kette init` | green 0 | green 0 | green 0 | green 0 | green 0 | green 0, 1 | green 0 | green 0 |  | green 0 |  | green 0 | green 0 | green 0 | green 0 | green 0 |  |  | green 0 | green 0 |
 | `kette rules --path` | green 0 |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
 | `kette rules` | green 0 |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
-| `kette doctor` | green 0 | green 1 | green 0, 1 |  |  |  |  | green 0 |  | green 0 |  |  |  |  | green 0 | green 0 | red 0 |  | green 0, 1 |  |
+| `kette doctor` | green 0 | green 1 | green 0, 1 |  |  |  |  | green 0 |  | green 0 |  |  |  |  | green 0 | green 0 | green 0 |  | green 0, 1 |  |
 | `kette wallet init` |  | green 1 |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
-| `kette update` |  | green 0 |  | green 0 | green 0 | green 0 | green 0 |  |  |  | green 0 |  |  |  |  |  | red 0 | green 0 | green 0 | green 0 |
+| `kette update` |  | green 0 |  | green 0 | green 0 | green 0 | green 0 |  |  |  | green 0 |  |  |  |  |  | green 0 | green 0 | green 0 | green 0 |
 | `kette profile --effective` |  | green 1 |  |  |  |  |  |  |  | green 1 |  |  |  |  |  |  |  |  |  |  |
 | `kette add` |  | green 1 |  | green 0 |  |  |  |  |  |  |  |  |  |  | green 0 | green 0 |  |  |  |  |
 | `kette instance remove` |  | green 0 |  |  |  |  |  |  | green 0 |  |  |  |  |  |  |  |  |  |  |  |
@@ -233,7 +233,7 @@ D2 Community repo on a licensed machine loads and names only Community content Â
 | `kette doctor --instance` |  |  |  |  |  |  |  |  |  | green 1 |  |  |  |  |  |  |  |  |  |  |
 | `kette init (terminal)` |  |  |  |  |  |  |  |  |  |  | green 0, 1 |  |  |  |  |  |  |  |  |  |
 | `kette npm` |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  | green 0 |  |
-| `kette update (terminal)` |  |  |  |  |  |  |  |  |  |  | red 0 |  |  |  |  |  |  |  |  |  |
+| `kette update (terminal)` |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  | green 0 |  |
 
 Each regression test of fix round 1 was run against the code of the first round (9bab850) and failed there, all 13; each test of fix round 2 against 60b7cc5 and failed there (CR-NEW-2 tests a function that did not exist before); each test of fix round 3 against 1bf4f5b, where the lock tests (8 processes, SIGKILL of a holder) and the deterministic QA-29 test failed. The multi-process lock tests in test/lock.test.mjs run in the CI on Linux, macOS and Windows. The logs are kept with the fix round notes.
 

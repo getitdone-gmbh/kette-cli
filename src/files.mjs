@@ -11,6 +11,20 @@ function realTarget(file) {
 export const othersCanRead = (file) => process.platform !== 'win32' && fs.existsSync(file) && (fs.statSync(file).mode & 0o077) !== 0;
 export const privateHint = (file, cmd) => `${file} is readable by others. Fix with: ${cmd(`chmod 600 ${file}`)}`;
 
+const BUSY = ['EPERM', 'EBUSY', 'EACCES'];
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// Windows refuses a rename over a file another process has open for a moment (CR-NEW-9); retried for up to 2 seconds
+function renameRetrying(from, to) {
+  const until = Date.now() + 2000;
+  for (let wait = 2; ; wait = Math.min(wait * 2, 50)) {
+    try { fs.renameSync(from, to); return; } catch (err) {
+      if (!BUSY.includes(err.code) || Date.now() > until) throw err;
+      pause(wait);
+    }
+  }
+}
+
 // Temp file of this process in the same folder, then rename: readers never see half a file
 export function writeAtomic(file, content, mode = 0o644) {
   const dest = realTarget(file);
@@ -18,7 +32,7 @@ export function writeAtomic(file, content, mode = 0o644) {
   const temp = path.join(path.dirname(dest), `.${path.basename(dest)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
   try {
     fs.writeFileSync(temp, content, { mode, flag: 'wx' });
-    fs.renameSync(temp, dest);
+    renameRetrying(temp, dest);
   } catch (err) {
     fs.rmSync(temp, { force: true });
     throw err;

@@ -187,7 +187,7 @@ export function instanceRepo(box, name, edition) {
 }
 
 // Runs the CLI in a pseudo terminal (python pty) and answers each prompt once it shows up, like a person at the keyboard
-export async function interactive(box, argv, answers, { cwd = box.work } = {}) {
+export async function interactive(box, argv, answers, { cwd = box.work, allow = [], scenario = 'onboarding' } = {}) {
   const before = snapshot(box.root);
   // python3 -I: isolated mode, nothing from the working folder is imported
   const child = spawn('python3', ['-I', '-c', 'import pty, sys; sys.exit(pty.spawn(sys.argv[1:]) >> 8)', process.execPath, BIN, ...argv], { cwd, env: box.env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -212,9 +212,9 @@ export async function interactive(box, argv, answers, { cwd = box.work } = {}) {
   clearTimeout(timer);
   const outside = changed(before, snapshot(box.root)).filter((p) => !p.startsWith(path.join(cwd, argv[1] || '.'))).filter((p) => {
     const rel = path.relative(box.home, p).split(path.sep).join('/');
-    return rel.startsWith('..') || !MACHINE.some((r) => r.test(rel));
+    return rel.startsWith('..') || ![...MACHINE, ...allow].some((r) => r.test(rel));
   });
-  results.push({ command: `kette ${argv.join(' ')} (terminal)`, scenario: 'onboarding', code, outside: outside.map((p) => path.relative(box.root, p)), userPlugins: userScopeKette(box), out: out.slice(-600) });
+  results.push({ command: `kette ${argv.join(' ')} (terminal)`, scenario, code, outside: outside.map((p) => path.relative(box.root, p)), userPlugins: userScopeKette(box), out: out.slice(-600) });
   return { code, out, outside: outside.map((p) => path.relative(box.root, p)), userPlugins: userScopeKette(box) };
 }
 

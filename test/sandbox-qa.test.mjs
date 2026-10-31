@@ -460,11 +460,13 @@ test('CR-NEW-8: in a terminal update asks before the global scope line moves, an
   const registry = stateOf(box).npm.registry;
   const tok = fs.readFileSync(rc, 'utf8').match(/kt_[A-Za-z0-9_-]{43}/)[0];
   fs.writeFileSync(rc, `# >>> kette: managed by kette login, removed by kette logout\n@getitdone-gmbh:registry=${registry}\n${registry.replace(/^https?:/, '')}:_authToken=${tok}\n# <<< kette\n`);
-  const no = await interactive(box, ['update'], [['Move the line out of the user npmrc now?', 'n']]);
+  const no = await interactive(box, ['update'], [['Move the line out of the user npmrc now?', 'n']], { scenario: 'r3-scope', allow: NPMRC });
+  assert.deepEqual(no.outside, []);
   assert.equal(no.code, 0, no.out);
   assert.match(no.out, /Other apps that install @getitdone-gmbh packages then need the same line/);
   assert.match(fs.readFileSync(rc, 'utf8'), /^@getitdone-gmbh:registry=/m);
-  const yes = await interactive(box, ['update'], [['Move the line out of the user npmrc now?', 'y']]);
+  const yes = await interactive(box, ['update'], [['Move the line out of the user npmrc now?', 'y']], { scenario: 'r3-scope', allow: NPMRC });
+  assert.deepEqual(yes.outside, [], 'only the user npmrc changed outside the project');
   assert.equal(yes.code, 0, yes.out);
   assert.doesNotMatch(fs.readFileSync(rc, 'utf8'), /@getitdone-gmbh:registry/);
 });
