@@ -88,7 +88,8 @@ syncBuiltinESMExports();
 `);
 const NO_LINKS = ['--import', pathToFileURL(path.join(hookDir, 'no-links.mjs')).href];
 
-for (const code of ['ENOTSUP', 'EPERM']) {
+// EISDIR is what Windows answers on exFAT (AT-R2)
+for (const code of ['ENOTSUP', 'EPERM', 'EISDIR']) {
   test(`CR-AT-1: on a drive without hard links (${code}) kette init still creates the whole project, quickly, and never replaces a file`, async () => {
     const box = sandbox();
     ok(await kette(box, ['update']));
@@ -103,7 +104,7 @@ for (const code of ['ENOTSUP', 'EPERM']) {
     JSON.parse(fs.readFileSync(path.join(app, '.kette', 'profile.json'), 'utf8'));
     assert.match(fs.readFileSync(path.join(app, 'CLAUDE.md'), 'utf8'), /^# mine\n/, 'an existing file is appended to, never replaced');
     assert.ok(Number(fs.readFileSync(count, 'utf8')) <= 3, 'found once per device, not tried for every file');
-    assert.doesNotMatch(r.out, /ENOTSUP|EPERM/);
+    assert.doesNotMatch(r.out, /ENOTSUP|EPERM|EISDIR/);
     assert.deepEqual(fs.readdirSync(app, { recursive: true }).filter((n) => /\.tmp$/.test(String(n))), []);
   });
 }

@@ -46,6 +46,8 @@ before(async () => {
     }
     if (url.pathname === '/registry/ci-tokens/list') return json(res, 200, { tokens: state.ci.map(({ token: _t, ...rest }) => rest), max: 2 });
     if (url.pathname === '/registry/ci-tokens/revoke') {
+      // As docs/install-api.md: an id that is not a UUID is a bad request
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(b.id))) return json(res, 400, { error: 'bad_request' });
       const before = state.ci.length;
       state.ci = state.ci.filter((t) => t.id !== b.id);
       return json(res, 200, { revoked: state.ci.length < before });
@@ -179,6 +181,15 @@ test('token ci create, list und revoke', async () => {
   assert.match((await run('token', 'ci', 'revoke', state.ci[0].id)).out, /revoked/);
   assert.match((await run('token', 'ci', 'revoke', '00000000-0000-4000-8000-000000000009')).out, /No active CI token/);
   await assert.rejects(run('token', 'npm', 'list'), /kette token ci/);
+});
+
+test('KETTE-20: token ci revoke with an ID that is not a UUID fails before any request', async () => {
+  await run('login', KEY, '--no-plugins');
+  for (const id of ['abc', '1234', '00000000-0000-4000-8000-00000000000']) {
+    calls.length = 0;
+    await assert.rejects(run('token', 'ci', 'revoke', id), new RegExp(`"${id}" is not a CI token ID.*kette token ci list`));
+    assert.deepEqual(calls, [], 'nothing was sent to the delivery service');
+  }
 });
 
 test('token ci und figma verlangen einen Login', async () => {

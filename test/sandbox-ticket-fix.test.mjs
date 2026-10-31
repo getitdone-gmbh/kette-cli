@@ -96,8 +96,8 @@ test('KETTE-31: a new killed after its first write is named by list and report, 
   assert.equal(fs.existsSync(lock), false, 'no lock left behind');
 });
 
-// QA T14-02: several homes (machines) record decisions on one empty board at the same moment, round after round
-for (const [homes, rounds] of [[2, 1], [4, 4], [7, 1]]) {
+// QA T14-02 and S8M: several homes (machines) record decisions on one empty board at the same moment, round after round; 8 x 4 is the QA scenario S8M of KETTE-40
+for (const [homes, rounds] of [[2, 1], [4, 4], [7, 1], [8, 4]]) {
   test(`KETTE-29 (T14-02): ${homes} homes x ${rounds} rounds of parallel ticket new on one empty board end with distinct ids, without a manual step`, needsBoard, async () => {
     const token = `tok-homes-${homes}x${rounds}-0123456789`;
     const project = `p-homes-${homes}x${rounds}`;

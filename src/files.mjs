@@ -82,22 +82,37 @@ export function writeAtomic(file, content, mode) {
 // Devices where hard links do not work (exFAT, FAT, some network and FUSE drives), found once per device and remembered
 const noLinks = new Set();
 const LINKS_UNSUPPORTED = ['ENOTSUP', 'ENOSYS', 'EXDEV', 'EOPNOTSUPP'];
+// EPERM is also a busy file on Windows, EISDIR is what Windows answers on exFAT (AT-R2): a probe link tells them apart
+const LINKS_UNCLEAR = ['EPERM', 'EISDIR'];
 const deviceOf = (dir) => { try { return fs.statSync(dir).dev; } catch { return null; } };
 
-// EPERM means a busy file on Windows or a drive without hard links; one probe link of a fresh file in the same folder tells them apart
-function linksWork(dir) {
-  const probe = path.join(dir, `.kette-link-probe.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+// One probe link of a fresh file next to file; both names end like the temp files of file, so a kette killed in the middle leaves
+// nothing that sweepTemps or the ignore pattern miss (AT-R1)
+function linksWork(file) {
+  const name = () => path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+  const probe = name();
+  const link = name();
   try {
     writeNew(probe, '', NEW_FILE, false);
-    fs.linkSync(probe, `${probe}.link`);
-    fs.rmSync(`${probe}.link`, { force: true });
+    fs.linkSync(probe, link);
+    fs.rmSync(link, { force: true });
     return true;
   } catch (err) {
-    if (LINKS_UNSUPPORTED.includes(err.code) || err.code === 'EPERM') return false;
+    if (LINKS_UNSUPPORTED.includes(err.code) || LINKS_UNCLEAR.includes(err.code)) return false;
     throw err;
   } finally {
     fs.rmSync(probe, { force: true });
   }
+}
+
+// The drive of file is already known to have no hard links
+export const linksKnownMissing = (file) => noLinks.has(deviceOf(path.dirname(file)));
+
+// A link to file failed because its drive has no hard links (remembered for the device), not because the file was busy or taken
+export function linksMissing(err, file) {
+  const missing = LINKS_UNSUPPORTED.includes(err.code) || (LINKS_UNCLEAR.includes(err.code) && !linksWork(file));
+  if (missing) noLinks.add(deviceOf(path.dirname(file)));
+  return missing;
 }
 
 // A new file that must not replace anything (also no dangling symlink): the full temp file is hard-linked to the name, which fails
@@ -106,20 +121,15 @@ function linksWork(dir) {
 export function createAtomic(file, content, mode = NEW_FILE) {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
-  const dev = deviceOf(dir);
-  if (noLinks.has(dev)) { createDirect(file, content, mode); return; }
+  if (linksKnownMissing(file)) { createDirect(file, content, mode); return; }
   const temp = writeTemp(file, content, mode, false);
   try {
     try {
       retrying(() => fs.linkSync(temp, file), ['EBUSY', 'EACCES']);
     } catch (err) {
-      if (!LINKS_UNSUPPORTED.includes(err.code) && !(err.code === 'EPERM' && !linksWork(dir))) {
-        if (err.code !== 'EPERM') throw err;
-        retrying(() => fs.linkSync(temp, file));
-      } else {
-        noLinks.add(dev);
-        createDirect(file, content, mode);
-      }
+      if (linksMissing(err, file)) createDirect(file, content, mode);
+      else if (err.code === 'EPERM') retrying(() => fs.linkSync(temp, file));
+      else throw err;
     }
   } finally {
     fs.rmSync(temp, { force: true });
