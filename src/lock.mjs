@@ -32,7 +32,8 @@ export const lockFile = (name) => path.join(home(), 'locks', `${name}.lck`);
 const claimFile = (file, token) => `${file}.${token}.claim`;
 const readOwner = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
 const readRaw = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return null; } };
-const statOf = (file) => { try { return fs.statSync(file); } catch (err) { if (err.code === 'ENOENT') return null; throw err; } };
+// Windows answers EPERM for a file whose delete is pending: it is as good as gone
+const statOf = (file) => { try { return fs.statSync(file); } catch (err) { if (err.code === 'ENOENT' || err.code === 'EPERM') return null; throw err; } };
 
 // Start of a running process in ms since the epoch, null when the system does not tell; asked again after a few seconds at most
 const starts = new Map();
@@ -132,19 +133,21 @@ const claimant = () => JSON.stringify({ pid: process.pid, start: START, at: Date
 
 // A claim whose claimant is gone is cleared; an unreadable one (cut short on a drive without hard links) only after STALE_MS.
 // minAge keeps the sweep away from fresh claims. The claim is moved aside first, so of several processes only one clears it, and a
-// claim that a live claimant placed after the look goes back
+// claim that a live claimant placed after the look goes back; the content tells them apart (pid, start and time in ms), not the
+// file times, which Windows reports differently for the names of one hard-linked file
 function clearClaim(claim, minAge = 0) {
   const before = statOf(claim);
   if (!before) return;
-  const age = Date.now() - before.mtimeMs;
   const raw = readRaw(claim);
   const by = readOwner(claim);
+  // The time a claimant wrote counts; the file time only for a claim cut short
+  const age = Date.now() - (Number.isFinite(by?.at) ? by.at : before.mtimeMs);
   if (age < minAge || !(by?.pid ? gone(by, age) : age > STALE_MS)) return;
   const aside = `${claim}.${process.pid}.${hex()}.tmp`;
   try { retry(() => fs.renameSync(claim, aside)); } catch (err) { if (err.code === 'ENOENT') return; throw err; }
   try {
     const moved = readRaw(aside);
-    if (moved !== raw || statOf(aside)?.mtimeMs !== before.mtimeMs) place(claim, moved ?? '');
+    if (moved !== raw) place(claim, moved ?? '');
   } finally {
     unlinkIfThere(aside);
   }
@@ -209,10 +212,10 @@ function acquire(name) {
   const until = Date.now() + WAIT_MS;
   // A taken lock is judged without writing a temp file in every round
   while (fs.existsSync(file) || !place(file, JSON.stringify(owner))) {
+    if (Date.now() > until) throw new Error(`Another kette process is changing ${name} (lock ${file}). Try again; if no kette runs, delete that file.`);
     const current = readOwner(file);
     // Gone meanwhile: try again at once; stale or abandoned: retry once it is removed, otherwise wait a moment
     if (isStale(current) ? removeIfToken(file, current.token) : !current && (!statOf(file) || removeAbandoned(file))) continue;
-    if (Date.now() > until) throw new Error(`Another kette process is changing ${name} (lock ${file}). Try again; if no kette runs, delete that file.`);
     // A short random pause, so waiting processes do not retry in lockstep
     pause(1 + Math.floor(Math.random() * 8));
   }
