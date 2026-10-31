@@ -68,3 +68,42 @@ test('a kette killed while writing the wallet keeps .kette/wallet.json whole', a
   ok(await kette(box, ['wallet', 'init', '--yes'], { cwd: app }));
   await killedWhileWriting(box, app, '.kette/wallet.json', ['wallet', 'add', 'NEW_SECRET', '--env', 'dev'], []);
 });
+
+// Drives without hard links (exFAT, FAT, some network and FUSE drives): linkSync fails with the error the drive gives (CR-AT-1)
+// Only the project folder is on such a drive; ~/.kette (and its lock files) stays on a normal one, as in the reported case
+write(hookDir, 'no-links.mjs', `import fs from 'node:fs';
+import path from 'node:path';
+import { syncBuiltinESMExports } from 'node:module';
+const code = process.env.KETTE_TEST_LINK_ERROR;
+const dir = process.env.KETTE_TEST_LINK_IN;
+const link = fs.linkSync;
+let calls = 0;
+fs.linkSync = function (from, to) {
+  if (!path.resolve(String(to)).startsWith(dir)) return link.call(this, from, to);
+  calls++;
+  throw Object.assign(new Error(code + ': hard links not supported'), { code });
+};
+process.on('exit', () => fs.writeFileSync(process.env.KETTE_TEST_LINK_COUNT, String(calls)));
+syncBuiltinESMExports();
+`);
+const NO_LINKS = ['--import', pathToFileURL(path.join(hookDir, 'no-links.mjs')).href];
+
+for (const code of ['ENOTSUP', 'EPERM']) {
+  test(`CR-AT-1: on a drive without hard links (${code}) kette init still creates the whole project, quickly, and never replaces a file`, async () => {
+    const box = sandbox();
+    ok(await kette(box, ['update']));
+    const app = path.join(box.work, 'app');
+    fs.mkdirSync(app);
+    write(app, 'CLAUDE.md', '# mine\n');
+    const count = path.join(tmp(), 'count');
+    const started = Date.now();
+    const r = ok(await kette(box, ['init', app, ...SETUP], { projects: [app], allow: CLAUDE_REGISTRY, node: NO_LINKS, env: { KETTE_TEST_LINK_ERROR: code, KETTE_TEST_LINK_COUNT: count, KETTE_TEST_LINK_IN: fs.realpathSync(app) } }));
+    assert.ok(Date.now() - started < 15000, `${code} costs no retry per file`);
+    for (const f of ['.kette/profile.json', '.kette/README.md', '.claude/settings.json', '.claude/settings.local.json', '.gitignore']) assert.ok(fs.statSync(path.join(app, f)).size > 0, f);
+    JSON.parse(fs.readFileSync(path.join(app, '.kette', 'profile.json'), 'utf8'));
+    assert.match(fs.readFileSync(path.join(app, 'CLAUDE.md'), 'utf8'), /^# mine\n/, 'an existing file is appended to, never replaced');
+    assert.ok(Number(fs.readFileSync(count, 'utf8')) <= 3, 'found once per device, not tried for every file');
+    assert.doesNotMatch(r.out, /ENOTSUP|EPERM/);
+    assert.deepEqual(fs.readdirSync(app, { recursive: true }).filter((n) => /\.tmp$/.test(String(n))), []);
+  });
+}
