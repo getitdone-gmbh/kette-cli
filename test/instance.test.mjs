@@ -370,3 +370,12 @@ test('KETTE-28: ticketing.project is one path segment, session and intake model 
   assert.deepEqual(validateInstance({ ...full(), stations: [{ id: 'prototype', owner: 'lead@acme.test', builder: 'ux-designer', approve: 'lead@acme.test', merge: 'release-team', targets: ['proto-site'] }] }), []);
   assert.ok(validateInstance({ ...full(), stations: [{ id: 'app', targets: [] }] }).some((e) => /targets must be a list of distinct names/.test(e)));
 });
+
+test('KETTE-38: ticketing.intakeModel refuses private, link-local and unique-local addresses, also over https and IPv4-mapped', async () => {
+  const { isModelUrl } = await import('../src/instance/config.mjs');
+  for (const url of ['https://10.1.2.3/v1', 'https://172.16.0.1/v1', 'https://192.168.178.175/v1', 'https://169.254.169.254/x', 'https://[fd00::12]/v1', 'https://[fe80::1]/v1', 'https://[::ffff:10.0.0.1]/v1', 'http://model.example/v1', 'ftp://x.example/']) {
+    assert.equal(isModelUrl(url), false, url);
+    assert.ok(validateInstance({ ...full(), ticketing: { adapter: 'workload-zero', project: 'p1', intakeModel: url } }).some((e) => /intakeModel must be an https URL outside private/.test(e)), url);
+  }
+  for (const url of ['https://model.example/v1', 'http://localhost:11434/v1', 'http://127.0.0.1:11434/v1', 'http://[::1]:11434/v1']) assert.equal(isModelUrl(url), true, url);
+});

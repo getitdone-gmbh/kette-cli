@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { instancesDir, isSecureUrl } from '../paths.mjs';
+import { instancesDir } from '../paths.mjs';
 import { COMMUNITY, ENTERPRISE } from '../editions.mjs';
 import { readState, updateState, validVersion } from '../manifest.mjs';
 import { writeAtomic } from '../files.mjs';
@@ -108,6 +108,32 @@ const memberErrors = (m, at) => {
 
 const DONE_MAX = 1000;
 const TARGETS_MAX = 50;
+const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
+const v4Private = (ip) => {
+  const p = ip.split('.').map(Number);
+  return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) && (p[0] === 10 || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 169 && p[1] === 254));
+};
+// Private, link-local and unique-local addresses, also IPv4-mapped IPv6 (KETTE-38); names that resolve to them are refused by the hook
+export function isPrivateAddress(raw) {
+  const ip = String(raw).replace(/^\[|\]$/g, '').toLowerCase();
+  if (v4Private(ip)) return true;
+  if (!ip.includes(':')) return false;
+  const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
+  if (dotted) return v4Private(dotted[1]);
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(ip);
+  if (hex) { const n = parseInt(hex[1], 16) * 65536 + parseInt(hex[2], 16); return v4Private([Math.floor(n / 16777216), Math.floor(n / 65536) % 256, Math.floor(n / 256) % 256, n % 256].join('.')); }
+  const first = parseInt(ip.split(':')[0] || '0', 16);
+  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+}
+// A model the intake hook may ask: https, http only on this machine, never a private, link-local or unique-local address
+export function isModelUrl(url) {
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  const host = u.hostname.toLowerCase();
+  if (LOOPBACK.includes(host)) return u.protocol === 'https:' || u.protocol === 'http:';
+  return u.protocol === 'https:' && !isPrivateAddress(host);
+}
+
 // A board project id is one URL path segment (KETTE-28)
 export const PROJECT_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 // A station is its id, or an object with the id and the definition of done this instance sets for it (KETTE-24)
@@ -134,7 +160,7 @@ function sectionErrors(i) {
       if (typeof t.adapter !== 'string' || !ID_PATTERN.test(t.adapter)) errs.push('ticketing.adapter must be an adapter id (lowercase letters, digits, dashes)');
       if (typeof t.project !== 'string' || !PROJECT_PATTERN.test(t.project)) errs.push('ticketing.project must be a board project id (letters, digits, dash, underscore, at most 64)');
       if ('session' in t && typeof t.session !== 'boolean') errs.push('ticketing.session must be true or false (true allows the shared Workbase session file)');
-      if ('intakeModel' in t && (!isText(t.intakeModel) || !isSecureUrl(t.intakeModel))) errs.push('ticketing.intakeModel must be an https URL (http only on this machine)');
+      if ('intakeModel' in t && (!isText(t.intakeModel) || !isModelUrl(t.intakeModel))) errs.push('ticketing.intakeModel must be an https URL outside private, link-local and unique-local networks (http only on this machine)');
     }
   }
   if ('wallet' in i) {
