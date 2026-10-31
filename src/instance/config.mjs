@@ -111,19 +111,36 @@ const TARGETS_MAX = 50;
 const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
 const v4Private = (ip) => {
   const p = ip.split('.').map(Number);
-  return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) && (p[0] === 10 || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 169 && p[1] === 254));
+  return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) && (p[0] === 0 || p[0] === 10 || (p[0] === 100 && p[1] >= 64 && p[1] <= 127) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 169 && p[1] === 254));
 };
-// Private, link-local and unique-local addresses, also IPv4-mapped IPv6 (KETTE-38); names that resolve to them are refused by the hook
+// The eight groups of an IPv6 address, with an embedded dotted IPv4 tail; null when it is none
+function v6Groups(ip) {
+  let s = ip;
+  const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(s);
+  if (dotted) {
+    const p = dotted[1].split('.').map(Number);
+    s = `${s.slice(0, -dotted[1].length)}${(p[0] * 256 + p[1]).toString(16)}:${(p[2] * 256 + p[3]).toString(16)}`;
+  }
+  const parts = s.split('::');
+  if (parts.length > 2) return null;
+  const head = parts[0] ? parts[0].split(':') : [];
+  const tail = parts.length === 2 ? (parts[1] ? parts[1].split(':') : []) : null;
+  const groups = tail === null ? head : [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail];
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return groups.map((g) => parseInt(g, 16));
+}
+const v4Of = (hi, lo) => [Math.floor(hi / 256), hi % 256, Math.floor(lo / 256), lo % 256].join('.');
+// Private, shared, link-local, site-local, unique-local and unspecified addresses, also IPv4-mapped and NAT64 forms (KETTE-38, KETTE-39);
+// names that resolve to them are refused by the hook before it connects
 export function isPrivateAddress(raw) {
   const ip = String(raw).replace(/^\[|\]$/g, '').toLowerCase();
-  if (v4Private(ip)) return true;
-  if (!ip.includes(':')) return false;
-  const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
-  if (dotted) return v4Private(dotted[1]);
-  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(ip);
-  if (hex) { const n = parseInt(hex[1], 16) * 65536 + parseInt(hex[2], 16); return v4Private([Math.floor(n / 16777216), Math.floor(n / 65536) % 256, Math.floor(n / 256) % 256, n % 256].join('.')); }
-  const first = parseInt(ip.split(':')[0] || '0', 16);
-  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+  if (!ip.includes(':')) return v4Private(ip);
+  const g = v6Groups(ip);
+  if (!g) return false;
+  if (g.every((x) => x === 0)) return true;
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return v4Private(v4Of(g[6], g[7]));
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return v4Private(v4Of(g[6], g[7]));
+  return (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0;
 }
 // A model the intake hook may ask: https, http only on this machine, never a private, link-local or unique-local address
 export function isModelUrl(url) {

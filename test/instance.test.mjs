@@ -379,3 +379,10 @@ test('KETTE-38: ticketing.intakeModel refuses private, link-local and unique-loc
   }
   for (const url of ['https://model.example/v1', 'http://localhost:11434/v1', 'http://127.0.0.1:11434/v1', 'http://[::1]:11434/v1']) assert.equal(isModelUrl(url), true, url);
 });
+
+test('KETTE-39: shared, site-local, NAT64 with a private target and unspecified addresses are refused for the intake model', async () => {
+  const { isModelUrl, isPrivateAddress } = await import('../src/instance/config.mjs');
+  for (const url of ['https://100.64.1.2/v1', 'https://0.0.0.0/v1', 'https://[fec0::1]/v1', 'https://[64:ff9b::c0a8:105]/v1', 'https://[::]/v1']) assert.equal(isModelUrl(url), false, url);
+  assert.equal(isPrivateAddress('100.128.0.1'), false);
+  assert.equal(isPrivateAddress('64:ff9b::808:808'), false);
+});
