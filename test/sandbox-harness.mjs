@@ -131,9 +131,10 @@ export function changed(before, afterSnap) {
 }
 
 // Runs the CLI as its own process (async, so the fake servers in this process can answer) and checks the diff
-export async function kette(box, argv, { cwd = box.work, projects = [], allow = [], input = '', record = null } = {}) {
+// node: extra arguments for node, e.g. --import of a test hook
+export async function kette(box, argv, { cwd = box.work, projects = [], allow = [], input = '', record = null, node = [], env = {} } = {}) {
   const before = snapshot(box.root);
-  const child = spawn(process.execPath, [BIN, ...argv], { cwd, env: box.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [...node, BIN, ...argv], { cwd, env: { ...box.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (c) => { out += c; });
   child.stderr.on('data', (c) => { out += c; });

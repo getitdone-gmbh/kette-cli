@@ -14,6 +14,7 @@ import {
 } from './config.mjs';
 import { linkedProject, setupInfisical } from './infisical.mjs';
 import { ProviderError, installHint, providerFor, providerVersion, spawnTool } from './providers.mjs';
+import { writeAtomic } from '../files.mjs';
 
 export const WALLET_HELP = `kette wallet init     Secret wallet (Enterprise): create .kette/wallet.json. Infisical (default) is guided: sign-in,
                         project, environment check; previews: Vault, AWS, Azure; or your own commands
@@ -124,7 +125,7 @@ function syncProfile(root, providerId) {
   const value = PROFILE_SECRETS[providerId];
   if (!profile?.platform || !value || profile.platform.secrets === value) return false;
   profile.platform = { ...profile.platform, secrets: value };
-  fs.writeFileSync(f, `${JSON.stringify(profile, null, 2)}\n`);
+  writeAtomic(f, `${JSON.stringify(profile, null, 2)}\n`);
   return true;
 }
 

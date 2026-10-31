@@ -7,7 +7,7 @@ import { readState, writeState } from './manifest.mjs';
 import { isSecureUrl, npmUserConfig, registryDefault } from './paths.mjs';
 import { cmd, file as fileName, isoDate, status } from './out.mjs';
 import { SCOPE, TOKEN_PATTERN, authKey, blockHasScope, blockToken, foreignScopeLines, hasBlock, projectScope, readFile, withBlock, withoutBlock } from './npmrc.mjs';
-import { othersCanRead, privateHint, writePrivate } from './files.mjs';
+import { othersCanRead, privateHint, writeAtomic, writePrivate } from './files.mjs';
 import { confirm } from './prompt.mjs';
 
 const GITHUB_PACKAGES = 'npm.pkg.github.com';
@@ -230,7 +230,7 @@ async function downloadChecked(file, target) {
   if (!res.ok) throw new DeliveryError(`http_${res.status}`, `${file.name} could not be downloaded (${res.status}). Run the command again, the links are valid for 15 minutes.`);
   const buf = Buffer.from(await res.arrayBuffer());
   if (crypto.createHash('sha256').update(buf).digest('hex') !== file.sha256) throw new DeliveryError('checksum', `The checksum of ${file.name} does not match. Run the command again.`);
-  fs.writeFileSync(target, buf);
+  writeAtomic(target, buf);
 }
 
 // kette figma [--out folder]: download the current Figma release, verify checksums, show the import order

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { accent, dim, hint } from './out.mjs';
+import { createAtomic, writeAtomic } from './files.mjs';
 
 // A plan is a list of files; existing files are never overwritten, only appended to or renewed in their marked block
 // lstat, so a symlink (also a dangling one) counts as present and is never written through
@@ -55,14 +56,14 @@ export function apply(described, root) {
   if (escaping.length) throw new Error(`Refusing to write outside the project: ${escaping.map((d) => d.path).join(', ')}`);
   for (const d of described) {
     const abs = path.resolve(base, d.path);
+    // Every write is atomic, so a kette killed in the middle leaves the old or the new file, never an empty one
     if (d.action === 'create') {
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.writeFileSync(abs, d.content, { flag: 'wx' });
+      createAtomic(abs, d.content);
     } else if (d.action === 'append') {
       const cur = fs.readFileSync(abs, 'utf8');
-      fs.writeFileSync(abs, cur.replace(/\n*$/, '\n\n') + d.content);
+      writeAtomic(abs, cur.replace(/\n*$/, '\n\n') + d.content);
     } else if (d.action === 'update') {
-      fs.writeFileSync(abs, d.next);
+      writeAtomic(abs, d.next);
     }
   }
 }
