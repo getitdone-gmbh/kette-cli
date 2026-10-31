@@ -106,6 +106,19 @@ const memberErrors = (m, at) => {
   return errs;
 };
 
+const DONE_MAX = 1000;
+// A station is its id, or an object with the id and the definition of done this instance sets for it (KETTE-24)
+export const stationId = (s) => (isObject(s) ? s.id : s);
+function stationErrors(s, at) {
+  const bad = [`${at} must be a station id (lowercase letters, digits, dashes) or an object with id and definitionOfDone`];
+  if (typeof s === 'string') return ID_PATTERN.test(s) ? [] : bad;
+  if (!isObject(s) || typeof s.id !== 'string' || !ID_PATTERN.test(s.id)) return bad;
+  const errs = unknown(s, ['id', 'definitionOfDone'], `${at}.`);
+  const done = s.definitionOfDone;
+  if ('definitionOfDone' in s && (typeof done !== 'string' || !done.trim() || done.length > DONE_MAX || CONTROL.test(done))) errs.push(`${at}.definitionOfDone must be one line of at most ${DONE_MAX} characters`);
+  return errs;
+}
+
 function sectionErrors(i) {
   const errs = [];
   if ('ticketing' in i) {
@@ -128,7 +141,7 @@ function sectionErrors(i) {
     }
   }
   errs.push(...listErrors(i.overlays, 'overlays', (o, at) => (isObject(o) && isText(o.source) && !unknown(o, ['source'], '').length ? [] : [`${at} must be an object with source`]), (o) => o.source));
-  errs.push(...listErrors(i.stations, 'stations', (s, at) => (typeof s === 'string' && ID_PATTERN.test(s) ? [] : [`${at} must be a station id (lowercase letters, digits, dashes)`]), (s) => s));
+  errs.push(...listErrors(i.stations, 'stations', stationErrors, stationId));
   return errs;
 }
 

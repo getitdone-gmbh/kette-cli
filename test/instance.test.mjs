@@ -351,3 +351,10 @@ test('CR-AT-5: the .gitignore kette keeps ignores the temp files of a killed ket
   for (const f of ['.kette/.profile.json.4242.0a1b2c3d4e5f.tmp', '.claude/.settings.json.17.abcdef012345.tmp']) assert.equal(spawnSync('git', ['-C', d, 'check-ignore', '-q', f]).status, 0, f);
   assert.notEqual(spawnSync('git', ['-C', d, 'check-ignore', '-q', '.kette/profile.json']).status, 0, 'the real file is not ignored');
 });
+
+test('KETTE-24: a station may carry the definition of done the instance sets for it', () => {
+  assert.deepEqual(validateInstance({ ...full(), stations: ['tokens', { id: 'app', definitionOfDone: 'Live on acme.test, deploy run checked' }] }), []);
+  const errs = validateInstance({ ...full(), stations: [{ id: 'app', definitionOfDone: '' }, { id: 'Web' }, { id: 'zero', done: 'x' }, 'app'] });
+  for (const e of [/stations\[0\]\.definitionOfDone must be one line/, /stations\[1\] must be a station id .* or an object with id and definitionOfDone/, /unknown field stations\[2\]\.done/]) assert.ok(errs.some((x) => e.test(x)), `${e} in ${errs.join('; ')}`);
+  assert.deepEqual(validateInstance({ ...full(), stations: ['app', { id: 'app' }] }), ['stations[1] app is listed twice']);
+});

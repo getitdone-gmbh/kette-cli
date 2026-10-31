@@ -16,6 +16,8 @@ export const TICKET_HELP = `kette ticket connect [workload-zero] --project <id>
   kette ticket list | show <KD> | inbox --member <id> | report | why <subject|file:line|commit|KD>
   kette ticket edit <KD> | extend <KD> --stations a,b | route <KD> | close <KD>
   kette ticket pick <item> --as <member> | link <item> --pr|--commit|--figma|--review <url> | check <item>
+  kette ticket check <KD>
+                        Follow-through: per station its definition of done and what is still open (reads only)
   kette ticket hook install | status | remove
                         The intake hook in this project's .claude/settings.json (never the user settings)`;
 
@@ -199,8 +201,18 @@ async function itemCommand(project, opts, args, action) {
     if (!/^https:\/\/[^/\s]+\.[^/\s]+/.test(url)) throw new ExitError(`--${kinds[0]} needs an https URL (a commit as its URL on the git host): ${printable(url)}`);
     run = ({ service, at }) => service.link(key, { kind: LINK_FLAGS[kinds[0]], url, addedBy: meta.actor, addedAt: at }, meta);
   }
-  await write(board, opts, run, (item) => `${action} ${item.key}:\n${itemLine(item)}`);
+  const doneWhen = (item) => board.routing.stations[item.layer]?.definitionOfDone;
+  await write(board, opts, run, (item) => `${action} ${item.key}:\n${itemLine(item)}${doneWhen(item) ? `\n      ${dim(`done when: ${printable(doneWhen(item))}`)}` : ''}`);
   return 0;
+}
+
+// kette ticket check <KD>: follow-through of the whole decision; checks status, links and chain order, the rest is the owner's to confirm
+async function followThrough(project, opts, id) {
+  const { live, t } = await open(project, opts);
+  const f = await refused(() => live().service.followThrough(id));
+  if (json(opts, f)) return f.complete ? 0 : 1;
+  console.log(t.lib.formatFollowThrough(f).split('\n').map(printable).join('\n'));
+  return f.complete ? 0 : 1;
 }
 
 async function close(project, opts, args) {
@@ -363,6 +375,7 @@ export async function ticket(sub, opts, deps) {
   const project = ticketProject('.', deps);
   if (sub === 'hook') return hook(args[0], opts, { ...deps, root: '.', project });
   if (sub === 'connect') return connect(project, opts, args);
+  if (sub === 'check' && args[0] && !args[0].includes('/')) return followThrough(project, opts, args[0]);
   if (['pick', 'link', 'check'].includes(sub)) return itemCommand(project, opts, args, sub);
   if (sub === 'why') return whyCmd(project, opts, args, deps);
   if (COMMANDS[sub]) return COMMANDS[sub](project, opts, args);

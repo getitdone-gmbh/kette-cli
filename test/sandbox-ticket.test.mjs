@@ -79,7 +79,7 @@ test('Enterprise instance: connect writes only the ticketing block, then every c
   const box = sandbox();
   const token = 'tok-acme-0123456789abcdef';
   await licensed(box);
-  const app = await enterpriseRepo(box, 'acme');
+  const app = await enterpriseRepo(box, 'acme', { stations: ['prototype', { id: 'app', definitionOfDone: 'Live on shop.acme.test, deploy run checked' }] });
   const wallet = path.join(app, '.kette', 'wallet.json');
 
   const dry = ok(await step(box, ['ticket', 'connect', 'workload-zero', '--project', 'p-acme', '--dry-run'], { cwd: app }));
@@ -133,6 +133,15 @@ test('Enterprise instance: connect writes only the ticketing block, then every c
   assert.equal(writesTo(token), writes, 'a refused check sends nothing');
   assert.match((await run(['report'])).out, /In progress ahead of upstream: 1/);
 
+  // KETTE-24: follow-through per station with its definition of done, reads only, exit 1 while a station is open
+  const follow = await run(['check', 'KD-0001'], 1);
+  assert.match(follow.out, /KD-0001 follow-through: 2 of 2 stations open/);
+  assert.match(follow.out, /prototype:workload-zero-dashboard open[\s\S]*done when: Screens, spec and docs changed and deployed to zero-design-intern\.itdone\.de/);
+  assert.match(follow.out, /app:acme-app in_progress[\s\S]*done when: Live on shop\.acme\.test, deploy run checked[\s\S]*open: upstream open: KD-0001\/prototype\/workload-zero-dashboard/);
+  assert.match(follow.out, /review: One batch review .* never a review per station/);
+  assert.deepEqual(follow.all, []);
+  assert.equal(writesTo(token), writes, 'the follow-through writes nothing');
+
   const proto = 'KD-0001/prototype/workload-zero-dashboard';
   await run(['pick', proto, '--as', 'ux-designer', '--yes']);
   await run(['link', proto, '--pr', 'https://github.com/acme/proto/pull/2', '--as', 'ux-designer', '--yes']);
@@ -141,8 +150,9 @@ test('Enterprise instance: connect writes only the ticketing block, then every c
   await run(['check', proto, '--as', 'ux-designer', '--approved-by', 'lead@acme.test', '--yes']);
   assert.match((await run(['close', 'KD-0001', '--yes'], 1)).out, /\[close-open-items\] KD-0001 cannot close: KD-0001\/app\/acme-app/);
   await run(['link', appItem, '--review', 'https://github.com/acme/acme-app/pull/1#review', '--as', 'fullstack-developer', '--yes']);
-  await run(['check', appItem, '--as', 'fullstack-developer', '--yes']);
+  assert.match((await run(['check', appItem, '--as', 'fullstack-developer', '--yes'])).out, /check KD-0001\/app\/acme-app:[\s\S]*done when: Live on shop\.acme\.test, deploy run checked/);
   assert.match((await run(['list'])).out, /KD-0001 decided, closed, 2\/2 stations/);
+  assert.match((await run(['check', 'KD-0001'])).out, /KD-0001 follow-through: every station done/);
 });
 
 test('a Community instance is refused for every ticket command and nothing is written', async () => {
@@ -210,7 +220,7 @@ test('missing board credential: a clear next step, no value asked for or printed
   assert.deepEqual(requests.filter((r) => r.token === ''), [], 'no request without a token');
 });
 
-test('hook install and remove touch only the project settings and only kette\'s entry', needsBoard, async () => {
+test('hook install and remove touch only the project settings and only kette\'s entry', async () => {
   const box = sandbox();
   await licensed(box);
   const app = await enterpriseRepo(box, 'acme', { stations: ['prototype', 'app'] });
@@ -230,9 +240,11 @@ test('hook install and remove touch only the project settings and only kette\'s 
   assert.match(ok(await step(box, ['ticket', 'hook', 'status'], rec)).out, /Intake hook on in \.claude\/settings\.json/);
   assert.deepEqual(ok(await step(box, ['ticket', 'hook', 'install'], rec)).all, [], 'a second install changes nothing');
 
+  // The hook answer needs the library; without it the hook stays silent and still exits 0
   const hit = ok(await step(box, ['ticket', 'hook', 'run'], { ...rec, input: JSON.stringify({ prompt: 'Skillmap und Skill radar zusammenlegen in acme-app' }) }));
   assert.deepEqual(hit.all, []);
-  assert.match(JSON.parse(hit.out).hookSpecificOutput.additionalContext, /Kette intake: this prompt asks for a change to the chain\. Stations touched \(first guess\): [^.]*\bapp\./);
+  if (hasTicketing) assert.match(JSON.parse(hit.out).hookSpecificOutput.additionalContext, /Kette intake: this prompt asks for a change to the chain\. Stations touched \(first guess\): [^.]*\bapp\./);
+  else assert.equal(hit.out, '');
   assert.equal(ok(await step(box, ['ticket', 'hook', 'run'], { ...rec, input: 'not json' })).out, '', 'bad input: silent, exit 0');
 
   const rm = ok(await step(box, ['ticket', 'hook', 'remove'], rec));

@@ -10,7 +10,7 @@ import { bold, cmd, dim, file, status } from '../out.mjs';
 import { tilde } from '../rules.mjs';
 import {
   EDITIONS, INSTANCE_FILE, ROLES, checkouts, forgetInstance, instanceDir, instanceExists, instanceFile, instanceSource, listInstances, newInstance,
-  printable, readInstance, redact, repoIdentity, setCheckout, updateInstance, validName, validateInstance, withRepo, withoutRepo, writeInstance,
+  printable, readInstance, redact, repoIdentity, setCheckout, stationId, updateInstance, validName, validateInstance, withRepo, withoutRepo, writeInstance,
 } from './config.mjs';
 
 export const INSTANCE_HELP = `kette instance create <name> [--edition enterprise|community] [--from <git-url|folder>]
@@ -155,7 +155,7 @@ function show(arg, opts) {
     ['Ticketing', i.ticketing ? `${i.ticketing.adapter} ${i.ticketing.project}` : 'none'],
     ['Wallet', i.wallet ? [i.wallet.provider, i.wallet.project, i.wallet.env].filter(Boolean).join(' ') : 'none'],
     ['Overlays', (i.overlays || []).map((o) => o.source).join(', ') || 'none'],
-    ['Stations', (i.stations || []).join(', ') || 'none'],
+    ['Stations', (i.stations || []).map(stationId).join(', ') || 'none'],
   ];
   for (const [k, v] of rows) console.log(`${bold(k.padEnd(11))} ${printable(v)}`);
   console.log(bold('Repos'));
