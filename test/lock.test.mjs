@@ -181,7 +181,7 @@ test('CR-NEW-11: claims of claimants that are gone and older than STALE_MS are s
   put('live.lck', JSON.stringify({ pid: process.pid, at: Date.now(), token: 'live' }), 0);
   const kept = [
     put('held.lck.fresh.claim', JSON.stringify({ pid: dead, start: 1, at: Date.now() }), 0),
-    put('live.lck.live.claim', JSON.stringify({ pid: process.pid, at: 0 }), 121000),
+    put('live.lck.live.claim', JSON.stringify({ pid: process.ppid, at: 0 }), 121000),
   ];
   assert.equal(withLock('c', () => 'ran'), 'ran');
   const left = fs.readdirSync(locks);
@@ -454,4 +454,92 @@ test('Windows: a holder whose Node started many seconds after its process (cold 
   c.kill();
   await new Promise((r) => c.on('close', r));
   assert.equal(entered, '', 'the waiter still waits');
+});
+
+// KETTE-43: two waiters remove the stale lock at once; one moves aside the claim the other just placed, the other gives up meanwhile,
+// then the first puts the claim back: a claim of a live process that no longer uses it. That process must take it as its own leftover
+test('KETTE-43: a claim of this process put back by another clearer after it gave up does not block it', async () => {
+  const { removeIfToken, lockFile, withLock } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const f = lockFile('c');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ pid: await deadPid(), at: Date.now(), token: 'gone' }));
+  fs.writeFileSync(`${f}.gone.claim`, JSON.stringify({ pid: process.pid, start: 'any', at: Date.now() }));
+  assert.equal(removeIfToken(f, 'gone'), true, 'the stale lock is removed despite the leftover claim');
+  assert.deepEqual(fs.readdirSync(path.dirname(f)), []);
+  assert.equal(withLock('c', () => 'ran'), 'ran');
+});
+
+// KETTE-43, seen on Windows CI: a clearer moved the claim aside, could not read it right after the rename and put back an empty claim;
+// that claim counted as unreadable for STALE_MS and both waiters ran into the 30 s
+test('KETTE-43: a claim that cannot be read after the move is not put back as an empty claim', { timeout: 60000 }, async () => {
+  const { removeIfToken, lockFile } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const f = lockFile('c');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ pid: await deadPid(), at: Date.now() - 11000, token: 'gone' }));
+  fs.linkSync(f, `${f}.gone.claim`);
+  const read = fs.readFileSync;
+  fs.readFileSync = function (p, ...rest) {
+    if (/\.claim\.\d+\.[0-9a-f]+\.tmp$/.test(String(p))) throw Object.assign(new Error('EPERM: sharing violation'), { code: 'EPERM' });
+    return read.call(this, p, ...rest);
+  };
+  try {
+    assert.equal(removeIfToken(f, 'gone'), true);
+  } finally {
+    fs.readFileSync = read;
+  }
+  assert.deepEqual(fs.readdirSync(path.dirname(f)), [], 'no empty claim and no lock left');
+});
+
+test('KETTE-43: an empty claim left next to a stale lock blocks for seconds, not for STALE_MS', { timeout: 60000 }, async () => {
+  const { home, counter, script, env } = setup();
+  const lock = path.join(locksOf(home), 'c.lck');
+  fs.writeFileSync(lock, JSON.stringify({ pid: await deadPid(), at: Date.now(), token: 'gone' }));
+  fs.writeFileSync(`${lock}.gone.claim`, '');
+  aged(`${lock}.gone.claim`, 3000);
+  const started = Date.now();
+  const rs = await Promise.all([run(script, [counter, '10'], env), run(script, [counter, '10'], env)]);
+  assert.deepEqual(rs.map((r) => r.code), [0, 0], rs.map((r) => r.out).join('\n'));
+  assert.equal(Number(fs.readFileSync(counter, 'utf8')), 20);
+  assert.ok(Date.now() - started < 25000);
+  assert.deepEqual(leftovers(home), []);
+});
+
+test('WC-1: a refused second read never turns a readable claim of a dead claimant into an unreadable one', async () => {
+  const { removeIfToken, lockFile } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const f = lockFile('c');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  const dead = await deadPid();
+  fs.writeFileSync(f, JSON.stringify({ pid: dead, at: Date.now(), token: 'gone' }));
+  // Fresh: as unreadable it would stay for REUSE_CHECK_MS; as the claim of a dead claimant it goes at once
+  fs.writeFileSync(`${f}.gone.claim`, JSON.stringify({ pid: dead, at: Date.now(), dead: true }));
+  const read = fs.readFileSync;
+  let seen = 0;
+  fs.readFileSync = function (p, ...rest) {
+    const out = read.call(this, p, ...rest);
+    if (String(out).includes('"dead":true') && ++seen > 1) throw Object.assign(new Error('EIO: read failed'), { code: 'EIO' });
+    return out;
+  };
+  try {
+    assert.equal(removeIfToken(f, 'gone'), true);
+  } finally {
+    fs.readFileSync = read;
+  }
+  assert.deepEqual(fs.readdirSync(path.dirname(f)), []);
+});
+
+test('WC-2: a claim of another thread of this process is not taken for an own leftover', async () => {
+  const { removeIfToken, lockFile } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const f = lockFile('c');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ pid: await deadPid(), at: Date.now(), token: 'gone' }));
+  // Locks hold per thread: a worker thread of this process may be at work with this claim
+  const claim = JSON.stringify({ pid: process.pid, thread: 7, at: Date.now() });
+  fs.writeFileSync(`${f}.gone.claim`, claim);
+  assert.equal(removeIfToken(f, 'gone'), false);
+  assert.equal(fs.readFileSync(`${f}.gone.claim`, 'utf8'), claim, 'the claim of the other thread stays');
+  assert.ok(fs.existsSync(f));
 });

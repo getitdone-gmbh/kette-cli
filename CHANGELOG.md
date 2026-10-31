@@ -17,6 +17,8 @@
 
 - A `kette ticket list` or `report` right after a killed `kette ticket new` says the run was interrupted until its decision shows as incomplete; `kette ticket repair` takes over the lock of the killed run. A claim whose lock is gone or holds another token is removed by the next kette run (KETTE-42). Windows allows 30 seconds between the start of Node and its process, Linux without a boot id compares the start ticks alone, drives without stable inodes recognise the own lock by its content (KETTE-41).
 
+- Two kette processes removing one stale lock at once no longer leave a claim behind that blocks both for 30 seconds: on Windows a claim that could not be read right after it was moved came back empty, now it never does, and an unreadable claim is cleared after 2 seconds (KETTE-43).
+
 ## 0.10.0
 - Kette instances (Workbase ZERO-538, ADR-0002): `kette instance create <name> [--edition enterprise|community] [--from <git-url|folder>] | list | show | use | add-repo | members | remove`. Each instance has its own scope in `~/.kette/instances/<name>/instance.json`: edition, bundle pin, repos, members, ticketing, wallet defaults, overlays, chain stations; it can live in its own git repo. One licence covers all instances, seats stay per device.
 - `.kette/profile.json` names the instance (`instance`); the repo inherits edition, ticketing, wallet defaults, overlays and stations, its own values win. `kette init` and `kette add` take `--instance <name>` and ask in a terminal; `kette profile --effective` shows the inherited values and `.kette/README.md` tells agents to read them; `kette doctor --instance [name]` checks every checkout of an instance.
