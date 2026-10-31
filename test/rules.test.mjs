@@ -202,7 +202,7 @@ test('init nennt alle Plugins der Edition zum Einrichten von Hand, wenn Claude C
   const claude = fakeClaude([{ name: 'kette', source: 'directory', path: '/repos/kette' }]);
   let out;
   try { ({ out } = await run('init', path.join(tmp(), 'neu'), '--yes')); } finally { claude.restore(); }
-  assert.match(out, /By hand:\n  claude plugin marketplace add "[^"]+"\n  claude plugin install kette-engineering-core@kette\n  claude plugin install ui-laws@kette\n/);
+  assert.match(out, /By hand in the project folder:\n  claude plugin marketplace add --scope local "[^"]+"\n  claude plugin install kette-engineering-core@kette --scope project\n  claude plugin install ui-laws@kette --scope project\n/);
 });
 
 test('add leaves a detected stack the installed schema does not know out of the profile, with a hint', async () => {
@@ -271,6 +271,7 @@ test('doctor listet je Plugin Agenten, Skills und Befehle aus dem Paket', async 
   const d = rulebook('community');
   write(d, 'plugins/ui-laws/commands/check.md', 'x');
   const project = tmp();
+  write(project, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community' }));
   const cwd = process.cwd();
   const claude = fakeClaude([], 'kette-engineering-core@kette\nui-laws@kette\n');
   process.chdir(project);
@@ -328,7 +329,7 @@ test('Community-Rechner lässt ein Enterprise-Projekt auf Enterprise, doctor nen
 test('doctor zeigt, wo Regelwerk und Plugins liegen', async () => {
   const d = rulebook('community');
   const { out } = await run('doctor', '--ci');
-  assert.match(out, new RegExp(`INFO Rulebook and plugins live in .*${path.basename(path.dirname(d))}`));
+  assert.match(out, new RegExp(`INFO Rulebook lives in .*${path.basename(path.dirname(d))}`));
 });
 
 test('init in another folder starts the next steps with cd, init in the current folder does not', async () => {
@@ -359,7 +360,7 @@ test('doctor outside a project gives a hint instead of an open issue, --ci stays
   process.chdir(tmp());
   try {
     const { result, out } = await run('doctor');
-    assert.match(out, /^INFO No kette project in this folder\. cd into your project or run kette init\.$/m);
+    assert.match(out, /^INFO No kette project in this folder\. cd into your project or run kette init\. Plugins are enabled per project\.$/m);
     assert.doesNotMatch(out, /FAIL/);
     assert.match(out, /\nall good$/);
     assert.equal(result, 0);
@@ -397,13 +398,15 @@ test('doctor: a profile with apps and an installed schema without apps is a WARN
 test('doctor names a missing plugin as not installed', async () => {
   rulebook('community');
   const project = tmp();
+  write(project, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community' }));
   const cwd = process.cwd();
   const claude = fakeClaude([], 'kette-engineering-core@kette\n');
   process.chdir(project);
   try {
     const { out } = await run('doctor');
     assert.match(out, /^OK {3}Plugin kette-engineering-core@kette installed$/m);
-    assert.match(out, /^FAIL Plugin ui-laws@kette not installed\. Install with: kette update$/m);
+    assert.match(out, /^FAIL Plugin ui-laws@kette not installed\. Install with: kette add$/m);
+    assert.match(out, /^FAIL \.claude\/settings\.json missing, Claude Code has no Kette plugins for this project\. Enable them with: kette add$/m);
   } finally {
     claude.restore();
     process.chdir(cwd);

@@ -262,13 +262,15 @@ test('doctor prüft Block und Token und findet einen Token in einer Datei im Git
   await run('login', KEY, '--no-plugins');
   const project = tmp();
   write(project, 'package.json', '{}');
-  await inDir(project, () => run('add', '--yes', '--no-plugins', '--stack', 'nextjs-ts-tailwind', '--platform', 'github-docker', '--patterns', 'modular-monolith'));
-  execFileSync('git', ['-C', project, 'init', '-q']);
-  execFileSync('git', ['-C', project, 'add', '.']);
-  // All Enterprise plugins installed, so a valid token leaves nothing to warn about
-  const claude = fakeClaude([], 'kette-engineering-core@kette\nkette-engineering@kette\ndesign-system-agents@kette\ndesign-review-pack@kette\n');
+  // add enables all Enterprise plugins for the project, so a valid token leaves nothing to warn about
+  const claude = fakeClaude([]);
   let out;
-  try { ({ out } = await inDir(project, () => run('doctor'))); } finally { claude.restore(); }
+  try {
+    await inDir(project, () => run('add', '--yes', '--stack', 'nextjs-ts-tailwind', '--platform', 'github-docker', '--patterns', 'modular-monolith'));
+    execFileSync('git', ['-C', project, 'init', '-q']);
+    execFileSync('git', ['-C', project, 'add', '.']);
+    ({ out } = await inDir(project, () => run('doctor')));
+  } finally { claude.restore(); }
   assert.match(out, /OK {3}npm access in /);
   assert.doesNotMatch(out, /WARN/, 'a valid token never also reports missing access');
   assert.match(out, /\nall good$/);
