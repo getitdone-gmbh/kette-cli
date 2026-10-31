@@ -1,13 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { tmp, write } from './helpers.mjs';
 import { HOOK_COMMAND, installed, withHook, withoutHook } from '../src/ticket/hook.mjs';
 import { CONTRACT, loadTicketing, ticketingDir } from '../src/ticket/module.mjs';
 
-const PART = ['dist/index.js', 'routing.json', 'scripts/plan-guard.mjs', 'scripts/workbase-session.mjs', 'scripts/intake-hook.mjs'];
+const PART = ['scripts/cli-facade.mjs', 'routing.default.json', 'package.json'];
 
+// A bundle folder below a bundles root of its own, the way ~/.kette/bundles holds them
+let ROOT;
 function bundleWith(files) {
-  const dir = tmp();
+  ROOT = tmp();
+  const dir = path.join(ROOT, 'enterprise', '1');
   for (const [f, c] of Object.entries(files)) write(dir, `ticketing/${f}`, c);
   return dir;
 }
@@ -39,14 +44,32 @@ test('hook: a settings file that is not a JSON object is never rewritten', () =>
 
 test('bundle part: missing or incomplete ticketing means an older bundle, with kette update as the next step', async () => {
   assert.equal(ticketingDir(null), null);
-  assert.equal(ticketingDir(bundleWith({ 'dist/index.js': '' })), null);
+  assert.equal(ticketingDir(bundleWith({ 'scripts/cli-facade.mjs': '' }), { root: ROOT }), null);
   await assert.rejects(loadTicketing(tmp()), (err) => err.exitCode === 1 && /The Enterprise bundle on this machine has no ticketing yet\. Load the current one with: kette update/.test(err.message));
 });
 
+const files = (contract) => ({ 'package.json': '{"type":"module"}', 'routing.default.json': '{}', 'scripts/cli-facade.mjs': `export const CLI_CONTRACT = ${contract};\n` });
+
 test('bundle part: a library with another contract is refused, never driven blindly', async () => {
-  const files = (contract) => ({ ...Object.fromEntries(PART.map((f) => [f, 'export {};\n'])), 'package.json': '{"type":"module"}', 'routing.json': '{}', 'dist/index.js': `export const CLI_CONTRACT = ${contract};\n` });
-  await assert.rejects(loadTicketing(bundleWith(files(CONTRACT + 1))), /speaks contract 2, this kette speaks 1\. Update the kette CLI/);
-  await assert.rejects(loadTicketing(bundleWith(files(0))), /Load the current bundle with: kette update/);
-  const t = await loadTicketing(bundleWith(files(CONTRACT)));
+  await assert.rejects(loadTicketing(bundleWith(files(CONTRACT + 1)), { root: ROOT }), /speaks contract 3, this kette speaks 2\. Update the kette CLI/);
+  await assert.rejects(loadTicketing(bundleWith(files(1)), { root: ROOT }), /Load the current bundle with: kette update/);
+  const t = await loadTicketing(bundleWith(files(CONTRACT)), { root: ROOT });
   assert.equal(t.lib.CLI_CONTRACT, CONTRACT);
+});
+
+test('KETTE-28 (KT-M3): code is only loaded from inside the bundles folder, a link out of it is refused', { skip: process.platform === 'win32' }, async () => {
+  const dir = bundleWith(files(CONTRACT));
+  assert.equal(ticketingDir(dir, { root: tmp() }), null, 'a bundle outside the bundles root');
+  const outside = tmp();
+  write(outside, 'evil.mjs', 'export const CLI_CONTRACT = 2;\n');
+  fs.rmSync(path.join(dir, 'ticketing', 'scripts', 'cli-facade.mjs'));
+  fs.symlinkSync(path.join(outside, 'evil.mjs'), path.join(dir, 'ticketing', 'scripts', 'cli-facade.mjs'));
+  assert.equal(ticketingDir(dir, { root: ROOT }), null, 'an entry that links out of the bundle');
+  const linked = bundleWith({});
+  fs.rmSync(path.join(linked, 'ticketing'), { recursive: true, force: true });
+  const away = tmp();
+  for (const [f, c] of Object.entries(files(CONTRACT))) write(away, f, c);
+  fs.mkdirSync(linked, { recursive: true });
+  fs.symlinkSync(away, path.join(linked, 'ticketing'));
+  assert.equal(ticketingDir(linked, { root: ROOT }), null, 'a ticketing folder that links out of the bundles root');
 });

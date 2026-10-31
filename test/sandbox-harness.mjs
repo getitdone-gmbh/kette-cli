@@ -3,8 +3,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { fakeBundle, fakeClaude, json, serve, sha256, tmp, write } from './helpers.mjs';
+import { PART_FILES } from '../scripts/ticketing-part.mjs';
 
 // Harness of the sandbox tests: every command of the CLI in a fresh sandbox HOME (HOME, ~/.kette, ~/.npmrc and the Claude Code config all in temp folders,
 // delivery service and mirror as local fake servers), followed by a file system diff: outside the project folder only the
@@ -16,7 +17,7 @@ export const V = '0.20261020.9';
 export const CV = '0.20261022.40';
 // Every plugin carries an EDITION marker, so a test can see which bundle a copy in a marketplace came from
 const marked = (edition, plugins) => Object.fromEntries([['rules/core/readability.md', `# Readability ${edition}\n`], ...plugins.map((p) => [`plugins/${p}/EDITION`, edition])]);
-const ENTERPRISE_PLUGINS = ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack'];
+const ENTERPRISE_PLUGINS = ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack', 'kette-ticketing'];
 const COMMUNITY_PLUGINS = ['kette-engineering-core', 'ui-laws'];
 // Enterprise templates as kette-engineering ships them, so switching a repo to Community has files to remove
 const TEMPLATES = {
@@ -28,13 +29,23 @@ const TEMPLATES = {
   'checks/render/index.json': JSON.stringify({ files: [{ from: 'gitleaks.toml', to: '.gitleaks.toml' }] }),
   'checks/render/gitleaks.toml': '# gitleaks\n',
 };
-// The ticketing library is private (docs/adr/0003): tests take a built checkout from KETTE_TICKETING (default ../kette-ticketing)
-// and ship it in the fake Enterprise bundle as the real release does; without it the ticket scenarios that talk to a board skip
+// The ticketing library is private (docs/adr/0003): tests take a built checkout from KETTE_TICKETING (default ../kette-ticketing) and
+// ship it in the fake Enterprise bundle as the real release does; KETTE_TICKETING_DOUBLE=1 ships the public test double of the contract
+// instead (test/fixtures/ticketing-double); KETTE_TICKETING_REQUIRED=1 fails when no built library is there (kette-ticketing CI)
 export const TICKETING = path.resolve(process.env.KETTE_TICKETING || fileURLToPath(new URL('../../kette-ticketing', import.meta.url)));
-const TICKETING_FILES = ['package.json', 'routing.json', ...['plan-guard', 'workbase-session', 'intake-hook', 'intake-classify'].map((f) => `scripts/${f}.mjs`)];
-export const hasTicketing = fs.existsSync(path.join(TICKETING, 'dist', 'project.js'));
+export const DOUBLE = fileURLToPath(new URL('./fixtures/ticketing-double', import.meta.url));
+export const useDouble = process.env.KETTE_TICKETING_DOUBLE === '1';
+export const hasTicketing = !useDouble && fs.existsSync(path.join(TICKETING, 'dist', 'project.js')) && fs.existsSync(path.join(TICKETING, 'scripts', 'cli-facade.mjs'));
+if (process.env.KETTE_TICKETING_REQUIRED === '1' && !hasTicketing) throw new Error(`KETTE_TICKETING_REQUIRED=1 but no built kette-ticketing in ${TICKETING}`);
 const walkFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkFiles(path.join(dir, e.name)) : [path.join(dir, e.name)]));
-const ticketingPart = () => (hasTicketing ? Object.fromEntries([...TICKETING_FILES.map((f) => path.join(TICKETING, f)), ...walkFiles(path.join(TICKETING, 'dist'))].map((f) => [`ticketing/${path.relative(TICKETING, f).split(path.sep).join('/')}`, fs.readFileSync(f, 'utf8')])) : {});
+const partFrom = (src, prefix) => Object.fromEntries(walkFiles(src).map((f) => [`${prefix}/${path.relative(src, f).split(path.sep).join('/')}`, fs.readFileSync(f, 'utf8')]));
+function ticketingPart() {
+  if (useDouble) return partFrom(DOUBLE, 'ticketing');
+  if (!hasTicketing) return {};
+  // The plugin kette-ticketing as the release builds it: the intake agent and the /intake command (KETTE-30)
+  const plugin = { ...partFrom(path.join(TICKETING, 'agent'), 'plugins/kette-ticketing/agents'), ...partFrom(path.join(TICKETING, 'commands'), 'plugins/kette-ticketing/commands') };
+  return Object.assign(plugin, ...PART_FILES.map((f) => (fs.statSync(path.join(TICKETING, f)).isDirectory() ? partFrom(path.join(TICKETING, f), `ticketing/${f}`) : { [`ticketing/${f}`]: fs.readFileSync(path.join(TICKETING, f), 'utf8') })));
+}
 const enterpriseBundle = fakeBundle(V, ENTERPRISE_PLUGINS, { ...marked('enterprise', ENTERPRISE_PLUGINS), ...TEMPLATES, ...ticketingPart() });
 const communityBundle = fakeBundle(CV, COMMUNITY_PLUGINS, marked('community', COMMUNITY_PLUGINS));
 const figmaFiles = { 'zero.fig': 'zero-fig', 'IMPORT.md': '# Import\n' };
@@ -113,7 +124,8 @@ export function sandbox({ registry = () => [] } = {}) {
   const withClaude = process.env.PATH.split(path.delimiter).filter((d) => process.platform !== 'win32' || !fs.existsSync(path.join(d, 'gh.exe'))).join(path.delimiter);
   claude.restore();
   const env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), XDG_CONFIG_HOME: path.join(home, '.config'), KETTE_MIRROR: server.url, KETTE_DELIVERY: server.url, KETTE_REGISTRY: `${server.url}/`, KETTE_CLOUD_AUTH_URL: `${server.url}/realms/itdone`, PATH: `${tools}${path.delimiter}${withClaude}`, NO_COLOR: '1', CI: '1', KETTE_WALLET_TRUST: '1', KETTE_WALLET_PROJECT: 'proj-1', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com' };
-  for (const k of ['KETTE_HOME', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig', 'FORCE_COLOR', 'KETTE_LICENSE_KEY']) delete env[k];
+  // A test run started from Claude Code must not make every sandbox command an agent run
+  for (const k of ['KETTE_HOME', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig', 'FORCE_COLOR', 'KETTE_LICENSE_KEY', 'CLAUDECODE', 'KETTE_INTAKE_MODEL_URL', 'KETTE_INTAKE_OLLAMA_URL']) delete env[k];
   return { root, home, work, env, claude };
 }
 
@@ -227,3 +239,80 @@ export async function interactive(box, argv, answers, { cwd = box.work, allow = 
   return { code, out, outside: outside.map((p) => path.relative(box.root, p)), userPlugins: userScopeKette(box) };
 }
 
+
+// Fake board API for kette ticket: one simulated board per token (kette-ticketing's workload.zero simulator, or the board of the
+// test double); every request is logged with its token; delayMs slows writes and onWrite sees each write as it arrives
+export async function startBoard({ delayMs = 0, onWrite = null } = {}) {
+  const boards = new Map();
+  const requests = [];
+  let simulator = null;
+  if (hasTicketing) ({ createWorkbaseSimulator: simulator } = await import(pathToFileURL(path.join(TICKETING, 'dist', 'index.js')).href));
+  const doubleBoard = () => {
+    const tasks = [];
+    return {
+      async fetch(url, init) {
+        const p = new URL(url).pathname.replace(/^\/api/, '');
+        const reply = (status, body) => ({ status, ok: status < 300, text: async () => JSON.stringify(body) });
+        if (init.method === 'GET' && p.startsWith('/tasks/project/')) return reply(200, tasks.filter((t) => t.projectId === decodeURIComponent(p.slice(15))));
+        if (init.method === 'POST' && p === '/tasks') { const t = { _id: String(tasks.length + 1).padStart(24, '0'), ...JSON.parse(init.body) }; tasks.push(t); return reply(201, t); }
+        return reply(404, { message: 'not in the test double board' });
+      },
+      tasks,
+    };
+  };
+  const server = await serve(async (req, res, body) => {
+    const token = (req.headers.authorization || '').slice('Bearer '.length);
+    const entry = { token, method: req.method, path: req.url };
+    requests.push(entry);
+    const board = boards.get(token);
+    if (!board) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end('{"statusCode":401,"message":"Unauthorized"}'); }
+    if (req.method !== 'GET') { onWrite?.(entry); if (delayMs) await new Promise((r) => setTimeout(r, delayMs)); }
+    board.sim ??= simulator ? simulator({ baseUrl: `${server.url}/api`, projectId: board.project }) : doubleBoard();
+    const answer = await board.sim.fetch(`${server.url}${req.url}`, { method: req.method, headers: { Authorization: req.headers.authorization }, ...(body ? { body } : {}) });
+    res.writeHead(answer.status, { 'content-type': 'application/json' });
+    res.end(await answer.text());
+  });
+  return { url: server.url, api: `${server.url}/api`, boards, requests, close: server.close, writesTo: (t) => requests.filter((r) => r.token === t && r.method !== 'GET').length };
+}
+
+// No token value in any file of the sandbox (the provider store lives outside it, like a real vault) nor in the output
+export function noSecret(box, r, secrets) {
+  const files = [...snapshot(box.root).entries()].filter(([, v]) => v !== 'dir' && v !== 'git' && !v.startsWith('link:')).map(([f]) => f);
+  for (const s of secrets) {
+    assert.ok(!r.out.includes(s), `token in the output of ${r.out.slice(0, 200)}`);
+    for (const f of files) assert.ok(!fs.readFileSync(f, 'utf8').includes(s), `token written to ${path.relative(box.root, f)}`);
+  }
+  return r;
+}
+
+export const TICKET_TOKEN = 'KETTE_TICKETING_WORKBASE_TOKEN';
+
+// Steps of the ticket scenarios against one board: each step returns everything that changed anywhere in the sandbox (all)
+export function ticketKit(board) {
+  const env = () => ({ KETTE_TICKETING_API: board.api, KETTE_INTAKE_OLLAMA_URL: 'http://127.0.0.1:9/v1/chat/completions' });
+  async function step(box, argv, opts = {}) {
+    const before = snapshot(box.root);
+    const r = await kette(box, argv, { record: opts.record || 'ticket', ...opts, env: { ...env(), ...opts.env } });
+    return { ...r, all: changed(before, snapshot(box.root)).map((p) => path.relative(box.root, p).split(path.sep).join('/')) };
+  }
+  const licensed = async (box) => ok(await step(box, ['login', KEY, '--no-plugins', '--no-npm']));
+  // An Enterprise repo of instance name with a wallet; extra goes into instance.json (stations, ticketing.session)
+  async function enterpriseRepo(box, name, { stations = ['prototype', 'app'], walletProject = `wallet-${name}`, extra = {} } = {}) {
+    const dir = path.join(box.work, `${name}-app`);
+    ok(await step(box, ['instance', 'create', name, '--edition', 'enterprise']));
+    ok(await step(box, ['instance', 'members', 'add', `lead@${name}.test`, '--role', 'owner', '--instance', name]));
+    const f = path.join(box.home, '.kette', 'instances', name, 'instance.json');
+    fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), stations, ...extra }, null, 2));
+    ok(await step(box, ['init', dir, '--instance', name, '--no-plugins', ...SETUP], { projects: [dir] }));
+    ok(await step(box, ['wallet', 'init', '--yes'], { cwd: dir, env: { KETTE_WALLET_PROJECT: walletProject } }));
+    return dir;
+  }
+  async function connected(box, name, project, token, opts = {}) {
+    const dir = await enterpriseRepo(box, name, opts);
+    noSecret(box, ok(await step(box, ['ticket', 'connect', 'workload-zero', '--project', project, '--yes'], { cwd: dir })), [token]);
+    noSecret(box, ok(await step(box, ['wallet', 'set', TICKET_TOKEN, '--env', 'dev', '--stdin'], { cwd: dir, input: `${token}\n` })), [token]);
+    board.boards.set(token, { project });
+    return dir;
+  }
+  return { env, step, licensed, enterpriseRepo, connected, rel: (box, dir, f) => path.relative(box.root, path.join(dir, f)).split(path.sep).join('/') };
+}

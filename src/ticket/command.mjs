@@ -2,7 +2,8 @@ import { ExitError } from '../errors.mjs';
 import { ask, confirm } from '../prompt.mjs';
 import { bold, cmd, dim, file, status } from '../out.mjs';
 import { tilde } from '../rules.mjs';
-import { instanceFile, instanceSource, printable, updateInstance } from '../instance/config.mjs';
+import { withLockAsync } from '../lock.mjs';
+import { PROJECT_PATTERN, instanceFile, instanceSource, printable, updateInstance } from '../instance/config.mjs';
 import { WALLET_PATH, readWallet, writeWallet } from '../wallet/config.mjs';
 import { loadTicketing, ticketingDir } from './module.mjs';
 import { TOKEN_NAME, apiUrl, boardToken, contextOf, requireBoard, ticketProject } from './project.mjs';
@@ -14,7 +15,7 @@ export const TICKET_HELP = `kette ticket connect [workload-zero] --project <id>
                         Record a decision in the words of who decided (--paraphrase, --statement, --rationale, --label,
                         an accepted session proposal: --proposed-by <session> --acceptance "<words>")
   kette ticket list | show <KD> | inbox --member <id> | report | why <subject|file:line|commit|KD>
-  kette ticket edit <KD> | extend <KD> --stations a,b | route <KD> | close <KD>
+  kette ticket edit <KD> | extend <KD> --stations a,b | route <KD> | close <KD> | repair <KD>
   kette ticket pick <item> --as <member> | link <item> --pr|--commit|--figma|--review <url> | check <item>
   kette ticket check <KD>
                         Follow-through: per station its definition of done and what is still open (reads only)
@@ -26,9 +27,10 @@ const say = (kind, msg) => console.log(`${status(kind, kind === 'ok' ? 'OK  ' : 
 const list = (s) => (s ? String(s).split(',').map((x) => x.trim()).filter(Boolean) : []);
 const SOURCE_KINDS = ['chat', 'note', 'meeting', 'ticket', 'review'];
 const LINK_FLAGS = { pr: 'pr', commit: 'commit', figma: 'figma-node', review: 'review' };
+const isAgent = () => process.env.CLAUDECODE === '1';
 
 // Who writes: an agent when Claude Code runs kette, otherwise a person; always marked on the ticket (REQ-24)
-const authorOf = (opts) => ({ type: process.env.CLAUDECODE === '1' ? 'agent' : 'human', name: opts.as || opts.by || 'kette-cli', via: 'cli' });
+const authorOf = (opts) => ({ type: isAgent() ? 'agent' : 'human', name: opts.as || opts.by || 'kette-cli', via: 'cli' });
 const actorOf = (opts) => opts.as || opts.by || 'kette-cli';
 
 // A write goes to the board only after a yes in a terminal or --yes; agents and CI pass --yes on purpose
@@ -38,28 +40,28 @@ async function approved(opts, question) {
   return confirm(question);
 }
 
-// Rule and routing refusals of the library are answers, not crashes
-async function refused(run) {
-  try { return await run(); } catch (err) {
-    if (['LifecycleError', 'RoutingError', 'HttpError', 'PrivacyError', 'PlanMismatchError', 'AdoptionConflictError', 'ConflictError', 'BlockError', 'NotSupportedError'].includes(err.constructor?.name)) throw new ExitError(printable(err.message), 1);
-    throw err;
-  }
+// An approval, or acting as a person of the instance, is only accepted from that person at a terminal: never from an agent,
+// never without a terminal, and --yes does not skip the question (KETTE-28)
+async function asPerson(what) {
+  if (isAgent() || !process.stdin.isTTY) throw new ExitError(`${what} needs a person at a terminal: run it yourself in a terminal, not through an agent or CI. Nothing was written.`, 1);
+  if (!(await confirm(`${what}. Confirm as that person?`))) throw new ExitError('Not confirmed, nothing written.', 1);
 }
 
-// Board session of a project: routing from the project context, the board of its instance, the credential from its wallet
+// Board session of a project: the facade of the library with the project context, its board and the credential from its wallet
 async function open(project, opts) {
-  const t = await loadTicketing(project.bundleDir);
+  const { lib } = await loadTicketing(project.bundleDir);
   requireBoard(project);
-  const context = contextOf(project);
-  const routing = await refused(async () => t.lib.projectRouting(t.routing, context));
-  const config = await refused(async () => t.lib.boardConfig(context, apiUrl(t.lib)));
-  const { token, refresh } = await boardToken(project, opts, t.session);
-  const http = (fetch) => t.lib.createHttpClient({ baseUrl: config.apiBaseUrl, token, ...(refresh ? { refreshToken: refresh } : {}), fetch });
-  const on = (h, now) => {
-    const adapter = new t.lib.WorkloadZeroAdapter(config, h, Object.keys(routing.members));
-    return { adapter, service: new t.lib.TicketService({ adapter, routing, author: authorOf(opts), ...(now ? { now } : {}) }) };
-  };
-  return { t, routing, config, live: () => on(http(globalThis.fetch)), http, on };
+  const { token, refresh } = await boardToken(project, opts, lib);
+  const p = await refused(lib, async () => lib.openProject({ context: contextOf(project), apiBaseUrl: apiUrl(), token, ...(refresh ? { refreshToken: refresh } : {}), author: authorOf(opts) }));
+  return { lib, p };
+}
+
+// Refusals of the library (chain rules, routing, board, plan guard) are answers, not crashes
+async function refused(lib, run) {
+  try { return await run(); } catch (err) {
+    if (lib.isRefusal(err)) throw new ExitError(printable(err.message), 1);
+    throw err;
+  }
 }
 
 const describeWrite = (w) => {
@@ -68,32 +70,28 @@ const describeWrite = (w) => {
 };
 
 // Every write runs twice: first on a copy of the board (the plan, also what --dry-run prints), then for real, where each request is
-// compared with the plan before it leaves the process; a refusal by the chain rules stops in the first run, before anything is sent
-async function write(board, opts, run, summary) {
-  const { t, config } = board;
+// compared with the plan before it leaves the process; a refusal by the chain rules stops in the first run, before anything is sent.
+// --dry-run reads the board, and with the shared session file that read may renew the session (docs/ticketing.md)
+async function write({ lib, p }, opts, op, args, summary) {
   const at = new Date().toISOString();
-  const seed = await refused(() => t.lib.readBoard(board.http(globalThis.fetch), config.projectId));
-  const sim = t.lib.createWorkbaseSimulator({ baseUrl: config.apiBaseUrl, projectId: config.projectId, seed });
-  const writes = [];
-  const planning = t.lib.createHttpClient({ baseUrl: config.apiBaseUrl, token: 'dry-run', fetch: t.lib.recordingFetch(sim.fetch, config.apiBaseUrl, (w) => writes.push(w)), sleep: async () => {} });
-  const planned = await refused(() => run({ ...board.on(planning, () => at), at }));
+  const { result: planned, writes } = await refused(lib, () => p.plan(op, args, at));
   console.log(summary(planned));
-  if (!writes.length) { console.log(dim('Nothing to change on the board.')); return { planned, written: false }; }
-  console.log(`${opts.dryRun ? 'Would send' : 'Sends'} ${writes.length} request${writes.length === 1 ? '' : 's'} to project ${printable(config.projectId)}:`);
+  if (!writes.length) { console.log(dim('Nothing to change on the board.')); return planned; }
+  console.log(`${opts.dryRun ? 'Would send' : 'Sends'} ${writes.length} request${writes.length === 1 ? '' : 's'} to project ${printable(p.projectId)}:`);
   for (const w of writes) console.log(`  ${dim(describeWrite(w))}`);
-  if (opts.dryRun) { console.log(dim('--dry-run: nothing written.')); return { planned, written: false }; }
+  if (opts.dryRun) { console.log(dim('--dry-run: nothing written.')); return planned; }
   if (!(await approved(opts, 'Write this to the board?'))) throw new ExitError('Not confirmed, nothing written.', 1);
-  const guarded = t.guard.guardFetch(globalThis.fetch, writes, config.apiBaseUrl);
-  const result = await refused(() => run({ ...board.on(board.http(guarded), () => at), at }));
-  if (guarded.remaining()) throw new ExitError(`${guarded.remaining()} planned requests were not sent. Check the board with ${cmd('kette ticket list')} before running it again.`, 1);
-  say('ok', `Written to project ${printable(config.projectId)}`);
-  return { planned: result, written: true };
+  const { result, unsent, duplicates } = await refused(lib, () => p.write(op, args, at, writes));
+  if (unsent) throw new ExitError(`${unsent} planned requests were not sent. Check the board with ${cmd('kette ticket list')} before running it again.`, 1);
+  if (duplicates?.length > 1) throw new ExitError(`${result.decision.id} is on the board ${duplicates.length} times now (tickets ${duplicates.map(printable).join(', ')}): another kette recorded it at the same moment on another machine. Keep one and withdraw the other on the board.`, 1);
+  say('ok', `Written to project ${printable(p.projectId)}`);
+  return result;
 }
 
 const json = (opts, value) => { if (opts.json) { console.log(JSON.stringify(value, null, 2)); return true; } return false; };
 
 function itemLine(i) {
-  const extra = [i.awaiting && `waits for ${i.awaiting}`, i.reason, i.drift && 'drift: upstream not done'].filter(Boolean).map(printable).join(', ');
+  const extra = [i.awaiting && `waits for ${i.awaiting}`, i.reason, i.drift && 'drift: upstream not done', i.approval && `approved by ${i.approval.by} (${i.approval.how})`].filter(Boolean).map(printable).join(', ');
   const links = i.links.map((l) => `${l.kind} ${printable(l.url)}`).join(', ');
   return `  ${printable(i.key)}  ${bold(i.status)}${extra ? ` (${extra})` : ''}  ${dim(`owner ${printable(i.owner)}, builder ${printable(i.builder)}${i.assignee ? `, picked by ${printable(i.assignee)}` : ''}`)}${links ? `\n      ${dim(links)}` : ''}`;
 }
@@ -115,6 +113,9 @@ function showDecision(found) {
   console.log(dim(`  ${found.revisions?.length ?? 0} revisions, history with ${cmd(`kette ticket why ${d.id}`)}`));
 }
 
+// Decisions an interrupted run left half written, named with their repair
+const incompleteLines = (half) => half.map((h) => `${status('warn', 'WARN')} ${printable(h.id)} is incomplete (missing ${h.missing.map(printable).join(', ')}): ${cmd(`kette ticket repair ${h.id}`)}`);
+
 function parseSource(raw) {
   if (!raw) throw new ExitError('--source names where the decision was made, e.g. --source chat:<session> or --source meeting:<date>');
   const m = /^([a-z]+):(.+)$/.exec(raw);
@@ -128,33 +129,20 @@ function wordsOf(text, opts) {
 }
 
 const need = (value, usage) => { if (!value) throw new ExitError(`Usage: ${usage}`); return value; };
+const decisionId = (args, usage) => need(args[0], usage);
+const isMember = (project, id) => project.instance.members.some((m) => m.id.toLowerCase() === String(id).toLowerCase());
 
 async function newDecision(project, opts, args) {
   const words = need(args.join(' ').trim(), 'kette ticket new "<words>" --by <member> --source <ref> --stations a,b');
   if (!opts.by) throw new ExitError(`--by names who decided, a member of instance ${project.instance.name} (${project.instance.members.map((m) => printable(m.id)).join(', ') || `none yet: ${cmd('kette instance members add <id> --role owner')}`})`);
   const stations = list(opts.stations);
   if (!stations.length) throw new ExitError('--stations names the stations the decision reaches, e.g. --stations prototype,app:<repo>');
-  const source = parseSource(opts.source);
   const board = await open(project, opts);
-  await write(board, opts, async ({ adapter, service, at }) => {
-    const ids = (await adapter.listDecisions({})).items.map((d) => d.decision.id);
-    const decision = {
-      id: board.t.lib.nextDecisionId(ids),
-      statement: opts.statement || words,
-      words: wordsOf(words, opts),
-      decidedBy: opts.by,
-      decidedAt: at.slice(0, 10),
-      source,
-      status: 'decided',
-      labels: list(opts.label),
-      ...(opts.rationale ? { rationale: opts.rationale } : {}),
-    };
-    return service.create(decision, stations, { actor: actorOf(opts) });
-  }, (made) => `New decision ${made.decision.id} with ${made.items.length} station item${made.items.length === 1 ? '' : 's'}:\n${made.items.map(itemLine).join('\n')}`);
+  const op = { words, statement: opts.statement, paraphrase: Boolean(opts.paraphrase), proposedBy: opts['proposed-by'], acceptance: opts.acceptance, by: opts.by, source: parseSource(opts.source), stations, labels: list(opts.label), rationale: opts.rationale, actor: actorOf(opts) };
+  // One new decision at a time per instance on this machine, so two parallel runs never take the same id (KETTE-29)
+  await withLockAsync(`ticket-new-${project.instance.name}`, () => write(board, opts, 'new', op, (made) => `New decision ${made.decision.id} with ${made.items.length} station item${made.items.length === 1 ? '' : 's'}:\n${made.items.map(itemLine).join('\n')}`));
   return 0;
 }
-
-const decisionId = (args, usage) => need(args[0], usage);
 
 async function editDecision(project, opts, args) {
   const id = decisionId(args, 'kette ticket edit <KD> [--statement s] [--words w] [--rationale r] [--label a,b]');
@@ -165,8 +153,7 @@ async function editDecision(project, opts, args) {
     ...(opts.label ? { labels: list(opts.label) } : {}),
   };
   if (!Object.keys(patch).length) throw new ExitError('Nothing to edit: --statement, --words, --rationale or --label');
-  const board = await open(project, opts);
-  await write(board, opts, ({ service }) => service.edit(id, patch, { actor: actorOf(opts) }), (d) => `Edit ${d.decision.id}: ${Object.keys(patch).join(', ')}`);
+  await write(await open(project, opts), opts, 'edit', { id, patch, actor: actorOf(opts) }, (d) => `Edit ${d.decision.id}: ${Object.keys(patch).join(', ')}`);
   return 0;
 }
 
@@ -174,76 +161,82 @@ async function extendDecision(project, opts, args) {
   const id = decisionId(args, 'kette ticket extend <KD> --stations a,b [--comment text]');
   const stations = list(opts.stations);
   if (!stations.length && !opts.comment) throw new ExitError('Nothing to extend: --stations a,b or --comment text');
-  const board = await open(project, opts);
-  await write(board, opts, ({ service }) => service.extend(id, stations, { actor: actorOf(opts), ...(opts.comment ? { comment: opts.comment } : {}) }), (d) => `Extend ${d.decision.id}:\n${d.items.map(itemLine).join('\n')}`);
+  await write(await open(project, opts), opts, 'extend', { id, stations, comment: opts.comment, actor: actorOf(opts) }, (d) => `Extend ${d.decision.id}:\n${d.items.map(itemLine).join('\n')}`);
   return 0;
 }
 
 async function route(project, opts, args) {
   const id = decisionId(args, 'kette ticket route <KD>');
-  const board = await open(project, opts);
-  await write(board, opts, ({ service }) => service.reroute(id, actorOf(opts)), (changed) => (changed.length ? `Owners and builders from the routing of instance ${project.instance.name}:\n${changed.map(itemLine).join('\n')}` : `Every item of ${id} already has the owner and builder the routing names.`));
+  await write(await open(project, opts), opts, 'route', { id, actor: actorOf(opts) }, (changed) => (changed.length ? `Owners and builders from the routing of instance ${project.instance.name}:\n${changed.map(itemLine).join('\n')}` : `Every item of ${id} already has the owner and builder the routing names.`));
+  return 0;
+}
+
+// kette ticket repair <KD>: completes what an interrupted run left out (first revision, planned station items) (KETTE-31)
+async function repair(project, opts, args) {
+  const id = decisionId(args, 'kette ticket repair <KD>');
+  await write(await open(project, opts), opts, 'repair', { id, actor: actorOf(opts) }, (r) => (r.added.length || r.revision ? `Repair ${id}: ${[r.revision && 'first revision', ...r.added].filter(Boolean).map(printable).join(', ')}` : `${id} is complete, nothing to repair.`));
   return 0;
 }
 
 async function itemCommand(project, opts, args, action) {
   const key = need(args[0], `kette ticket ${action} <item key, e.g. KD-0001/app/<repo>>`);
   if (action === 'pick' && !opts.as) throw new ExitError('--as names who picks the item (a member, session or agent)');
+  if (action !== 'link' && opts.as && isMember(project, opts.as)) await asPerson(`${action} ${key} as ${printable(opts.as)}, a person of instance ${project.instance.name}`);
+  if (action === 'check' && opts['approved-by']) await asPerson(`${printable(opts['approved-by'])} approves ${key}`);
   const board = await open(project, opts);
-  const meta = { actor: actorOf(opts), ...(opts['approved-by'] ? { approvedBy: opts['approved-by'] } : {}) };
-  let run;
-  if (action === 'pick') run = ({ service }) => service.pick(key, opts.as);
-  else if (action === 'check') run = ({ service }) => service.check(key, meta);
+  const actor = actorOf(opts);
+  let args2;
+  if (action === 'pick') args2 = { key, as: opts.as };
+  else if (action === 'check') args2 = { key, actor, ...(opts['approved-by'] ? { approvedBy: opts['approved-by'], approvalHow: 'declared' } : {}) };
   else {
     const kinds = Object.keys(LINK_FLAGS).filter((k) => opts[k]);
     if (kinds.length !== 1) throw new ExitError('kette ticket link <item> needs exactly one of --pr, --commit, --figma, --review with a URL');
     const url = opts[kinds[0]];
     if (!/^https:\/\/[^/\s]+\.[^/\s]+/.test(url)) throw new ExitError(`--${kinds[0]} needs an https URL (a commit as its URL on the git host): ${printable(url)}`);
-    run = ({ service, at }) => service.link(key, { kind: LINK_FLAGS[kinds[0]], url, addedBy: meta.actor, addedAt: at }, meta);
+    args2 = { key, link: { kind: LINK_FLAGS[kinds[0]], url }, actor };
   }
-  const doneWhen = (item) => board.routing.stations[item.layer]?.definitionOfDone;
-  await write(board, opts, run, (item) => `${action} ${item.key}:\n${itemLine(item)}${doneWhen(item) ? `\n      ${dim(`done when: ${printable(doneWhen(item))}`)}` : ''}`);
+  const doneWhen = (item) => board.p.routing.stations[item.layer]?.definitionOfDone;
+  await write(board, opts, action, args2, (item) => `${action} ${item.key}:\n${itemLine(item)}${doneWhen(item) ? `\n      ${dim(`done when: ${printable(doneWhen(item))}`)}` : ''}`);
   return 0;
 }
 
 // kette ticket check <KD>: follow-through of the whole decision; checks status, links and chain order, the rest is the owner's to confirm
 async function followThrough(project, opts, id) {
-  const { live, t } = await open(project, opts);
-  const f = await refused(() => live().service.followThrough(id));
+  const { lib, p } = await open(project, opts);
+  const f = await refused(lib, () => p.followThrough(id));
   if (json(opts, f)) return f.complete ? 0 : 1;
-  console.log(t.lib.formatFollowThrough(f).split('\n').map(printable).join('\n'));
+  console.log(p.format.followThrough(f).split('\n').map(printable).join('\n'));
   return f.complete ? 0 : 1;
 }
 
 async function close(project, opts, args) {
   const id = decisionId(args, 'kette ticket close <KD>');
-  const board = await open(project, opts);
-  await write(board, opts, ({ service }) => service.close(id, actorOf(opts)), (d) => `Close ${d.decision.id}: every station is done or not applicable.`);
+  await write(await open(project, opts), opts, 'close', { id, actor: actorOf(opts) }, (d) => `Close ${d.decision.id}: every station is done or not applicable.`);
   return 0;
 }
 
 async function listCmd(project, opts) {
-  const { live, routing, t } = await open(project, opts);
-  const { adapter } = live();
+  const { lib, p } = await open(project, opts);
   if (opts.member || opts.station || opts.status) {
     const query = { ...(opts.member ? { member: opts.member } : {}), ...(opts.station ? { layer: opts.station } : {}), ...(opts.status ? { status: list(opts.status) } : {}) };
-    const items = t.lib.sortByChain((await refused(() => adapter.listLayerItems(query))).items, routing);
+    const items = await refused(lib, () => p.items(query));
     if (json(opts, items)) return 0;
     if (!items.length) console.log('No items match.');
     for (const i of items) console.log(itemLine(i));
     return 0;
   }
-  const decisions = (await refused(() => adapter.listDecisions({}))).items;
+  const decisions = await refused(lib, () => p.list());
   if (json(opts, decisions)) return 0;
   if (!decisions.length) console.log(`No decisions on the board of instance ${project.instance.name} yet. Record one with ${cmd('kette ticket new')}.`);
-  for (const d of decisions.sort((a, b) => a.decision.id.localeCompare(b.decision.id))) console.log(decisionLine(d));
+  for (const d of [...decisions].sort((a, b) => a.decision.id.localeCompare(b.decision.id))) console.log(decisionLine(d));
+  for (const l of incompleteLines(await refused(lib, () => p.incomplete()))) console.log(l);
   return 0;
 }
 
 async function show(project, opts, args) {
   const id = decisionId(args, 'kette ticket show <KD>');
-  const { live } = await open(project, opts);
-  const found = await refused(() => live().adapter.getDecision(id));
+  const { lib, p } = await open(project, opts);
+  const found = await refused(lib, () => p.get(id));
   if (!found) throw new ExitError(`${printable(id)} is not on the board of instance ${project.instance.name}.`, 1);
   if (json(opts, found)) return 0;
   showDecision(found);
@@ -253,8 +246,8 @@ async function show(project, opts, args) {
 async function inbox(project, opts) {
   const member = opts.member || opts.as;
   if (!member) throw new ExitError('Usage: kette ticket inbox --member <id>');
-  const { live } = await open(project, opts);
-  const items = await refused(() => live().service.inbox(member));
+  const { lib, p } = await open(project, opts);
+  const items = await refused(lib, () => p.inbox(member));
   if (json(opts, items)) return 0;
   if (!items.length) console.log(`Nothing open for ${printable(member)}.`);
   for (const i of items) console.log(itemLine(i));
@@ -262,11 +255,13 @@ async function inbox(project, opts) {
 }
 
 async function report(project, opts) {
-  const { live, routing, t } = await open(project, opts);
-  const r = await refused(() => live().service.report());
+  const { lib, p } = await open(project, opts);
+  const r = await refused(lib, () => p.report());
   if (opts.station) r.openByLayer = Object.fromEntries(Object.entries(r.openByLayer).filter(([layer]) => layer === opts.station));
-  if (json(opts, r)) return 0;
-  console.log(t.lib.formatReport(r, routing).split('\n').map(printable).join('\n'));
+  const half = await refused(lib, () => p.incomplete());
+  if (json(opts, { ...r, incomplete: half })) return 0;
+  console.log(p.format.report(r).split('\n').map(printable).join('\n'));
+  for (const l of incompleteLines(half)) console.log(l);
   return 0;
 }
 
@@ -286,23 +281,24 @@ const gitResolver = (root, spawnSync) => ({
 
 async function whyCmd(project, opts, args, deps) {
   const query = need(args.join(' ').trim(), 'kette ticket why <subject | file:line | commit | URL | KD id>');
-  const { live, t } = await open(project, opts);
-  const result = await refused(() => live().service.why(query, { resolver: gitResolver(project.root, deps.spawnSync) }));
+  const { lib, p } = await open(project, opts);
+  const result = await refused(lib, () => p.why(query, gitResolver(project.root, deps.spawnSync)));
   if (json(opts, result)) return 0;
-  console.log(t.lib.formatWhy(result).split('\n').map(printable).join('\n'));
+  console.log(p.format.why(result).split('\n').map(printable).join('\n'));
   return 0;
 }
 
 // kette ticket connect: the board goes into instance.json (under its lock) after the plan was shown; the credential only as a name
 async function connect(project, opts, args) {
-  const t = await loadTicketing(project.bundleDir);
-  const adapter = await refused(async () => t.lib.adapterId(args[0] || 'workload-zero'));
+  const { lib } = await loadTicketing(project.bundleDir);
+  const adapter = await refused(lib, async () => lib.adapterId(args[0] || 'workload-zero'));
   const id = opts.project;
   if (!id) throw new ExitError('Usage: kette ticket connect workload-zero --project <id> (the workload.zero project id)');
+  if (!PROJECT_PATTERN.test(id)) throw new ExitError(`--project must be a board project id (letters, digits, dash, underscore, at most 64): ${JSON.stringify(printable(id).slice(0, 80))}. Nothing written.`);
   const next = { adapter, project: id };
   const name = project.instance.name;
   const current = project.instance.ticketing;
-  if (current && (t.lib.adapterId(current.adapter) !== adapter || current.project !== id)) {
+  if (current && (lib.adapterId(current.adapter) !== adapter || current.project !== id)) {
     throw new ExitError(`Instance ${name} already uses ${printable(current.adapter)} ${printable(current.project)}. One ticket system per project, no sync between two (Q3). Change ticketing in ${tilde(instanceFile(name))} by hand if the project moves.`, 1);
   }
   const wallet = readWallet(project.root);
@@ -328,7 +324,7 @@ async function connect(project, opts, args) {
       say('ok', `${TOKEN_NAME} declared in ${file(WALLET_PATH)}`);
     }
   }
-  return probe({ ...project, effective: { ...project.effective, ticketing: next }, instance: { ...project.instance, ticketing: next } }, opts);
+  return probe({ ...project, effective: { ...project.effective, ticketing: { ...current, ...next } }, instance: { ...project.instance, ticketing: { ...current, ...next } } }, opts);
 }
 
 // One read of the board after connect; a missing credential is a next step, not a failure
@@ -340,7 +336,7 @@ async function probe(project, opts) {
     return 0;
   }
   try {
-    const count = (await board.live().adapter.listDecisions({})).items.length;
+    const count = (await board.p.list()).length;
     say('ok', `Board reachable, ${count} decision${count === 1 ? '' : 's'} on it. Try ${cmd('kette ticket list')}`);
   } catch (err) {
     say('warn', `Board not readable yet: ${printable(err.message)}`);
@@ -365,7 +361,7 @@ export async function offerTicketing(root, opts, { resolveProject }) {
   }
 }
 
-const COMMANDS = { new: newDecision, edit: editDecision, extend: extendDecision, route, close, list: listCmd, show, inbox, report };
+const COMMANDS = { new: newDecision, edit: editDecision, extend: extendDecision, route, close, repair, list: listCmd, show, inbox, report };
 
 export async function ticket(sub, opts, deps) {
   if (!sub || sub === 'help') { console.log(`Ticketing (Enterprise): decisions become tickets on the board of the instance and travel down the chain.\n\n  ${TICKET_HELP}`); return 0; }

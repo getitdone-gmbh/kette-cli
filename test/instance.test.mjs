@@ -358,3 +358,15 @@ test('KETTE-24: a station may carry the definition of done the instance sets for
   for (const e of [/stations\[0\]\.definitionOfDone must be one line/, /stations\[1\] must be a station id .* or an object with id and definitionOfDone/, /unknown field stations\[2\]\.done/]) assert.ok(errs.some((x) => e.test(x)), `${e} in ${errs.join('; ')}`);
   assert.deepEqual(validateInstance({ ...full(), stations: ['app', { id: 'app' }] }), ['stations[1] app is listed twice']);
 });
+
+test('KETTE-28: ticketing.project is one path segment, session and intake model are explicit, station objects carry routing', () => {
+  for (const project of ['../../tasks/deleted', 'a/b', 'x?y=1#z', '..', 'proj-acme/../../tasks/deleted', 'a b', '']) {
+    assert.ok(validateInstance({ ...full(), ticketing: { adapter: 'workload-zero', project } }).some((e) => /ticketing\.project must be a board project id/.test(e)), project);
+  }
+  assert.deepEqual(validateInstance({ ...full(), ticketing: { adapter: 'workload-zero', project: '6ae510fc15371242272a4278', session: true, intakeModel: 'https://model.example/v1' } }), []);
+  const bad = validateInstance({ ...full(), ticketing: { adapter: 'workload-zero', project: 'p1', session: 'yes', intakeModel: 'http://192.168.178.175:11434/v1' } });
+  assert.ok(bad.some((e) => /ticketing\.session must be true or false/.test(e)));
+  assert.ok(bad.some((e) => /ticketing\.intakeModel must be an https URL/.test(e)));
+  assert.deepEqual(validateInstance({ ...full(), stations: [{ id: 'prototype', owner: 'lead@acme.test', builder: 'ux-designer', approve: 'lead@acme.test', merge: 'release-team', targets: ['proto-site'] }] }), []);
+  assert.ok(validateInstance({ ...full(), stations: [{ id: 'app', targets: [] }] }).some((e) => /targets must be a list of distinct names/.test(e)));
+});

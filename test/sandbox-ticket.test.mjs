@@ -2,78 +2,32 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { serve } from './helpers.mjs';
-import { KEY, SETUP, TICKETING, changed, hasTicketing, interactive, kette, ok, posixOnly, readInstanceFile, sandbox, snapshot, start, stop } from './sandbox-harness.mjs';
+import { KEY, SETUP, TICKETING, TICKET_TOKEN, hasTicketing, interactive, noSecret, ok, posixOnly, readInstanceFile, sandbox, start, startBoard, stop, ticketKit } from './sandbox-harness.mjs';
 
 // kette ticket in a fresh sandbox per scenario (KETTE-12): the board is the workload.zero simulator of kette-ticketing behind a local
 // server, one simulated board per token; after each command a diff of the whole sandbox and a search for every token value
-const TOKEN = 'KETTE_TICKETING_WORKBASE_TOKEN';
-const boards = new Map();
-const requests = [];
-let server;
+const TOKEN = TICKET_TOKEN;
+let board;
+let boards;
+let requests;
 const needsBoard = { skip: hasTicketing ? false : `no built kette-ticketing in ${TICKETING} (set KETTE_TICKETING)` };
 
 before(async () => {
   await start();
-  if (!hasTicketing) return;
-  const { createWorkbaseSimulator } = await import(pathToFileURL(path.join(TICKETING, 'dist', 'index.js')).href);
-  server = await serve(async (req, res, body) => {
-    const token = (req.headers.authorization || '').slice('Bearer '.length);
-    requests.push({ token, method: req.method, path: req.url });
-    const board = boards.get(token);
-    if (!board) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end('{"statusCode":401,"message":"Unauthorized"}'); }
-    board.sim ??= createWorkbaseSimulator({ baseUrl: `${server.url}/api`, projectId: board.project });
-    const answer = await board.sim.fetch(`${server.url}${req.url}`, { method: req.method, headers: { Authorization: req.headers.authorization }, ...(body ? { body } : {}) });
-    res.writeHead(answer.status, { 'content-type': 'application/json' });
-    res.end(await answer.text());
-  });
+  board = await startBoard();
+  ({ boards, requests } = board);
+  kit = ticketKit(board);
 });
-after(async () => { await server?.close(); await stop('sandbox-ticket'); });
+after(async () => { await board?.close(); await stop('sandbox-ticket'); });
 
-const env = () => ({ KETTE_TICKETING_API: `${server.url}/api`, KETTE_INTAKE_OLLAMA_URL: 'http://127.0.0.1:9/v1/chat/completions' });
-const writesTo = (token) => requests.filter((r) => r.token === token && r.method !== 'GET').length;
-
-// No token value in any file of the sandbox (the provider store lives outside it, like a real vault) nor in the output
-function noSecret(box, r, secrets) {
-  const files = [...snapshot(box.root).entries()].filter(([, v]) => v !== 'dir' && v !== 'git' && !v.startsWith('link:')).map(([f]) => f);
-  for (const s of secrets) {
-    assert.ok(!r.out.includes(s), `token in the output of ${r.out.slice(0, 200)}`);
-    for (const f of files) assert.ok(!fs.readFileSync(f, 'utf8').includes(s), `token written to ${path.relative(box.root, f)}`);
-  }
-  return r;
-}
-
-// Runs one step and returns everything that changed anywhere in the sandbox
-async function step(box, argv, opts = {}) {
-  const before = snapshot(box.root);
-  const r = await kette(box, argv, { record: opts.record || 'ticket', ...opts, env: { ...(server ? env() : {}), ...opts.env } });
-  return { ...r, all: changed(before, snapshot(box.root)).map((p) => path.relative(box.root, p).split(path.sep).join('/')) };
-}
-
-const rel = (box, dir, f) => path.relative(box.root, path.join(dir, f)).split(path.sep).join('/');
-
-// An Enterprise repo of instance name with a wallet; board and token only when given
-async function enterpriseRepo(box, name, { stations = ['prototype', 'app'], walletProject = `wallet-${name}` } = {}) {
-  const dir = path.join(box.work, `${name}-app`);
-  ok(await step(box, ['instance', 'create', name, '--edition', 'enterprise']));
-  ok(await step(box, ['instance', 'members', 'add', `lead@${name}.test`, '--role', 'owner', '--instance', name]));
-  const f = path.join(box.home, '.kette', 'instances', name, 'instance.json');
-  fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), stations }, null, 2));
-  ok(await step(box, ['init', dir, '--instance', name, '--no-plugins', ...SETUP], { projects: [dir] }));
-  ok(await step(box, ['wallet', 'init', '--yes'], { cwd: dir, env: { KETTE_WALLET_PROJECT: walletProject } }));
-  return dir;
-}
-
-async function connected(box, name, project, token) {
-  const dir = await enterpriseRepo(box, name);
-  noSecret(box, ok(await step(box, ['ticket', 'connect', 'workload-zero', '--project', project, '--yes'], { cwd: dir })), [token]);
-  noSecret(box, ok(await step(box, ['wallet', 'set', TOKEN, '--env', 'dev', '--stdin'], { cwd: dir, input: `${token}\n` })), [token]);
-  boards.set(token, { project });
-  return dir;
-}
-
-const licensed = async (box) => ok(await step(box, ['login', KEY, '--no-plugins', '--no-npm']));
+const writesTo = (token) => board.writesTo(token);
+let kit;
+const step = (...a) => kit.step(...a);
+const licensed = (...a) => kit.licensed(...a);
+const enterpriseRepo = (...a) => kit.enterpriseRepo(...a);
+const connected = (...a) => kit.connected(...a);
+const rel = (...a) => kit.rel(...a);
+const env = () => kit.env();
 
 test('Enterprise instance: connect writes only the ticketing block, then every command runs on its board', needsBoard, async () => {
   const box = sandbox();
@@ -99,7 +53,7 @@ test('Enterprise instance: connect writes only the ticketing block, then every c
 
   const run = async (argv, code = 0) => noSecret(box, ok(await step(box, ['ticket', ...argv], { cwd: app }), code), [token]);
   const words = 'Der Speichern Button kommt nach rechts';
-  const newArgs = ['new', words, '--by', 'lead@acme.test', '--source', 'chat:session-test', '--stations', 'prototype:workload-zero-dashboard,app:acme-app'];
+  const newArgs = ['new', words, '--by', 'lead@acme.test', '--source', 'chat:session-test', '--stations', 'prototype:acme-app,app:acme-app'];
   const before = writesTo(token);
   const planned = await run([...newArgs, '--dry-run']);
   assert.match(planned.out, /New decision KD-0001 with 2 station items/);
@@ -108,7 +62,7 @@ test('Enterprise instance: connect writes only the ticketing block, then every c
   assert.equal(writesTo(token), before, 'dry run sends no write to the board');
 
   const made = await run([...newArgs, '--yes']);
-  assert.match(made.out, /KD-0001\/prototype\/workload-zero-dashboard[\s\S]*KD-0001\/app\/acme-app/);
+  assert.match(made.out, /KD-0001\/prototype\/acme-app[\s\S]*KD-0001\/app\/acme-app/);
   assert.deepEqual(made.all, [], 'a board write changes no file');
   assert.ok(writesTo(token) > before);
 
@@ -129,25 +83,24 @@ test('Enterprise instance: connect writes only the ticketing block, then every c
   await run(['link', appItem, '--pr', 'https://github.com/acme/acme-app/pull/1', '--as', 'fullstack-developer', '--yes']);
   const writes = writesTo(token);
   const early = await run(['check', appItem, '--as', 'fullstack-developer', '--yes'], 1);
-  assert.match(early.out, /\[chain-order\] KD-0001\/app\/acme-app cannot be checked off before upstream is done: KD-0001\/prototype\/workload-zero-dashboard/);
+  assert.match(early.out, /\[chain-order\] KD-0001\/app\/acme-app cannot be checked off before upstream is done: KD-0001\/prototype\/acme-app/);
   assert.equal(writesTo(token), writes, 'a refused check sends nothing');
   assert.match((await run(['report'])).out, /In progress ahead of upstream: 1/);
 
   // KETTE-24: follow-through per station with its definition of done, reads only, exit 1 while a station is open
   const follow = await run(['check', 'KD-0001'], 1);
   assert.match(follow.out, /KD-0001 follow-through: 2 of 2 stations open/);
-  assert.match(follow.out, /prototype:workload-zero-dashboard open[\s\S]*done when: Screens, spec and docs changed and deployed to zero-design-intern\.itdone\.de/);
-  assert.match(follow.out, /app:acme-app in_progress[\s\S]*done when: Live on shop\.acme\.test, deploy run checked[\s\S]*open: upstream open: KD-0001\/prototype\/workload-zero-dashboard/);
+  assert.match(follow.out, /prototype:acme-app open[\s\S]*done when: Screens, spec and docs changed and deployed where the team reviews the prototype/);
+  assert.match(follow.out, /app:acme-app in_progress[\s\S]*done when: Live on shop\.acme\.test, deploy run checked[\s\S]*open: upstream open: KD-0001\/prototype\/acme-app/);
   assert.match(follow.out, /review: One batch review .* never a review per station/);
   assert.deepEqual(follow.all, []);
   assert.equal(writesTo(token), writes, 'the follow-through writes nothing');
 
-  const proto = 'KD-0001/prototype/workload-zero-dashboard';
+  const proto = 'KD-0001/prototype/acme-app';
   await run(['pick', proto, '--as', 'ux-designer', '--yes']);
   await run(['link', proto, '--pr', 'https://github.com/acme/proto/pull/2', '--as', 'ux-designer', '--yes']);
   await run(['link', proto, '--review', 'https://github.com/acme/proto/pull/2#review', '--as', 'ux-designer', '--yes']);
-  assert.match((await run(['check', proto, '--as', 'ux-designer', '--yes'], 1)).out, /\[approval\] .* needs approval by lead@acme\.test/);
-  await run(['check', proto, '--as', 'ux-designer', '--approved-by', 'lead@acme.test', '--yes']);
+  await run(['check', proto, '--as', 'ux-designer', '--yes']);
   assert.match((await run(['close', 'KD-0001', '--yes'], 1)).out, /\[close-open-items\] KD-0001 cannot close: KD-0001\/app\/acme-app/);
   await run(['link', appItem, '--review', 'https://github.com/acme/acme-app/pull/1#review', '--as', 'fullstack-developer', '--yes']);
   assert.match((await run(['check', appItem, '--as', 'fullstack-developer', '--yes'])).out, /check KD-0001\/app\/acme-app:[\s\S]*done when: Live on shop\.acme\.test, deploy run checked/);

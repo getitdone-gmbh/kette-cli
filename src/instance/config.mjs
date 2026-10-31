@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { instancesDir } from '../paths.mjs';
+import { instancesDir, isSecureUrl } from '../paths.mjs';
 import { COMMUNITY, ENTERPRISE } from '../editions.mjs';
 import { readState, updateState, validVersion } from '../manifest.mjs';
 import { writeAtomic } from '../files.mjs';
@@ -107,15 +107,20 @@ const memberErrors = (m, at) => {
 };
 
 const DONE_MAX = 1000;
+const TARGETS_MAX = 50;
+// A board project id is one URL path segment (KETTE-28)
+export const PROJECT_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 // A station is its id, or an object with the id and the definition of done this instance sets for it (KETTE-24)
 export const stationId = (s) => (isObject(s) ? s.id : s);
 function stationErrors(s, at) {
   const bad = [`${at} must be a station id (lowercase letters, digits, dashes) or an object with id and definitionOfDone`];
   if (typeof s === 'string') return ID_PATTERN.test(s) ? [] : bad;
   if (!isObject(s) || typeof s.id !== 'string' || !ID_PATTERN.test(s.id)) return bad;
-  const errs = unknown(s, ['id', 'definitionOfDone'], `${at}.`);
+  const errs = unknown(s, ['id', 'definitionOfDone', 'owner', 'builder', 'approve', 'merge', 'targets'], `${at}.`);
   const done = s.definitionOfDone;
   if ('definitionOfDone' in s && (typeof done !== 'string' || !done.trim() || done.length > DONE_MAX || CONTROL.test(done))) errs.push(`${at}.definitionOfDone must be one line of at most ${DONE_MAX} characters`);
+  for (const k of ['owner', 'builder', 'approve', 'merge']) if (k in s && !isText(s[k])) errs.push(`${at}.${k} must be one line (a member, session or agent id)`);
+  if ('targets' in s && (!Array.isArray(s.targets) || !s.targets.length || s.targets.length > TARGETS_MAX || s.targets.some((x) => !isText(x)) || new Set(s.targets).size !== s.targets.length)) errs.push(`${at}.targets must be a list of distinct names (repos, Figma files), at most ${TARGETS_MAX}`);
   return errs;
 }
 
@@ -125,9 +130,11 @@ function sectionErrors(i) {
     const t = i.ticketing;
     if (!isObject(t)) errs.push('ticketing must be an object');
     else {
-      errs.push(...unknown(t, ['adapter', 'project'], 'ticketing.'));
+      errs.push(...unknown(t, ['adapter', 'project', 'session', 'intakeModel'], 'ticketing.'));
       if (typeof t.adapter !== 'string' || !ID_PATTERN.test(t.adapter)) errs.push('ticketing.adapter must be an adapter id (lowercase letters, digits, dashes)');
-      if (!isText(t.project)) errs.push('ticketing.project must be one line');
+      if (typeof t.project !== 'string' || !PROJECT_PATTERN.test(t.project)) errs.push('ticketing.project must be a board project id (letters, digits, dash, underscore, at most 64)');
+      if ('session' in t && typeof t.session !== 'boolean') errs.push('ticketing.session must be true or false (true allows the shared Workbase session file)');
+      if ('intakeModel' in t && (!isText(t.intakeModel) || !isSecureUrl(t.intakeModel))) errs.push('ticketing.intakeModel must be an https URL (http only on this machine)');
     }
   }
   if ('wallet' in i) {

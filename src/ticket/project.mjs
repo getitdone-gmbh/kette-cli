@@ -41,15 +41,16 @@ export function requireBoard(project) {
   throw new ExitError(`Instance ${project.instance.name} has no ticket board yet. Connect one with: ${cmd('kette ticket connect workload-zero --project <id>')}`, 1);
 }
 
-// The API of the board; another one only for tests and a self-hosted workload.zero, always https (http only locally)
-export const apiUrl = (lib) => secureUrl((process.env.KETTE_TICKETING_API || lib.ALEX_WORKLOAD_ZERO.apiBaseUrl).replace(/\/+$/, ''), 'KETTE_TICKETING_API');
+// Another board API only for tests and a self-hosted workload.zero, always https (http only locally); undefined means the default
+export const apiUrl = () => (process.env.KETTE_TICKETING_API ? secureUrl(process.env.KETTE_TICKETING_API.replace(/\/+$/, ''), 'KETTE_TICKETING_API') : undefined);
 
 // Wallet environment for the board credential: --env, the instance default, dev, or the first environment of the wallet
 const walletEnv = (wallet, instance, opts) => opts.env || (instance.wallet?.env && wallet.environments.includes(instance.wallet.env) ? instance.wallet.env : wallet.environments.includes('dev') ? 'dev' : wallet.environments[0]);
 
 const missing = (name, extra = '') => new ExitError(`No access to the ticket board of instance ${name}.${extra} Declare the credential with ${cmd(`kette wallet add ${TOKEN_NAME} --note "ticket board"`)} and store it with ${cmd(`kette wallet set ${TOKEN_NAME} --env dev`)}. kette never prints it.`, 1);
 
-// The board credential: the project wallet first, then the agents' shared Workbase session file; never an argument or a global setting
+// The board credential: the project wallet, or the shared Workbase session file when the instance enables it (ticketing.session);
+// never an argument or a global setting (KETTE-28)
 export async function boardToken(project, opts, session) {
   const { root, instance } = project;
   let wallet = null;
@@ -64,7 +65,7 @@ export async function boardToken(project, opts, session) {
     throw missing(instance.name, ` ${TOKEN_NAME} has no value in ${env}.`);
   }
   const config = session.sessionConfigFromEnv();
-  if (fs.existsSync(config.file)) {
+  if (project.effective.ticketing?.session === true && fs.existsSync(config.file)) {
     const token = await session.sessionAccessToken(config).catch((err) => { throw new ExitError(err.message, 1); });
     return { token, refresh: () => session.sessionAccessToken({ ...config, force: true }) };
   }
