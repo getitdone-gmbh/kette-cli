@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { activeBundleLink, bundlesDir, isSecureUrl, mirror, stateFile } from './paths.mjs';
 import { writePrivate } from './files.mjs';
+import { sweepDead, withLock } from './lock.mjs';
 import { toStderr } from './out.mjs';
 
 export async function fetchManifest() {
@@ -64,26 +65,49 @@ export function readState() {
 
 const saveState = (state) => writePrivate(stateFile(), JSON.stringify(state, null, 2) + '\n');
 
+// Every change reads state.json again under the lock, so parallel kette processes never drop each other's changes
+export function updateState(change) {
+  return withLock('state', () => {
+    const state = readState();
+    const next = change(state);
+    saveState(next);
+    return next;
+  });
+}
+
 export function writeState(next) {
-  saveState({ ...readState(), ...next });
+  updateState((state) => ({ ...state, ...next }));
 }
 
 export function removeState(keys) {
-  const state = readState();
-  for (const k of keys) delete state[k];
-  saveState(state);
+  updateState((state) => Object.fromEntries(Object.entries(state).filter(([k]) => !keys.includes(k))));
 }
 
 // Downloads a bundle, verifies it and unpacks it to ~/.kette/bundles/<tier>/<version>
 export async function installEntry(tier, version, entry, { anyHost = false } = {}) {
   if (!validVersion(version)) throw new Error(`Invalid bundle version ${JSON.stringify(version)}, nothing was installed`);
   const dir = path.join(bundlesDir(), tier, version);
-  if (!fs.existsSync(path.join(dir, '.claude-plugin', 'marketplace.json'))) {
-    const tgz = await download(entry, path.join(bundlesDir(), `${tier}-${version}.tgz`), { anyHost });
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(dir, { recursive: true });
-    execFileSync('tar', ['-xzf', tgz, '-C', dir]);
-    fs.rmSync(tgz);
+  const ready = () => fs.existsSync(path.join(dir, '.claude-plugin', 'marketplace.json'));
+  if (!ready()) {
+    // Download and unpack into folders of this process, then move into place under the lock: a parallel kette finds either nothing or the whole bundle
+    // Leftovers of a kette that was killed while unpacking go first (QA-26)
+    sweepDead(bundlesDir(), /^\.[a-z]+-.+\.(\d+)\.[0-9a-f]+\.tgz$/);
+    sweepDead(path.join(bundlesDir(), tier), /^\..+\.(\d+)\.[0-9a-f]+\.tmp$/);
+    const own = `${process.pid}.${crypto.randomBytes(4).toString('hex')}`;
+    const tgz = await download(entry, path.join(bundlesDir(), `.${tier}-${version}.${own}.tgz`), { anyHost });
+    const temp = path.join(bundlesDir(), tier, `.${version}.${own}.tmp`);
+    try {
+      fs.mkdirSync(temp, { recursive: true });
+      execFileSync('tar', ['-xzf', tgz, '-C', temp]);
+      withLock(`bundle-${tier}-${version}`, () => {
+        if (ready()) return;
+        fs.rmSync(dir, { recursive: true, force: true });
+        fs.renameSync(temp, dir);
+      });
+    } finally {
+      fs.rmSync(tgz, { force: true });
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
   }
   writeState({ [`bundle_${tier}`]: { version, dir } });
   return dir;

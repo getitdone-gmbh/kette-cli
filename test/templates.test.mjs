@@ -76,7 +76,7 @@ function install(dir) {
 // Files in the project without .git and the files kette always writes
 function files(root) {
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.name === '.git' ? [] : e.isDirectory() ? walk(path.join(dir, e.name)) : [path.relative(root, path.join(dir, e.name)).split(path.sep).join('/')]));
-  const always = ['.kette/profile.json', '.kette/README.md', 'CLAUDE.md', 'docs/adr/0000-template.md', 'docs/adr/0000-vorlage.md'];
+  const always = ['.kette/profile.json', '.kette/README.md', '.kette/templates.json', 'CLAUDE.md', 'docs/adr/0000-template.md', 'docs/adr/0000-vorlage.md'];
   return walk(root).filter((f) => !always.includes(f)).sort();
 }
 const read = (root, f) => fs.readFileSync(path.join(root, f), 'utf8');

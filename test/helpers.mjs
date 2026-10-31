@@ -11,6 +11,8 @@ export const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kette-test-'));
 process.env.NPM_CONFIG_USERCONFIG = path.join(tmp(), 'user.npmrc');
 // Tests never read or write the real ~/.kette (a machine signed in to Enterprise changed the help line)
 process.env.KETTE_HOME = tmp();
+// Tests never read the real Claude Code settings either
+process.env.CLAUDE_CONFIG_DIR = tmp();
 delete process.env.npm_config_userconfig;
 // Output assertions expect plain text, even when the shell running the tests forces colors
 delete process.env.FORCE_COLOR;
@@ -69,12 +71,29 @@ export async function capture(fn) {
 export function fakeClaude(list = [], plugins = '', responses = {}, mcp = {}) {
   const bin = tmp();
   const log = path.join(bin, 'calls.log');
+  const cwdLog = path.join(bin, 'cwd.log');
   const state = path.join(bin, 'state.json');
   fs.writeFileSync(state, JSON.stringify({ list, plugins: plugins.match(/\S+@\S+/g) || [], responses, mcp }));
   write(bin, 'claude', `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2).join(' ');
 fs.appendFileSync(${JSON.stringify(log)}, args + '\\n');
+fs.appendFileSync(${JSON.stringify(cwdLog)}, process.cwd() + '\\n');
+const path = require('node:path');
+const argv = process.argv.slice(2);
+const scope = argv.includes('--scope') ? argv[argv.indexOf('--scope') + 1] : 'user';
+// Scopes as Claude Code keeps them: project in .claude/settings.json, local in .claude/settings.local.json of the folder it runs in,
+// user in CLAUDE_CONFIG_DIR/settings.json, written only when a test points CLAUDE_CONFIG_DIR to a sandbox
+const settingsFile = (sc) => (sc === 'project' ? path.join(process.cwd(), '.claude', 'settings.json') : sc === 'local' ? path.join(process.cwd(), '.claude', 'settings.local.json') : process.env.CLAUDE_CONFIG_DIR && path.join(process.env.CLAUDE_CONFIG_DIR, 'settings.json'));
+const edit = (sc, change) => {
+  const f = settingsFile(sc);
+  if (!f) return;
+  let cur = {};
+  try { cur = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
+  change(cur);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify(cur, null, 2) + '\\n');
+};
 const s = JSON.parse(fs.readFileSync(${JSON.stringify(state)}, 'utf8'));
 const save = () => fs.writeFileSync(${JSON.stringify(state)}, JSON.stringify(s));
 const r = s.responses[args];
@@ -96,11 +115,45 @@ else if (a === 'mcp' && b === 'add') {
   if (s.mcp[name]) { console.error('MCP server ' + name + ' already exists in user config'); process.exit(1); }
   const flag = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : null);
   s.mcp[name] = flag('--client-id') ? { url, clientId: flag('--client-id'), port: Number(flag('--callback-port')) } : url; save();
+  // User scope MCP servers live in .claude.json of the config folder, written only for a sandbox
+  if (flag('-s') === 'user' && process.env.CLAUDE_CONFIG_DIR) { const f = path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify({ mcpServers: s.mcp }, null, 2)); }
 }
-else if (a === 'plugin' && b === 'install') { if (!s.plugins.includes(c)) s.plugins.push(c); save(); }
+else if (a === 'plugin' && b === 'marketplace' && c === 'add') {
+  const source = argv[argv.length - 1];
+  const name = JSON.parse(fs.readFileSync(path.join(source, '.claude-plugin', 'marketplace.json'), 'utf8')).name;
+  // As Claude Code does (checked by hand): a known name in the same folder is "already on disk", in another folder it is repointed
+  // and keeps what was installed from it
+  const known = s.list.find((m) => m.name === name);
+  if (known && path.resolve(known.path) === path.resolve(source)) { console.log("Marketplace '" + name + "' already on disk"); }
+  else if (known) console.log("Marketplace '" + name + "' was already added from dir:" + known.path + ' and now points at dir:' + source + '.');
+  s.list = [...s.list.filter((m) => m.name !== name), { name, source: 'directory', path: source }]; save();
+  edit(scope, (cur) => { cur.extraKnownMarketplaces = { ...cur.extraKnownMarketplaces, [name]: { source: { source: 'directory', path: source } } }; });
+  // The registry of marketplace names is global in Claude Code, also for a marketplace declared in a project
+  if (process.env.CLAUDE_CONFIG_DIR) { const f = path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins', 'known_marketplaces.json'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(Object.fromEntries(s.list.map((m) => [m.name, m])), null, 2)); }
+}
+else if (a === 'plugin' && b === 'marketplace' && c === 'remove') {
+  const name = argv[3];
+  if (!s.list.some((m) => m.name === name)) { console.error('Marketplace ' + name + ' not found'); process.exit(1); }
+  s.list = s.list.filter((m) => m.name !== name);
+  s.plugins = s.plugins.filter((id) => !id.endsWith('@' + name)); save();
+  // As Claude Code does (checked with mrm.sh and by hand): its plugins are uninstalled and their entries leave the user settings,
+  // and run inside a project also that project's settings
+  for (const sc of ['user', 'project', 'local']) {
+    const f = settingsFile(sc);
+    if (!f || !fs.existsSync(f)) continue;
+    edit(sc, (cur) => {
+      if (cur.enabledPlugins) for (const id of Object.keys(cur.enabledPlugins)) if (id.endsWith('@' + name)) delete cur.enabledPlugins[id];
+      if (cur.extraKnownMarketplaces) delete cur.extraKnownMarketplaces[name];
+    });
+  }
+}
+else if (a === 'plugin' && b === 'install') { if (!s.plugins.includes(c)) s.plugins.push(c); save(); edit(scope, (cur) => { cur.enabledPlugins = { ...cur.enabledPlugins, [c]: true }; }); }
 else if (a === 'plugin' && b === 'uninstall') {
-  if (!s.plugins.includes(c)) { console.log('Plugin ' + c + ' is not installed'); process.exit(1); }
+  const userFile = settingsFile('user');
+  const inUser = userFile && fs.existsSync(userFile) && JSON.parse(fs.readFileSync(userFile, 'utf8')).enabledPlugins?.[c];
+  if (!s.plugins.includes(c) && !inUser) { console.log('Plugin ' + c + ' is not installed'); process.exit(1); }
   s.plugins = s.plugins.filter((id) => id !== c); save();
+  edit(scope, (cur) => { if (cur.enabledPlugins) delete cur.enabledPlugins[c]; });
 }
 `);
   fs.chmodSync(path.join(bin, 'claude'), 0o755);
@@ -110,6 +163,8 @@ else if (a === 'plugin' && b === 'uninstall') {
   process.env.PATH = `${bin}${path.delimiter}${orig}`;
   return {
     calls: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : []),
+    // Folder each call ran in, same order as calls()
+    cwds: () => (fs.existsSync(cwdLog) ? fs.readFileSync(cwdLog, 'utf8').trim().split('\n') : []),
     installed: () => JSON.parse(fs.readFileSync(state, 'utf8')).plugins,
     mcp: () => JSON.parse(fs.readFileSync(state, 'utf8')).mcp,
     restore: () => { process.env.PATH = orig; },

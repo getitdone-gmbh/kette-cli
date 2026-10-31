@@ -13,7 +13,7 @@ test('authKey ordnet den Token der Registry ohne Protokoll und mit Schrägstrich
 });
 
 test('ohne Datei entsteht nur der Block', () => {
-  assert.equal(withBlock('', REG, T1), `${BLOCK_START}\n@getitdone-gmbh:registry=${REG}\n//npm.kette.itdone.de/:_authToken=${T1}\n${BLOCK_END}\n`);
+  assert.equal(withBlock('', REG, T1), `${BLOCK_START}\n//npm.kette.itdone.de/:_authToken=${T1}\n${BLOCK_END}\n`, 'D3: only the token is global, the scope line lives in Enterprise projects');
 });
 
 test('andere Einstellungen bleiben, der Block wird erneuert statt verdoppelt, logout entfernt nur ihn', () => {

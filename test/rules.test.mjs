@@ -160,7 +160,7 @@ test('init endet mit Zusammenfassung, .kette/README.md beschreibt den Ablauf der
   assert.equal(result, 0);
   const tail = out.slice(out.indexOf('Done.'));
   assert.match(tail, /^Done\. In the project: \.kette\/profile\.json, \.kette\/README\.md, CLAUDE\.md, docs\/adr\/0000-vorlage\.md\n/);
-  assert.match(tail, /Not active in Claude Code yet \(plugins: kette-engineering-core@kette \(Agent kette-check, Skills architecture-patterns, engineering-rules\), ui-laws@kette \(Skills a11y-standards, interaction-principles, ui-laws\)\)/);
+  assert.match(tail, /Not active in Claude Code yet \(plugins: kette-engineering-core@kette-community \(Agent kette-check, Skills architecture-patterns, engineering-rules\), ui-laws@kette-community \(Skills a11y-standards, interaction-principles, ui-laws\)\)/);
   assert.match(tail, /browse with: kette rules/);
   assert.match(tail, /Next steps:\n  1\. cd "?\S+neu"?\n  2\. kette doctor\n  3\. Open Claude Code in the project .*\n  4\. kette login <key>/);
   assert.ok(tail.split('\n').length <= 10);
@@ -174,8 +174,8 @@ test('init endet mit Zusammenfassung, .kette/README.md beschreibt den Ablauf der
   assert.match(note, /Agents .* come with Die Kette \(Enterprise edition\): `kette login <key>`/);
   assert.doesNotMatch(note, /design-system-agents:/);
   assert.match(note, /## Where the rules live/);
-  assert.match(note, /~\/\.kette\/bundles\/active\//);
-  assert.match(note, /In Claude Code the plugins `kette-engineering-core@kette`, `ui-laws@kette`\./);
+  assert.match(note, /~\/\.kette\/bundles\/community\//);
+  assert.match(note, /In Claude Code the plugins `kette-engineering-core@kette-community`, `ui-laws@kette-community`, enabled for this project in `\.claude\/settings\.json`\./);
   assert.doesNotMatch(note, /[\u2013\u2014]/);
 });
 
@@ -192,17 +192,17 @@ test('Enterprise: .kette/README.md schreibt Rollen, Pflicht-Gates und /feature-l
   assert.match(note, /\/feature-loop start <feature>/);
   assert.match(note, /A human runs apply, deploys and destructive migrations/);
   assert.match(note, /The agents, gates and `\/feature-loop` need Die Kette on the machine \(`kette login <key>`\)/);
-  assert.match(note, /`design-system-agents@kette`, `design-review-pack@kette`\./);
+  assert.match(note, /`design-system-agents@kette-enterprise`, `design-review-pack@kette-enterprise`, enabled for this project/);
   assert.doesNotMatch(note, /\d+ (Agents|Skills|Commands)/);
   assert.doesNotMatch(note, /[\u2013\u2014]/);
 });
 
 test('init nennt alle Plugins der Edition zum Einrichten von Hand, wenn Claude Code sie nicht übernimmt', { skip: process.platform === 'win32' }, async () => {
   rulebook('community');
-  const claude = fakeClaude([{ name: 'kette', source: 'directory', path: '/repos/kette' }]);
+  const claude = fakeClaude([{ name: 'kette-community', source: 'directory', path: '/repos/kette' }]);
   let out;
   try { ({ out } = await run('init', path.join(tmp(), 'neu'), '--yes')); } finally { claude.restore(); }
-  assert.match(out, /By hand:\n  claude plugin marketplace add "[^"]+"\n  claude plugin install kette-engineering-core@kette\n  claude plugin install ui-laws@kette\n/);
+  assert.match(out, /By hand in the project folder:\n  claude plugin marketplace add --scope local "[^"]+"\n  claude plugin install kette-engineering-core@kette-community --scope project\n  claude plugin install ui-laws@kette-community --scope project\n/);
 });
 
 test('add leaves a detected stack the installed schema does not know out of the profile, with a hint', async () => {
@@ -271,17 +271,18 @@ test('doctor listet je Plugin Agenten, Skills und Befehle aus dem Paket', async 
   const d = rulebook('community');
   write(d, 'plugins/ui-laws/commands/check.md', 'x');
   const project = tmp();
+  write(project, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community' }));
   const cwd = process.cwd();
-  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-laws@kette\n');
+  const claude = fakeClaude([], 'kette-engineering-core@kette-community\nui-laws@kette-community\n');
   process.chdir(project);
   try {
     const { out } = await run('doctor');
-    assert.match(out, /OK {3}Plugin ui-laws@kette installed/);
+    assert.match(out, /OK {3}Plugin ui-laws@kette-community installed/);
     // Box characters where Unicode is likely supported, ASCII on a plain Windows console
     const { tee, end, bar } = symbols();
     const pad = ' '.repeat(bar.length);
-    assert.ok(out.includes(['INFO Plugin contents:', `      ${tee} kette-engineering-core@kette`, `      ${bar}   Agents (1): kette-check`, `      ${bar}   Skills (2): architecture-patterns, engineering-rules`,
-      `      ${end} ui-laws@kette`, `      ${pad}   Skills (3): a11y-standards, interaction-principles, ui-laws`, `      ${pad}   Commands (1): /check`].join('\n')), out);
+    assert.ok(out.includes(['INFO Plugin contents:', `      ${tee} kette-engineering-core@kette-community`, `      ${bar}   Agents (1): kette-check`, `      ${bar}   Skills (2): architecture-patterns, engineering-rules`,
+      `      ${end} ui-laws@kette-community`, `      ${pad}   Skills (3): a11y-standards, interaction-principles, ui-laws`, `      ${pad}   Commands (1): /check`].join('\n')), out);
     assert.doesNotMatch((await run('doctor', '--ci')).out, /Plugin contents/);
   } finally {
     claude.restore();
@@ -328,7 +329,7 @@ test('Community-Rechner lässt ein Enterprise-Projekt auf Enterprise, doctor nen
 test('doctor zeigt, wo Regelwerk und Plugins liegen', async () => {
   const d = rulebook('community');
   const { out } = await run('doctor', '--ci');
-  assert.match(out, new RegExp(`INFO Rulebook and plugins live in .*${path.basename(path.dirname(d))}`));
+  assert.match(out, new RegExp(`INFO Rulebook of this machine in .*${path.basename(path.dirname(d))}`));
 });
 
 test('init in another folder starts the next steps with cd, init in the current folder does not', async () => {
@@ -354,12 +355,12 @@ test('init in another folder starts the next steps with cd, init in the current 
 
 test('doctor outside a project gives a hint instead of an open issue, --ci stays strict', { skip: process.platform === 'win32' }, async () => {
   rulebook('community');
-  const claude = fakeClaude([], 'kette-engineering-core@kette\nui-laws@kette\n');
+  const claude = fakeClaude([], 'kette-engineering-core@kette-community\nui-laws@kette-community\n');
   const cwd = process.cwd();
   process.chdir(tmp());
   try {
     const { result, out } = await run('doctor');
-    assert.match(out, /^INFO No kette project in this folder\. cd into your project or run kette init\.$/m);
+    assert.match(out, /^INFO No kette project in this folder\. cd into your project or run kette init\. Plugins are enabled per project\.$/m);
     assert.doesNotMatch(out, /FAIL/);
     assert.match(out, /\nall good$/);
     assert.equal(result, 0);
@@ -397,13 +398,15 @@ test('doctor: a profile with apps and an installed schema without apps is a WARN
 test('doctor names a missing plugin as not installed', async () => {
   rulebook('community');
   const project = tmp();
+  write(project, '.kette/profile.json', JSON.stringify({ version: 1, project: { name: 'x' }, stack: ['nestjs-prisma'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community' }));
   const cwd = process.cwd();
-  const claude = fakeClaude([], 'kette-engineering-core@kette\n');
+  const claude = fakeClaude([], 'kette-engineering-core@kette-community\n');
   process.chdir(project);
   try {
     const { out } = await run('doctor');
-    assert.match(out, /^OK {3}Plugin kette-engineering-core@kette installed$/m);
-    assert.match(out, /^FAIL Plugin ui-laws@kette not installed\. Install with: kette update$/m);
+    assert.match(out, /^OK {3}Plugin kette-engineering-core@kette-community installed$/m);
+    assert.match(out, /^FAIL Plugin ui-laws@kette-community not installed\. Install with: kette add$/m);
+    assert.match(out, /^FAIL \.claude\/settings\.json missing, Claude Code has no Kette plugins for this project\. Enable them with: kette add$/m);
   } finally {
     claude.restore();
     process.chdir(cwd);

@@ -8,6 +8,8 @@ export const activeBundleLink = () => path.join(bundlesDir(), 'active');
 export const credentialsFile = () => path.join(home(), 'credentials');
 export const deviceIdFile = () => path.join(home(), 'device-id');
 export const stateFile = () => path.join(home(), 'state.json');
+// One folder per Kette instance, each holds instance.json (a plain folder, a git clone or a link to an instance repo)
+export const instancesDir = () => path.join(home(), 'instances');
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 // https everywhere; plain http only for a local test server or with KETTE_INSECURE=1
 export function isSecureUrl(url) {

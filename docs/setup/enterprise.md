@@ -24,12 +24,14 @@ Then open a new terminal.
 kette login CDP-XXXXX-XXXXX-XXXXX-XXXXX
 ```
 
-Downloads the Enterprise bundle and installs the Claude Code plugins `kette-engineering-core`, `kette-engineering`, `design-system-agents` and `design-review-pack`. Each device takes one seat of the licence (Solo 3, Team 20).
+Downloads the Enterprise bundle. Each device takes one seat of the licence (Solo 3, Team 20); one licence covers every Kette instance on the device.
 
 ## 3. Connect a project
 
 - New project: `kette init my-project`
 - Existing repo: `kette add` (repos already connected get the Enterprise templates this way)
+
+Each project enables its own Claude Code plugins in `.claude/settings.json`: `kette-engineering-core`, `kette-engineering`, `design-system-agents` and `design-review-pack`. Several projects with their own scope (edition, repos, members, ticketing, wallet): `kette instance create <name>`, then `kette init my-project --instance <name>`, see [instances](../instances.md). A Community instance stays Community on this device.
 
 ## 4. Install the design system packages
 

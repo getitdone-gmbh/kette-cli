@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { NO_TERMINAL, ask, askSecret, choose, confirm } from '../prompt.mjs';
-import { readState, writeState } from '../manifest.mjs';
+import { readState, updateState } from '../manifest.mjs';
 import { ENTERPRISE } from '../editions.mjs';
 import { bold, cmd, dim, file, status } from '../out.mjs';
+import { readInstance } from '../instance/config.mjs';
 import { ExitError } from '../errors.mjs';
 import { cmdLine } from '../claude.mjs';
 import {
@@ -51,7 +52,7 @@ function requireWallet(root) {
 const trustKey = (root) => path.resolve(root);
 export const isTrusted = (root, wallet) => process.env[TRUST_ENV] === '1' || readState().wallet_trust?.[trustKey(root)] === providerHash(wallet.provider);
 function remember(root, wallet) {
-  writeState({ wallet_trust: { ...(readState().wallet_trust || {}), [trustKey(root)]: providerHash(wallet.provider) } });
+  updateState((state) => ({ ...state, wallet_trust: { ...(state.wallet_trust || {}), [trustKey(root)]: providerHash(wallet.provider) } }));
 }
 
 function describeProvider(p) {
@@ -103,9 +104,9 @@ async function providerSettings(id, root, project) {
 }
 
 // Non-interactive provider from options: --provider infisical needs KETTE_WALLET_PROJECT and so on, kept small on purpose
-function providerFromEnv(id, project, root) {
+function providerFromEnv(id, project, root, inherited = null) {
   const e = process.env;
-  if (id === 'infisical') return { id, project: e.KETTE_WALLET_PROJECT || linkedProject(root) || '', ...(e.KETTE_WALLET_DOMAIN ? { domain: e.KETTE_WALLET_DOMAIN } : {}) };
+  if (id === 'infisical') return { id, project: e.KETTE_WALLET_PROJECT || (inherited?.provider === id && inherited.project) || linkedProject(root) || '', ...(e.KETTE_WALLET_DOMAIN ? { domain: e.KETTE_WALLET_DOMAIN } : {}) };
   if (id === 'vault') return { id, path: e.KETTE_WALLET_PATH || `apps/${project}` };
   if (id === 'aws-secrets-manager') return { id, prefix: e.KETTE_WALLET_PREFIX || project };
   if (id === 'azure-key-vault') return { id, vault: e.KETTE_WALLET_VAULT || '' };
@@ -127,15 +128,24 @@ function syncProfile(root, providerId) {
   return true;
 }
 
+// Wallet defaults of the instance the repo belongs to (provider, project, environment), null without one
+function instanceWallet(profile) {
+  if (!profile?.instance) return null;
+  try { return readInstance(profile.instance)?.wallet || null; } catch { return null; }
+}
+
 async function init(root, opts) {
   if (fs.existsSync(walletFile(root))) throw new ExitError(`${WALLET_PATH} exists already. Change it by hand or with ${cmd('kette wallet add')}.`, 1);
   const profile = readProfile(root);
   const project = (profile?.project?.name || path.basename(path.resolve(root))).toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-  let id = opts.provider || DEFAULT_PROVIDER;
+  const inherited = instanceWallet(profile);
+  let id = opts.provider || inherited?.provider || DEFAULT_PROVIDER;
   if (!PROVIDER_IDS.includes(id)) throw new ExitError(`--provider must be one of ${PROVIDER_IDS.join(', ')}`);
-  if (!opts.yes && !opts.provider) [id] = await choose('Where do the secrets live?', PROVIDERS, '1');
-  const provider = opts.yes ? providerFromEnv(id, project, root) : await providerSettings(id, root, project);
-  const environments = list(opts.env) || (opts.yes ? DEFAULT_ENVIRONMENTS : list(await ask('Environments', DEFAULT_ENVIRONMENTS.join(','))));
+  if (inherited && !opts.provider) console.log(dim(`Provider ${id} from instance ${profile.instance}.`));
+  else if (!opts.yes && !opts.provider) [id] = await choose('Where do the secrets live?', PROVIDERS, '1');
+  const provider = opts.yes ? providerFromEnv(id, project, root, inherited) : await providerSettings(id, root, project);
+  const defaults = inherited?.env && !DEFAULT_ENVIRONMENTS.includes(inherited.env) ? [inherited.env, ...DEFAULT_ENVIRONMENTS] : DEFAULT_ENVIRONMENTS;
+  const environments = list(opts.env) || (opts.yes ? defaults : list(await ask('Environments', defaults.join(','))));
   const folders = Object.values(profile?.apps || {}).filter((v) => typeof v === 'string');
   const names = exampleNames(root, folders);
   const wallet = newWallet(provider, environments, names);

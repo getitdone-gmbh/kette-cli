@@ -3,7 +3,9 @@ import path from 'node:path';
 import { COMMUNITY, ENTERPRISE, editionLabel, retiredPlugins, isNewer } from './editions.mjs';
 import { DeliveryError, KEY_PATTERN, deviceId, downloadErrorText, latest, readCredentials, removeCredentials, requestToken, writeCredentials } from './delivery.mjs';
 import { DownloadError, fetchManifest, installEntry, installedBundle, readState, removeState, setActiveBundle, validVersion, writeState } from './manifest.mjs';
-import { REPAIR_NOTE, editionHints, hasClaude, installEdition, pluginId, pluginsOutdated, uninstallPlugin } from './claude.mjs';
+import { hasClaude, removeMarketplace, uninstallPlugin } from './claude.mjs';
+import { buildMarketplace, marketName } from './marketplace.mjs';
+import { userScopePlugins, userSettingsFile } from './project-plugins.mjs';
 import { bundlesDir, credentialsFile, delivery } from './paths.mjs';
 import { validEmail } from './cloud.mjs';
 import { ensureNpm, setupNpm, teardownNpm } from './npm-access.mjs';
@@ -45,16 +47,10 @@ async function install(g) {
   return dir;
 }
 
-function plugins(dir, opts) {
-  if (opts.noPlugins) return;
-  const link = setActiveBundle(dir);
-  const r = installEdition(link, ENTERPRISE, retiredPlugins(COMMUNITY, ENTERPRISE));
-  if (r.ok) console.log(`Claude Code plugins installed: ${r.present.join(', ')}`);
-  for (const l of editionHints(r, link)) console.log(l);
-}
 
 // Key from the argument, KETTE_LICENSE_KEY or a hidden prompt, so it does not have to land in the shell history
-export async function login(rawKey, opts, cli) {
+// refreshProject: enables the plugins of the project in the current folder, if there is one
+export async function login(rawKey, opts, cli, refreshProject) {
   const given = rawKey || process.env.KETTE_LICENSE_KEY || (await askSecret('License key (input hidden)', 'No terminal for the hidden prompt. Pass the key with kette login <key> or set KETTE_LICENSE_KEY.'));
   const key = given.trim().toUpperCase();
   if (!KEY_PATTERN.test(key)) throw new Error('Enter the license key in the format CDP-XXXXX-XXXXX-XXXXX-XXXXX, e.g. kette login CDP-AB12C-...');
@@ -64,12 +60,15 @@ export async function login(rawKey, opts, cli) {
   writeCredentials(key);
   console.log(`Loading ${editionLabel(ENTERPRISE)} ${g.version} ...`);
   const dir = await install(g);
-  plugins(dir, opts);
+  // The rulebook link follows the edition of this machine; plugins are enabled per project, never for all projects (docs/adr/0002)
+  setActiveBundle(dir);
   // After /install/token, because that is where the device gets registered
   await setupNpm(key, opts);
+  // Last: a damaged instance of the project in this folder only warns, the licence and npm access are set up already
+  await refreshProject?.();
   const seats = g.seats?.max ? `, devices ${g.seats.used} of ${g.seats.max}` : '';
   console.log(`\nSigned in: ${editionLabel(ENTERPRISE)}, version ${g.version}, updates until ${formatDate(g.updates_until)}${seats}.`);
-  console.log(`Existing projects get the Enterprise templates and the flow with agents and gates with: ${cmd('kette add')}`);
+  console.log(`Projects get the Enterprise plugins, templates and the flow with agents and gates with: ${cmd('kette add')} (or ${cmd('kette instance use <name>')} for an Enterprise instance). Community projects and instances stay Community.`);
   return 0;
 }
 
@@ -81,20 +80,28 @@ export async function logout(opts) {
   // While the key is still there: revoke the npm token, then remove only the kette block
   await teardownNpm(credentialsStatus() === 'valid' ? readCredentials() : null);
   const claude = !opts.noPlugins && hasClaude();
-  // Remove the Enterprise plugins first, while the marketplace still points to the Enterprise bundle
+  // Enterprise plugins an older kette switched on for all projects (user scope), removed while the marketplace still has them;
+  // only those the user settings really list, project installs are left to their project
   if (claude) {
-    for (const name of retiredPlugins(ENTERPRISE, COMMUNITY)) {
-      const r = uninstallPlugin(name);
-      if (!r.ok) console.log(`Plugin ${name} not removed (${r.reason}). By hand: ${cmd(`claude plugin uninstall ${pluginId(name)}`)}`);
+    const enterpriseOnly = retiredPlugins(ENTERPRISE, COMMUNITY);
+    for (const id of userScopePlugins().filter((x) => enterpriseOnly.some((p) => x.startsWith(`${p}@`)))) {
+      const r = uninstallPlugin(id);
+      if (!r.ok) console.log(`Plugin ${id} not removed (${r.reason}). By hand: ${cmd(`claude plugin uninstall ${id}`)}`);
     }
+    const rm = removeMarketplace(marketName(ENTERPRISE));
+    if (!rm.ok) console.log(`Marketplace ${marketName(ENTERPRISE)} not removed from Claude Code (${rm.reason}). By hand: ${cmd(`claude plugin marketplace remove ${marketName(ENTERPRISE)}`)}`);
+    // Claude Code uninstalls the plugins but keeps their copies; kette never deletes inside the Claude Code folder
+    const cache = path.join(path.dirname(userSettingsFile()), 'plugins', 'cache', marketName(ENTERPRISE));
+    if (rm.ok && fs.existsSync(cache)) console.log(`Claude Code keeps unused copies of the Enterprise plugins in ${cache}. Delete that folder if you want them gone.`);
   }
   removeCredentials();
   fs.rmSync(path.join(bundlesDir(), ENTERPRISE), { recursive: true, force: true });
   removeState([`bundle_${ENTERPRISE}`, 'login']);
   const community = installedBundle(COMMUNITY);
-  const link = setActiveBundle(community?.dir || null);
-  if (claude && link) for (const l of editionHints(installEdition(link, COMMUNITY), link)) console.log(l);
-  console.log('Signed out. License key and Enterprise bundle are removed from this machine.');
+  setActiveBundle(community?.dir || null);
+  // The Enterprise marketplace folder goes with the bundle, so Enterprise projects on this machine stop loading its plugins
+  buildMarketplace(ENTERPRISE, null);
+  console.log('Signed out. License key and Enterprise bundle are removed from this machine. Enterprise projects keep their settings, their Enterprise plugins no longer load here.');
   console.log('The device stays registered with the license, support can release it. Signing in again on this machine does not take another device seat.');
   if (!community) console.log(`Load the Community edition with: ${cmd('kette update')}`);
   return 0;
@@ -121,10 +128,6 @@ export async function updateEnterprise(opts, cli) {
   }
   if (have && have.version === info.available) {
     console.log(`Up to date (${editionLabel(ENTERPRISE)} ${have.version}).`);
-    if (!opts.dryRun && !opts.noPlugins && hasClaude() && pluginsOutdated(have.dir, ENTERPRISE)) {
-      console.log(REPAIR_NOTE);
-      plugins(have.dir, opts);
-    }
     if (!opts.dryRun) await ensureNpm(key, opts);
     await cliHint(cli);
     return 0;
@@ -133,7 +136,7 @@ export async function updateEnterprise(opts, cli) {
   if (info.changelog) console.log(info.changelog);
   if (opts.dryRun) return 0;
   const dir = await install(await grant(key, cli));
-  plugins(dir, opts);
+  setActiveBundle(dir);
   await ensureNpm(key, opts);
   await cliHint(cli);
   console.log(`${editionLabel(ENTERPRISE)} ${readState().login.version} installed.`);

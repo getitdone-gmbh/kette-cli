@@ -1,10 +1,12 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { bundlesDir } from './paths.mjs';
-import { RENAMED_PLUGINS, bundlePlugins } from './editions.mjs';
+import { bundlesDir, home } from './paths.mjs';
+import { RENAMED_PLUGINS } from './editions.mjs';
 import { cmd, status } from './out.mjs';
+import { isInside } from './files.mjs';
 
-// Own name, so the developer marketplace kette-engineering (repo) is never hit
+// Marketplace of kette before 0.10 (user scope, ~/.kette/bundles/active); projects use one marketplace per edition (src/marketplace.mjs)
 export const MARKETPLACE = 'kette';
 // Name up to 0.3.0; if it points into ~/.kette, the CLI created it itself
 const LEGACY_MARKETPLACE = 'kette-engineering';
@@ -22,15 +24,28 @@ export function cmdLine(args, bin = 'claude.cmd') {
   if (args.some((a) => /["%\r\n]|\\$/.test(a))) return null;
   return [bin, ...args.map((a) => (/[\s&|<>^()]/.test(a) ? `"${a}"` : a))].join(' ');
 }
-export function runClaude(args) {
-  if (process.platform !== 'win32') return spawnSync('claude', args, { encoding: 'utf8' });
-  const exe = spawnSync('claude.exe', args, { encoding: 'utf8' });
+// cwd: the project folder for project and local scope, Claude Code resolves those scopes from where it runs
+export function runClaude(args, { cwd } = {}) {
+  const base = { encoding: 'utf8', ...(cwd ? { cwd } : {}) };
+  if (process.platform !== 'win32') return spawnSync('claude', args, base);
+  const exe = spawnSync('claude.exe', args, base);
   if (exe.error?.code !== 'ENOENT') return exe;
   const line = cmdLine(args);
   if (!line) return { status: 1, stdout: '', stderr: `Argument not safe for claude.cmd: ${args.join(' ')}` };
-  return spawnSync(line, { encoding: 'utf8', shell: true });
+  return spawnSync(line, { ...base, shell: true });
 }
-export const output = (r) => ((r.stdout || '') + (r.stderr || '')).trim();
+// Reply of Claude Code for a message; a stack trace of a crash is cut off, the first lines say what went wrong
+// ~/.kette is never a project, so a command run there cannot touch the settings of the project kette was started in
+const neutralCwd = () => {
+  fs.mkdirSync(home(), { recursive: true });
+  return home();
+};
+
+export const output = (r) => {
+  const lines = ((r.stdout || '') + (r.stderr || '')).trim().split('\n');
+  const stack = lines.findIndex((l) => /^\s+at /.test(l));
+  return (stack < 0 ? lines : lines.slice(0, stack)).join('\n').trim();
+};
 export const hasClaude = () => runClaude(['--version']).status === 0;
 
 function marketplaces() {
@@ -39,13 +54,13 @@ function marketplaces() {
   try { return JSON.parse(r.stdout); } catch { return []; }
 }
 
-const insideKette = (p) => !path.relative(bundlesDir(), path.resolve(p)).startsWith('..');
+export const insideKette = (p) => isInside(bundlesDir(), p);
 // Plugin ID as a whole word, so kette-engineering@kette does not match kette-engineering@kette-engineering; list null (not readable) never matches
 const listed = (list, id) => list !== null && new RegExp(`(^|\\s)${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`, 'm').test(list);
 
 // Success is decided by the plugin list afterwards, not the reply text; if the list is not readable, the exit status decides
 function uninstall(id) {
-  const r = runClaude(['plugin', 'uninstall', id]);
+  const r = runClaude(['plugin', 'uninstall', id], { cwd: neutralCwd() });
   const list = installedPlugins();
   // Reply of Claude Code when the plugin is already gone: counts as removed
   const absent = /not found in installed plugins/i.test(output(r));
@@ -69,7 +84,7 @@ function migrateLegacy(all) {
       const r = uninstall(pluginId(p, LEGACY_MARKETPLACE));
       if (!r.ok) return r;
     }
-    const rm = runClaude(['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE]);
+    const rm = runClaude(['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE], { cwd: neutralCwd() });
     return rm.status === 0 ? { ok: true } : { ok: false, reason: output(rm) };
   }
   duplicateHint(legacy, ALL_PLUGINS.map((p) => pluginId(p, LEGACY_MARKETPLACE)), installedPlugins());
@@ -82,85 +97,68 @@ function packDuplicates(all, plugins) {
   if (pack) duplicateHint(pack, plugins.filter((p) => PACK_PLUGINS.includes(p)).flatMap(withOldNames).map((p) => pluginId(p, PACK_MARKETPLACE)), installedPlugins());
 }
 
-// Commands for a manual setup when the CLI cannot drive Claude Code
-export const manualInstall = (source, plugins) => ['', `claude plugin marketplace add "${source}"`, ...plugins.map((p) => `claude plugin install ${pluginId(p)}`)].join('\n  ');
+// Commands for a manual setup in the project folder when the CLI cannot drive Claude Code
+export const manualInstall = (source, plugins, market) => ['', `claude plugin marketplace add --scope local "${source}"`, ...plugins.map((p) => `claude plugin install ${pluginId(p, market)} --scope project`)].join('\n  ');
 
-// Adds the rulebook as a plugin marketplace to Claude Code (scope user); source is the fixed link to the active bundle
-// retire: plugins of the other edition, removed while the marketplace still knows them
-export function installPlugins(source, plugins, retire = []) {
+const samePath = (a, b) => path.resolve(a) === path.resolve(b);
+
+
+// Plugins for one project only: kette declares the marketplace in .claude/settings.local.json itself (local scope, the path differs
+// per machine), each plugin is installed with scope project and lands in .claude/settings.json, never in the user settings
+// Claude Code keeps one path per marketplace name for all projects: a registration of this name in another folder under ~/.kette
+// (older kette, moved KETTE_HOME) is removed and added again, one outside ~/.kette is never touched
+export function enablePlugins(source, plugins, root, market) {
   if (!hasClaude()) return { ok: false, reason: 'claude not found' };
   const all = marketplaces();
   const migrated = migrateLegacy(all);
   if (!migrated.ok) return migrated;
-  let known = all.find((m) => m.name === MARKETPLACE) || null;
-  const moved = known?.path && path.resolve(known.path) !== path.resolve(source);
-  // Foreign marketplaces with the same name stay untouched, checked before anything is removed
-  if (moved && !insideKette(known.path)) return { ok: false, reason: `Marketplace ${MARKETPLACE} points to ${known.path}. Switch with: claude plugin marketplace remove ${MARKETPLACE} && claude plugin marketplace add "${source}"` };
-  const list = retire.length ? installedPlugins() : '';
-  const retired = [];
-  // Without a readable list, try to remove every plugin of the other edition instead of silently skipping it
-  for (const p of retire.filter((name) => list === null || listed(list, pluginId(name)))) {
-    const r = uninstall(pluginId(p));
-    if (!r.ok) return r;
-    retired.push(pluginId(p));
-  }
-  // If a later step fails, the reason says what was already removed
-  const fail = (reason) => ({ ok: false, reason: retired.length ? `${reason}; already removed before: ${retired.join(', ')}` : reason });
+  const known = all.find((m) => m.name === market);
+  if (known?.path && !samePath(known.path, source) && !insideKette(known.path)) return { ok: false, reason: `Marketplace ${market} points to ${known.path}. Switch with: claude plugin marketplace remove ${market}, then run kette add again` };
   packDuplicates(all, plugins);
-  if (moved) {
-    const rm = runClaude(['plugin', 'marketplace', 'remove', MARKETPLACE]);
-    if (rm.status !== 0) return fail(output(rm));
-    known = null;
+  // add also repoints a registration in another folder under ~/.kette and keeps what is installed from it; remove would uninstall
+  // its plugins in every project and empty their entries in the user settings (checked with the real Claude Code, QA-28)
+  if (!known || !samePath(known.path, source)) {
+    const add = runClaude(['plugin', 'marketplace', 'add', '--scope', 'local', source], { cwd: root });
+    if (add.status !== 0 && !/already/i.test(output(add))) return { ok: false, reason: output(add) };
   }
-  const step = known ? runClaude(['plugin', 'marketplace', 'update', MARKETPLACE]) : runClaude(['plugin', 'marketplace', 'add', source]);
-  if (step.status !== 0 && !/already/i.test(output(step))) return fail(output(step));
+  // The folder is rebuilt when a bundle changes, update makes Claude Code read it again
+  const refresh = runClaude(['plugin', 'marketplace', 'update', market], { cwd: root });
+  if (refresh.status !== 0) return { ok: false, reason: output(refresh) };
   for (const p of plugins) {
-    const id = pluginId(p);
-    let r = runClaude(['plugin', 'install', id]);
-    if (r.status !== 0 && /already/i.test(output(r))) r = runClaude(['plugin', 'update', id]);
-    if (r.status !== 0) return fail(`${id}: ${output(r)}`);
+    const id = pluginId(p, market);
+    let r = runClaude(['plugin', 'install', id, '--scope', 'project'], { cwd: root });
+    if (r.status !== 0 && /already/i.test(output(r))) r = runClaude(['plugin', 'update', id, '--scope', 'project'], { cwd: root });
+    if (r.status !== 0) return { ok: false, reason: `${id}: ${output(r)}` };
   }
   return { ok: true };
 }
 
-// Installs the edition plugins the bundle contains; editionHints reports missing ones instead of failing
-// A renamed plugin is retired once the bundle has its successor or the successor is retired as well:
-// kette update replaces ui-gesetze@kette with ui-laws@kette, kette login removes both
-export function installEdition(link, tier, retire = []) {
-  const { present, missing } = bundlePlugins(link, tier);
-  const renamed = Object.keys(RENAMED_PLUGINS).filter((old) => !present.includes(old) && (present.includes(RENAMED_PLUGINS[old]) || retire.includes(RENAMED_PLUGINS[old])));
-  const retireAll = [...new Set([...retire, ...renamed])];
-  return { ...installPlugins(link, present, retireAll), present, missing };
-}
-
-export function editionHints(result, link) {
-  const lines = [];
-  if (!result.ok) lines.push(`Plugins not installed (${result.reason}). By hand:${manualInstall(link, result.present)}`);
-  if (result.missing.length) lines.push(`${status('warn', 'WARN')} The bundle on this machine does not contain ${result.missing.join(', ')} yet. Reload with: ${cmd('kette update')}`);
-  return lines;
-}
-
-export function uninstallPlugin(name) {
+// id in the user scope, the only scope uninstall touches by default
+export function uninstallPlugin(id) {
   if (!hasClaude()) return { ok: false, reason: 'claude not found' };
-  return uninstall(pluginId(name));
+  return uninstall(id);
 }
 
-// Output of claude plugin list, null when the call fails
-export function installedPlugins() {
-  const r = runClaude(['plugin', 'list']);
+// Points a registered marketplace to another folder from a neutral folder (user scope); what was installed from it stays installed
+export function repointMarketplace(source) {
+  const r = runClaude(['plugin', 'marketplace', 'add', source], { cwd: neutralCwd() });
+  return r.status === 0 || /already/i.test(output(r)) ? { ok: true } : { ok: false, reason: output(r) };
+}
+
+// Marketplaces Claude Code has registered on this folder (e.g. the shared folder of an unreleased 0.10 build, QA-24)
+export const registeredAt = (dir) => (hasClaude() ? marketplaces().filter((m) => m.path && samePath(m.path, dir)).map((m) => m.name) : []);
+
+// After kette logout: Claude Code forgets the Enterprise marketplace and its copies; "not found" counts as done
+export function removeMarketplace(market) {
+  if (!hasClaude()) return { ok: true };
+  const r = runClaude(['plugin', 'marketplace', 'remove', market], { cwd: neutralCwd() });
+  return r.status === 0 || /not found/i.test(output(r)) ? { ok: true } : { ok: false, reason: output(r) };
+}
+
+// Output of claude plugin list, null when the call fails; root lists what Claude Code loads in that project
+export function installedPlugins(root) {
+  const r = runClaude(['plugin', 'list'], { cwd: root });
   return r.status === 0 ? r.stdout : null;
 }
 
-export const pluginInstalled = (name, list = installedPlugins()) => listed(list, pluginId(name));
-
-// A plugin the bundle has is missing in Claude Code, or an old name is still installed that this edition no longer uses
-// (e.g. after CLI 0.6.1 loaded a bundle with ui-laws); plugins the bundle lacks never count, so an update does not repair again and again
-export function pluginsOutdated(bundleDir, tier) {
-  const list = installedPlugins();
-  if (list === null) return false;
-  const { present } = bundlePlugins(bundleDir, tier);
-  const stale = Object.keys(RENAMED_PLUGINS).filter((old) => !present.includes(old));
-  return present.some((p) => !listed(list, pluginId(p))) || stale.some((old) => listed(list, pluginId(old)));
-}
-
-export const REPAIR_NOTE = 'Claude Code plugins do not match the installed bundle, installing them again.';
+export const pluginInstalled = (name, list = installedPlugins(), market = MARKETPLACE) => listed(list, pluginId(name, market));
