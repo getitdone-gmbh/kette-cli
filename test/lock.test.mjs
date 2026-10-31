@@ -178,7 +178,7 @@ test('CR-NEW-11: claims of claimants that are gone and older than STALE_MS are s
   const swept = [put('c.lck.orphan.claim', JSON.stringify({ pid: dead, start: 1, at: 0 }), 121000), put('other.lck.cut.claim', '', 121000)];
   const kept = [
     put('c.lck.fresh.claim', JSON.stringify({ pid: dead, start: 1, at: Date.now() }), 0),
-    put('c.lck.live.claim', JSON.stringify({ pid: process.pid, start: Math.round(performance.timeOrigin), at: 0 }), 121000),
+    put('c.lck.live.claim', JSON.stringify({ pid: process.pid, at: 0 }), 121000),
   ];
   assert.equal(withLock('c', () => 'ran'), 'ran');
   const left = fs.readdirSync(locks);
@@ -217,7 +217,7 @@ fs.openSync = function (p, flags, ...rest) { if (here(p) && String(flags).includ
 test('CR-NEW-13: a lock whose pid now runs another process is taken over without waiting for STALE_MS', { timeout: 120000 }, async () => {
   const { home, counter, script, env } = setup();
   // The pid is alive (this test process), but the owner started an hour before it: the pid was reused
-  fs.writeFileSync(path.join(locksOf(home), 'c.lck'), JSON.stringify({ pid: process.pid, start: Math.round(performance.timeOrigin) - 3600000, at: Date.now() - 3000, token: 'reused' }));
+  fs.writeFileSync(path.join(locksOf(home), 'c.lck'), JSON.stringify({ pid: process.pid, start: process.platform === 'win32' ? Math.round(performance.timeOrigin) - 3600000 : 'another process', at: Date.now() - 3000, token: 'reused' }));
   const started = Date.now();
   const r = await run(script, [counter, '1'], env);
   assert.equal(r.code, 0, r.out);
@@ -240,4 +240,150 @@ test('CR-NEW-13: an empty or unreadable lock is freed once it was not changed fo
     assert.equal(fs.existsSync(f), false);
   }
   assert.deepEqual(fs.readdirSync(path.dirname(lockFile('x'))), []);
+});
+
+// Fix round 5 of the lock (KETTE-41, docs/adr/0002 decision 22)
+// A holder in the lock for holdMs, and a second process with a hook that plays a clock or time zone trouble; they must never overlap
+async function holderAndWaiter(waiterHook, holderHook = [], env = {}) {
+  const home = tmp();
+  const dir = tmp();
+  const log = path.join(dir, 'log');
+  fs.writeFileSync(log, '');
+  const script = overlapWorker(dir);
+  const base = { ...process.env, KETTE_HOME: home };
+  const holder = runNode(holderHook, script, [log, '4000'], { ...base, ...env.holder });
+  for (let i = 0; i < 400 && !fs.readFileSync(log, 'utf8'); i++) await new Promise((r) => setTimeout(r, 25));
+  const rs = await Promise.all([holder, runNode(waiterHook, script, [log, '0'], { ...base, ...env.waiter })]);
+  assert.deepEqual(rs.map((r) => r.code), [0, 0], rs.map((r) => r.out).join('\n'));
+  assert.equal(noOverlap(log), 2);
+  assert.deepEqual(leftovers(home), []);
+}
+
+test('LK-1: a clock jump on Linux (btime moved by an hour) never makes a live holder look like a reused pid', { timeout: 60000, skip: process.platform !== 'linux' && 'Linux /proc only' }, async () => {
+  const jump = hook('btime-jump.mjs', `const read = fs.readFileSync;
+fs.readFileSync = function (p, ...rest) {
+  const out = read.call(this, p, ...rest);
+  return p === '/proc/stat' ? String(out).replace(/^btime (\\d+)$/m, (_, b) => 'btime ' + (Number(b) + 3600)) : out;
+};`);
+  await holderAndWaiter(jump);
+});
+
+test('LK-2: the macOS lstart text is compared as it is, a DST hour in another time zone never makes a live holder look reused', { timeout: 60000, skip: process.platform !== 'darwin' && 'macOS ps only' }, async () => {
+  // The hour from 02:00 to 03:00 on 25 October 2026 happens twice in Berlin; ps answers that text for every process
+  const dst = hook('lstart-dst.mjs', `import cp from 'node:child_process';
+const spawn = cp.spawnSync;
+cp.spawnSync = function (cmd, args, opts) {
+  return cmd === 'ps' ? { status: 0, stdout: 'Sun Oct 25 02:30:00 2026\\n', stderr: '' } : spawn.call(this, cmd, args, opts);
+};`);
+  await holderAndWaiter(dst, dst, { holder: { TZ: 'America/New_York' }, waiter: { TZ: 'Europe/Berlin' } });
+});
+
+test('LK-3: a claimant whose claim was replaced meanwhile does not delete the lock and leaves the other claim', async () => {
+  const { removeIfToken, lockFile } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const f = lockFile('lk3');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ pid: await deadPid(), at: Date.now(), token: 'dead' }));
+  const claim = `${f}.dead.claim`;
+  const other = JSON.stringify({ pid: process.pid, at: Date.now(), other: true });
+  const read = fs.readFileSync;
+  // Right when the claimant checks the lock, a clearer has moved its claim aside and another claimant took the name
+  fs.readFileSync = function (p, ...rest) {
+    if (p === f && fs.existsSync(claim) && !String(read.call(this, claim, 'utf8')).includes('"other"')) fs.writeFileSync(claim, other);
+    return read.call(this, p, ...rest);
+  };
+  try {
+    assert.equal(removeIfToken(f, 'dead'), false);
+  } finally {
+    fs.readFileSync = read;
+  }
+  assert.ok(fs.existsSync(f), 'the lock stays');
+  assert.equal(fs.readFileSync(claim, 'utf8'), other, 'the claim of the other claimant stays');
+});
+
+test('LK-4: without hard links a lock whose name was removed and taken while it was written is not counted as held', { timeout: 60000, skip: process.platform === 'win32' && 'Windows keeps the name of an open file, nobody can take it meanwhile' }, async () => {
+  const { home } = setup();
+  const dir = tmp();
+  const seen = path.join(dir, 'seen');
+  write(dir, 'own.mjs', `import fs from 'node:fs';
+import { withLock, lockFile } from ${JSON.stringify(LOCK)};
+withLock('c', () => fs.writeFileSync(process.argv[2], String(JSON.parse(fs.readFileSync(lockFile('c'), 'utf8')).pid === process.pid)));
+`);
+  const swap = hook('swap-after-write.mjs', `const link = fs.linkSync;
+fs.linkSync = function (from, to) {
+  if (String(to).startsWith(process.env.KETTE_HOME)) throw Object.assign(new Error('ENOTSUP'), { code: 'ENOTSUP' });
+  return link.call(this, from, to);
+};
+const write = fs.writeFileSync;
+let done = false;
+fs.writeFileSync = function (target, ...rest) {
+  const out = write.call(this, target, ...rest);
+  if (!done && typeof target === 'number') {
+    done = true;
+    const lock = process.env.KETTE_HOME + '/locks/c.lck';
+    fs.unlinkSync(lock);
+    write.call(fs, lock, JSON.stringify({ pid: Number(process.env.KETTE_TEST_DEAD), at: Date.now(), token: 'other' }));
+  }
+  return out;
+};`);
+  const r = await runNode(swap, path.join(dir, 'own.mjs'), [seen], { ...process.env, KETTE_HOME: home, KETTE_TEST_DEAD: String(await deadPid()) });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(seen, 'utf8'), 'true', 'the work ran only under its own lock');
+  assert.deepEqual(leftovers(home), []);
+});
+
+test('LK-5: a lock that looks gone but stays (a pending delete on Windows) is retried with a pause, not in a tight loop', { timeout: 60000 }, async () => {
+  const { home, counter, script } = setup();
+  const lock = path.join(locksOf(home), 'c.lck');
+  fs.writeFileSync(lock, '{}');
+  const count = path.join(tmp(), 'count');
+  const pending = hook('pending-delete.mjs', `const stat = fs.statSync;
+const read = fs.readFileSync;
+const lock = process.env.KETTE_HOME + '/locks/c.lck';
+let until = 0;
+let calls = 0;
+const busy = (p) => {
+  if (String(p).replace(/\\\\/g, '/') !== lock.replace(/\\\\/g, '/')) return false;
+  if (!until) until = Date.now() + 500;
+  if (Date.now() < until) { calls++; return true; }
+  if (fs.existsSync(lock)) fs.unlinkSync(lock);
+  return false;
+};
+const eperm = () => Object.assign(new Error('EPERM: delete pending'), { code: 'EPERM' });
+fs.statSync = function (p, ...rest) { if (busy(p)) throw eperm(); return stat.call(this, p, ...rest); };
+fs.readFileSync = function (p, ...rest) { if (busy(p)) throw eperm(); return read.call(this, p, ...rest); };
+process.on('exit', () => write(process.env.KETTE_TEST_COUNT, String(calls)));
+const write = (f, c) => { const fd = fs.openSync(f, 'w'); fs.writeSync(fd, c); fs.closeSync(fd); };`);
+  const r = await runNode(pending, script, [counter, '1'], { ...process.env, KETTE_HOME: home, KETTE_TEST_COUNT: count });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(Number(fs.readFileSync(counter, 'utf8')), 1);
+  assert.ok(Number(fs.readFileSync(count, 'utf8')) < 2000, `${fs.readFileSync(count, 'utf8')} looks in half a second`);
+});
+
+test('LK-6: an async holder renews its lock while it works', { timeout: 60000 }, async () => {
+  const { withLockAsync, lockFile } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const started = Date.now();
+  let renewed = 0;
+  await withLockAsync('lk6', async () => {
+    await new Promise((r) => setTimeout(r, 10500));
+    renewed = fs.statSync(lockFile('lk6')).mtimeMs;
+  });
+  assert.ok(renewed > started + 5000, 'the file time moved on while the work ran');
+});
+
+test('LK-6: a live holder whose lock time is old but renewed is not taken over', { timeout: 60000 }, async () => {
+  const home = tmp();
+  const dir = tmp();
+  const log = path.join(dir, 'log');
+  fs.writeFileSync(log, '');
+  // Written over two minutes ago by this live process, renewed just now
+  fs.writeFileSync(path.join(locksOf(home), 'c.lck'), JSON.stringify({ pid: process.pid, at: Date.now() - 130000, token: 'busy' }));
+  const c = spawn(process.execPath, [overlapWorker(dir), log, '0'], { env: { ...process.env, KETTE_HOME: home }, stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 3000));
+  const entered = fs.readFileSync(log, 'utf8');
+  // Only the PID of the child this test started is stopped
+  c.kill();
+  await new Promise((r) => c.on('close', r));
+  assert.equal(entered, '', 'the waiter still waits');
 });
