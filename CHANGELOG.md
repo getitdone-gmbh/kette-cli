@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0
+- Kette instances (Workbase ZERO-538, ADR-0002): `kette instance create <name> [--edition enterprise|community] [--from <git-url|folder>] | list | show | use | add-repo | members | remove`. Each instance has its own scope in `~/.kette/instances/<name>/instance.json`: edition, bundle pin, repos, members, ticketing, wallet defaults, overlays, chain stations; it can live in its own git repo. One licence covers all instances, seats stay per device.
+- `.kette/profile.json` names the instance (`instance`); the repo inherits edition, ticketing, wallet defaults, overlays and stations, its own values win. `kette init` and `kette add` take `--instance <name>` and ask in a terminal; `kette profile --effective` shows the inherited values; `kette doctor --instance [name]` checks every repo of an instance.
+- Editions mix on one machine: a Community instance never enables Enterprise plugins, templates or the wallet, even with a licence; an Enterprise instance needs the licence and says so clearly.
+- Plugins are enabled per project, never in the user scope: `.claude/settings.json` switches the edition plugins on and every other Kette plugin off, the marketplace path goes into `.claude/settings.local.json` (git ignored). One merged marketplace `kette` in `~/.kette/bundles/marketplace`, built from the installed bundles. `kette login` and `kette update` enable the plugins of the project in the current folder; outside a project they change no plugin. Plugins from older versions in the user scope stay, `kette doctor` names them.
+- `kette wallet init` in an instance repo takes provider, project and environment from the instance.
+- New sandbox test: every command of the help runs with HOME, `~/.kette`, `~/.npmrc` and the Claude Code config in temp folders against fake servers, with a file system diff after each command; test matrix in docs/instances.md.
+
 ## 0.9.4
 - The release train is now called batch review. The flow text in `.kette/README.md` (written by `kette add` and `kette update`) says "batch review" and starts it by describing the round to `/feature-loop` (for example `/feature-loop filter and export done, review at the end`) instead of naming branches. `flow.mode: batch` is the new value, the old value `train` gives the same text.
 - `kette init` and `kette add` (Enterprise) name `/feature-loop <description of the round>` in the next steps.
