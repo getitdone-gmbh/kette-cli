@@ -469,3 +469,39 @@ test('KETTE-43: a claim of this process put back by another clearer after it gav
   assert.deepEqual(fs.readdirSync(path.dirname(f)), []);
   assert.equal(withLock('c', () => 'ran'), 'ran');
 });
+
+// KETTE-43, seen on Windows CI: a clearer moved the claim aside, could not read it right after the rename and put back an empty claim;
+// that claim counted as unreadable for STALE_MS and both waiters ran into the 30 s
+test('KETTE-43: a claim that cannot be read after the move is not put back as an empty claim', { timeout: 60000 }, async () => {
+  const { removeIfToken, lockFile } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const f = lockFile('c');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ pid: await deadPid(), at: Date.now() - 11000, token: 'gone' }));
+  fs.linkSync(f, `${f}.gone.claim`);
+  const read = fs.readFileSync;
+  fs.readFileSync = function (p, ...rest) {
+    if (/\.claim\.\d+\.[0-9a-f]+\.tmp$/.test(String(p))) throw Object.assign(new Error('EPERM: sharing violation'), { code: 'EPERM' });
+    return read.call(this, p, ...rest);
+  };
+  try {
+    assert.equal(removeIfToken(f, 'gone'), true);
+  } finally {
+    fs.readFileSync = read;
+  }
+  assert.deepEqual(fs.readdirSync(path.dirname(f)), [], 'no empty claim and no lock left');
+});
+
+test('KETTE-43: an empty claim left next to a stale lock blocks for seconds, not for STALE_MS', { timeout: 60000 }, async () => {
+  const { home, counter, script, env } = setup();
+  const lock = path.join(locksOf(home), 'c.lck');
+  fs.writeFileSync(lock, JSON.stringify({ pid: await deadPid(), at: Date.now(), token: 'gone' }));
+  fs.writeFileSync(`${lock}.gone.claim`, '');
+  aged(`${lock}.gone.claim`, 3000);
+  const started = Date.now();
+  const rs = await Promise.all([run(script, [counter, '10'], env), run(script, [counter, '10'], env)]);
+  assert.deepEqual(rs.map((r) => r.code), [0, 0], rs.map((r) => r.out).join('\n'));
+  assert.equal(Number(fs.readFileSync(counter, 'utf8')), 20);
+  assert.ok(Date.now() - started < 25000);
+  assert.deepEqual(leftovers(home), []);
+});

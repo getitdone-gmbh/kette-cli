@@ -33,7 +33,8 @@ export const alive = (pid) => { try { process.kill(pid, 0); return true; } catch
 export const lockFile = (name) => path.join(home(), 'locks', `${name}.lck`);
 const claimFile = (file, token) => `${file}.${token}.claim`;
 const readOwner = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
-const readRaw = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return null; } };
+// Windows refuses a read for a moment while another process renames or opens the file; null only when it stays unreadable (KETTE-43)
+const readRaw = (file) => { try { return retry(() => fs.readFileSync(file, 'utf8'), ['EBUSY', 'EPERM', 'EACCES'], 500); } catch { return null; } };
 // Windows answers EPERM for a file whose delete is pending: it is as good as gone
 const statOf = (file) => { try { return fs.statSync(file); } catch (err) { if (err.code === 'ENOENT' || err.code === 'EPERM') return null; throw err; } };
 
@@ -171,17 +172,19 @@ function clearClaim(claim, minAge = 0) {
   if (!before) return;
   const raw = readRaw(claim);
   const by = readOwner(claim);
-  // The time a claimant wrote counts; the file time only for a claim cut short
+  // The time a claimant wrote counts; the file time only for a claim cut short. A claimant writes its claim in microseconds, so one
+  // still unreadable after REUSE_CHECK_MS is left over; even if a claimant were still at work, it stops at its own check (LK-3)
   const age = Date.now() - (Number.isFinite(by?.at) ? by.at : before.mtimeMs);
   // A claim of this process is a leftover of its own earlier attempt: every lock step runs synchronously, so none of its claims is in
   // use while it looks. A clearer that put back a claim this process had already given up leaves exactly that (KETTE-43)
   const own = by?.pid === process.pid;
-  if (!own && (age < minAge || !(by?.pid ? gone(by, age) : age > STALE_MS))) return;
+  if (!own && (age < minAge || !(by?.pid ? gone(by, age) : age > REUSE_CHECK_MS))) return;
   const aside = `${claim}.${process.pid}.${hex()}.tmp`;
   try { retry(() => fs.renameSync(claim, aside)); } catch (err) { if (err.code === 'ENOENT') return; throw err; }
   try {
+    // Only a claim that can be read goes back: putting back an empty one would block that lock for STALE_MS (KETTE-43)
     const moved = readRaw(aside);
-    if (moved !== raw) place(claim, moved ?? '');
+    if (moved !== null && moved !== raw) place(claim, moved);
   } finally {
     unlinkIfThere(aside);
   }
