@@ -63,7 +63,7 @@ kette init web --instance acme          # or in an existing repo: kette instance
 kette doctor --instance acme            # every repo of the instance on this machine
 ```
 
-A repo names its instance in `.kette/profile.json` and inherits edition, ticketing, wallet defaults, overlays and stations; its own stack, platform and apps win. A Community instance never enables Enterprise plugins or features, even on a licensed machine; an Enterprise instance needs the licence. A repo without an instance works as before. Details, the verified list of what changes outside a project and the test matrix: [docs/instances.md](docs/instances.md), decision: [ADR-0002](docs/adr/0002-project-scoped-instances.md).
+A repo names its instance in `.kette/profile.json` and inherits edition, ticketing, wallet defaults, overlays and stations; its own stack, platform and apps win. The whole team needs kette 0.10 or newer: the committed `.claude/settings.json` switches the plugin IDs of older versions (`<plugin>@kette`) off, so a teammate on 0.9 has no Kette plugins in such a repo until they update and run `kette add`. A Community instance never enables Enterprise plugins or features, even on a licensed machine; an Enterprise instance needs the licence. A repo without an instance works as before. Details, the verified list of what changes outside a project and the test matrix: [docs/instances.md](docs/instances.md), decision: [ADR-0002](docs/adr/0002-project-scoped-instances.md).
 
 ## Review flow (`flow` in the profile)
 How a team reviews changes is set once in `.kette/profile.json`; `kette add` and `kette update` write it into the flow text of `.kette/README.md`, which Claude Code reads in every session.
@@ -86,13 +86,14 @@ Stacks: `nextjs-ts-tailwind`, `nestjs-prisma`, `nestjs-mongoose`, `python-fastap
 If the CLI does not know the template format of the installed rulebook (newer format, unknown placeholders or directives), it writes rules and profile, leaves out templates and checks, and names the command to reinstall the CLI. An older rulebook without templates by profile gives the hint `kette update`.
 
 ## npm packages of the design system (Enterprise)
+Since 0.10 only the token is in the user npmrc; the scope line `@getitdone-gmbh:registry=` is in the project `.npmrc` of Enterprise projects (`kette add` writes it), so npm in a Community repo never uses the Enterprise registry. `kette update` moves the line out of a block from before 0.10.
+
 The registry `https://npm.kette.itdone.de/` is live since 2026-10-22 and works with CLI 0.6.1 or newer. It serves `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/kette-design-enterprise`, `@getitdone-gmbh/zero` and `@getitdone-gmbh/zero-pages`, plus the old names `@getitdone-gmbh/figma-design-tokens` and `@getitdone-gmbh/component-library-react` for the versions published before the rename (contract: [docs/install-api.md](docs/install-api.md)). The free MIT library `@getitdone-gmbh/kette-design-community` is not part of it.
 
 `kette login` gets its own npm token for this device and writes a marked block into the user npmrc (`NPM_CONFIG_USERCONFIG`, otherwise `~/.npmrc`, mode 600):
 
 ```
 # >>> kette: managed by kette login, removed by kette logout
-@getitdone-gmbh:registry=https://npm.kette.itdone.de/
 //npm.kette.itdone.de/:_authToken=kt_...
 # <<< kette
 ```

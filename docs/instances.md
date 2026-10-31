@@ -94,7 +94,11 @@ Claude Code keeps one path per marketplace name and one copy per plugin ID for a
 
 The folders hold copies (Claude Code refuses plugin entries that leave the marketplace folder); a link inside a plugin is resolved, a link pointing outside the bundle is left out. On a licensed machine a Community repo makes kette load the Community bundle as well. `kette rules`, `.kette/README.md` and `kette doctor` in a Community repo point only to `~/.kette/bundles/community/`.
 
-When a registered `kette-community` or `kette-enterprise` points to another folder inside `~/.kette` (an earlier build, a moved `KETTE_HOME`), kette removes the registration and adds it again; a folder outside `~/.kette` is never touched and the reason is shown. `kette login` and `kette update` refresh the plugins of the project in the current folder; outside a project they say that plugins are enabled per project. `kette logout` removes the marketplace `kette-enterprise` from Claude Code and its folder, so Enterprise repos keep their settings but those plugins no longer load on this machine.
+When a registered `kette-community` or `kette-enterprise` points to another folder inside `~/.kette` (an earlier build, a moved `KETTE_HOME`), kette removes the registration and adds it again, always from the neutral folder `~/.kette` (run inside a project, Claude Code would also strip the marketplace from its committed `.claude/settings.json`); a folder outside `~/.kette` is never touched and the reason is shown. `kette login` and `kette update` refresh the plugins of the project in the current folder; outside a project they say that plugins are enabled per project. `kette logout` removes the marketplace `kette-enterprise` from Claude Code and its folder, so Enterprise repos keep their settings but those plugins no longer load on this machine.
+
+### Teams on mixed versions
+
+Every member of a team needs kette 0.10 or newer. The committed `.claude/settings.json` switches the `@kette` IDs of older versions off, so a teammate on 0.9 whose plugins sit in the user scope gets no Kette plugins in that repo until they update and run `kette add`.
 
 ### Machines set up by kette before 0.10
 
@@ -104,9 +108,15 @@ Earlier versions registered one marketplace `kette` on `~/.kette/bundles/active`
 
 When a profile names an instance that is missing, damaged or has an unsafe name, the project counts as Community for every gate: plugins, templates, npm and the wallet, never as the edition of the machine. `kette login` and `kette update` warn about such a repo, leave its plugins as they are and finish (licence and npm access are set up first). `kette add`, `kette instance use` and `kette profile --effective` stop with the reason, `kette doctor` fails with it.
 
+## npm access (D3)
+
+The npm token is global per device: the kette block in `~/.npmrc` holds only the `//<registry>/:_authToken=` line. The scope line `@getitdone-gmbh:registry=<kette registry>` lives only in the project `.npmrc` of Enterprise projects, written by `kette init`, `kette add` and `kette instance use` and recorded with its exact text in `.kette/templates.json`. So `npm config get @getitdone-gmbh:registry` in a Community repo is never the Enterprise registry, and an Enterprise repo still installs. `kette update` moves the scope line out of a block written before 0.10. `kette doctor` fails for an Enterprise project without the line and names `kette add`.
+
 ## Leaving Enterprise
 
-When a repo joins a Community instance (`kette instance use`, `kette add --instance`), `tier` goes down and kette removes what it wrote for Enterprise: the `@getitdone-gmbh` scope line in the project `.npmrc` and the Enterprise template files it created. kette records those files with their hash in `.kette/templates.json` when it writes them. A file that was changed since stays and `kette doctor` fails, naming the files; a Community project with the registry scope line fails `kette doctor` too.
+When a repo joins a Community instance (`kette instance use`, `kette add --instance`), `tier` goes down and kette removes what it wrote for Enterprise: the Enterprise template files it created and recorded with their hash in `.kette/templates.json`, and the scope line it recorded (or, for projects from before the record, the line with the kette registry). Every other line of `.npmrc`, a foreign registry line such as GitHub Packages, and the line endings stay. A template file that was changed since stays and `kette doctor` fails, naming the files. Nothing is deleted through a folder link that points outside the project. A repo without an instance is never touched this way and behaves as before 0.10.
+
+The other way, a Community repo that joins an Enterprise instance gets the scope line from `kette instance use`; the Enterprise templates come with `kette add`, and `kette doctor` names the missing ones until then.
 
 ## Repo identity
 
@@ -116,7 +126,7 @@ One repo belongs to one instance: joining with any checkout (`kette instance use
 
 ## Several kette processes at once
 
-Every read-modify-write of a machine file runs under a lock: `state.json`, each `instance.json`, the build of each marketplace folder and the unpacking of each bundle version. A lock is a folder `~/.kette/locks/<name>.lock` created with `mkdir`, holding the owner's PID and time; a waiting process retries for up to 30 seconds, a lock whose owner is gone or that is older than 2 minutes is taken over. Files are written to a temp file of the own process and renamed. Tested with 6 repos switching instance in parallel for 5 rounds and 4 repos building the marketplaces at once.
+Every read-modify-write of a machine file runs under a lock: `state.json`, each `instance.json`, the build of each marketplace folder and the unpacking of each bundle version. A lock is a folder `~/.kette/locks/<name>.lock` that appears atomically together with its owner (PID, time, token); a waiting process retries for up to 30 seconds. A lock without a readable owner, whose owner is gone or that is older than 2 minutes is taken over, and only if it still carries the token that was found stale. Temp folders of processes that died (a marketplace build or bundle unpacking killed half way) are removed at the next run. Files are written to a temp file of the own process and renamed. Tested with 6 repos switching instance in parallel for 5 rounds and 4 repos building the marketplaces at once.
 
 ## Onboarding
 
@@ -135,14 +145,14 @@ Every read-modify-write of a machine file runs under a lock: `state.json`, each 
 | `~/.kette/credentials`, `device-id`, `state.json`, `bundles/**`, `instances/**`, `locks` | machine store, the instances themselves, locks (empty after every command) | all |
 | `~/.claude/plugins/**` | Claude Code's own registry of marketplace names, its plugin cache and `installed_plugins.json` (project-scope entries with their project path); it changes for project-scope installs too and kette cannot avoid it | commands that enable plugins |
 | `~/.claude/.claude.json`, `~/.claude/backups/**` | Claude Code keeps its own state and backups there on every run (QA-19); with `kette cloud setup` it also holds the itdone MCP server in the user scope (open decision D4) | every command that runs `claude`, `cloud setup` |
-| `~/.npmrc` (marked Kette block) | licence-bound npm access per device (open decision D3) | `login`, `update`, `logout` |
+| `~/.npmrc` (marked Kette block, the token only) | npm access per device (D3, decided in fix round 2) | `login`, `update`, `logout` |
 | `~/.claude/settings.json` | only `kette logout`, and only to remove Enterprise plugins an older kette put in the user scope | `logout` on a machine set up before 0.10 |
 
 After every command the test also checks that the user settings of Claude Code contain no Kette plugin. The real Claude Code also adds `.claude/settings.local.json` to the global git ignore (`~/.config/git/ignore`) on the first local-scope declaration, and `claude plugin list` lists every installed plugin of every project with its status (an Enterprise plugin of another repo shows as disabled in a Community repo, QA-18); that happens in Claude Code, not in kette. `kette logout` removes the marketplace `kette-enterprise` from Claude Code, which uninstalls its plugins in every project (checked with the real Claude Code 2.1.310: `installed_plugins.json` is empty afterwards and `claude plugin list` shows nothing). Claude Code keeps the unused copies in `~/.claude/plugins/cache/kette-enterprise`; kette does not delete inside the Claude Code folder, `kette logout` names the folder instead.
 
 ## Test matrix
 
-Result of `KETTE_MATRIX_OUT=<prefix> node --test test/sandbox.test.mjs test/sandbox-qa.test.mjs` on macOS, Node 24 (2026-10-31, fix round 1): 237 command runs in 22 scenarios, 0 changes outside the allowed list, 0 Kette plugins in the user scope (the migration scenario seeds one from an older kette on purpose; `kette logout` removes it). The CI runs the same suites on Linux, macOS and Windows with Node 20 and 22; on Windows the tests that need a pseudo terminal, POSIX file modes or symlinks are skipped. A cell names the exit codes; 1 or 2 is the expected refusal in that scenario. Green: exit code as expected, nothing global changed beyond the list above, no plugin in the user scope.
+Result of `KETTE_MATRIX_OUT=<prefix> node --test test/sandbox.test.mjs test/sandbox-qa.test.mjs` on macOS, Node 24 (2026-10-31, fix round 2): 269 command runs in 28 scenarios, 0 changes outside the allowed list, 0 Kette plugins in the user scope (the migration scenario seeds one from an older kette on purpose; `kette logout` removes it). The CI runs the same suites on Linux, macOS and Windows with Node 20 and 22; on Windows the tests that need a pseudo terminal, POSIX file modes or symlinks are skipped. A cell names the exit codes; 1 or 2 is the expected refusal in that scenario. Green: exit code as expected, nothing global changed beyond the list above, no plugin in the user scope.
 
 ### Scenarios of the first round
 
@@ -197,33 +207,33 @@ A all commands of the help in one sandbox · B two repos in an Enterprise and a 
 
 ### Regression scenarios of fix round 1
 
-D2 Community repo on a licensed machine loads and names only Community content · FC fail closed with a missing or damaged instance (five kinds of damage) · D7 leaving Enterprise · ID repo identity, one instance per repo, same names, worktrees · LK 6 repos x 5 rounds in parallel and a parallel first marketplace build (the 34 parallel runs are checked in the test and not counted in the table) · Q9 checks before writing · SEC tokens, transports, control characters · MIG machine set up before 0.10 · RM dangling and damaged instances · MISC bundle pin, missing instance, corrupt profile, inherited overlays · OB onboarding with a wrong answer and a taken name · PLAT user scope and git ignore on every platform
+D2 Community repo on a licensed machine loads and names only Community content · FC fail closed with a missing or damaged instance (five kinds of damage) · D7 leaving Enterprise · ID repo identity, one instance per repo, same names, worktrees · LK 6 repos x 5 rounds in parallel and a parallel first marketplace build (the 34 parallel runs are checked in the test and not counted in the table) · Q9 checks before writing · SEC tokens, transports, control characters · MIG machine set up before 0.10 · RM dangling and damaged instances · MISC bundle pin, missing instance, corrupt profile, inherited overlays · OB onboarding with a wrong answer and a taken name · PLAT user scope and git ignore on every platform · fix round 2: LO logout inside an Enterprise repo · NPM token global, scope line per project (real npm) · FR foreign scope line with CRLF in a repo without instance · UP Community repo joins an Enterprise instance · R1 leftovers of the first 0.10 build · OB2 wrong edition answer and n at the plan
 
-| Command | D2 | FC | D7 | ID | LK | Q9 | SEC | MIG | RM | MISC | OB | PLAT |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `kette login` | green 0 | green 0 | green 0 |  | green 0 |  |  | green 0 |  | green 0 |  | green 0 |
-| `kette instance create` | green 0 | green 0 | green 0 | green 0 | green 0 | green 0 | green 0 | green 0 |  | green 0 | green 0 | green 0 |
-| `kette init` | green 0 | green 0 | green 0 | green 0 | green 0 | green 0, 1 | green 0 | green 0 |  | green 0 |  | green 0 |
-| `kette rules --path` | green 0 |  |  |  |  |  |  |  |  |  |  |  |
-| `kette rules` | green 0 |  |  |  |  |  |  |  |  |  |  |  |
-| `kette doctor` | green 0 | green 1 | green 0, 1 |  |  |  |  | green 0 |  | green 0 |  |  |
-| `kette wallet init` |  | green 1 |  |  |  |  |  |  |  |  |  |  |
-| `kette update` |  | green 0 |  | green 0 | green 0 | green 0 | green 0 |  |  |  | green 0 |  |
-| `kette profile --effective` |  | green 1 |  |  |  |  |  |  |  | green 1 |  |  |
-| `kette add` |  | green 1 |  | green 0 |  |  |  |  |  |  |  |  |
-| `kette instance remove` |  | green 0 |  |  |  |  |  |  | green 0 |  |  |  |
-| `kette instance use` |  |  | green 0 |  |  |  | green 0 |  |  |  |  |  |
-| `kette instance add-repo` |  |  |  | green 0 |  |  |  |  |  |  |  |  |
-| `kette doctor --instance --ci` |  |  |  | green 0 |  |  |  |  |  |  |  |  |
-| `kette instance show` |  |  |  |  |  |  | green 0 |  |  |  |  |  |
-| `kette instance create --from` |  |  |  |  |  |  | green 1 |  | green 0, 1 |  |  |  |
-| `kette instance members add` |  |  |  |  |  |  | green 2 |  |  |  |  |  |
-| `kette logout` |  |  |  |  |  |  |  | green 0 |  |  |  |  |
-| `kette instance list` |  |  |  |  |  |  |  |  | green 0 |  |  |  |
-| `kette doctor --instance` |  |  |  |  |  |  |  |  |  | green 1 |  |  |
-| `kette init (terminal)` |  |  |  |  |  |  |  |  |  |  | green 0 |  |
+| Command | D2 | FC | D7 | ID | LK | Q9 | SEC | MIG | RM | MISC | OB | PLAT | LO | NPM | FR | UP | R1 | OB2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `kette login` | green 0 | green 0 | green 0 |  | green 0 |  |  | green 0 |  | green 0 |  | green 0 | green 0 | green 0 |  | green 0 |  |  |
+| `kette instance create` | green 0 | green 0 | green 0 | green 0 | green 0 | green 0 | green 0 | green 0 |  | green 0 | green 0 | green 0 | green 0 | green 0 | green 0 | green 0 |  |  |
+| `kette init` | green 0 | green 0 | green 0 | green 0 | green 0 | green 0, 1 | green 0 | green 0 |  | green 0 |  | green 0 | green 0 | green 0 | green 0 | green 0 |  |  |
+| `kette rules --path` | green 0 |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| `kette rules` | green 0 |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| `kette doctor` | green 0 | green 1 | green 0, 1 |  |  |  |  | green 0 |  | green 0 |  |  |  |  | green 0 | green 0 | green 1 |  |
+| `kette wallet init` |  | green 1 |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| `kette update` |  | green 0 |  | green 0 | green 0 | green 0 | green 0 |  |  |  | green 0 |  |  |  |  |  | green 0 | green 0 |
+| `kette profile --effective` |  | green 1 |  |  |  |  |  |  |  | green 1 |  |  |  |  |  |  |  |  |
+| `kette add` |  | green 1 |  | green 0 |  |  |  |  |  |  |  |  |  |  | green 0 | green 0 |  |  |
+| `kette instance remove` |  | green 0 |  |  |  |  |  |  | green 0 |  |  |  |  |  |  |  |  |  |
+| `kette instance use` |  |  | green 0 |  |  |  | green 0 |  |  |  |  |  |  |  | green 0 | green 0 |  |  |
+| `kette instance add-repo` |  |  |  | green 0 |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| `kette doctor --instance --ci` |  |  |  | green 0 |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+| `kette instance show` |  |  |  |  |  |  | green 0 |  |  |  |  |  |  |  |  |  |  |  |
+| `kette instance create --from` |  |  |  |  |  |  | green 1 |  | green 0, 1 |  |  |  |  |  |  |  |  |  |
+| `kette instance members add` |  |  |  |  |  |  | green 2 |  |  |  |  |  |  |  |  |  |  |  |
+| `kette logout` |  |  |  |  |  |  |  | green 0 |  |  |  |  | green 0 |  |  |  |  |  |
+| `kette instance list` |  |  |  |  |  |  |  |  | green 0 |  |  |  |  |  |  |  |  |  |
+| `kette doctor --instance` |  |  |  |  |  |  |  |  |  | green 1 |  |  |  |  |  |  |  |  |
+| `kette init (terminal)` |  |  |  |  |  |  |  |  |  |  | green 0, 1 |  |  |  |  |  |  |  |
 
-Each regression test was run against the code of the first round (commit 9bab850) and failed there, all 13; the log is kept with the fix round notes.
+Each regression test of fix round 1 was run against the code of the first round (9bab850) and failed there, all 13; each test of fix round 2 against 60b7cc5 and failed there (CR-NEW-2 tests a function that did not exist before). The logs are kept with the fix round notes.
 
 ## Open decisions
 
@@ -231,7 +241,7 @@ Each regression test was run against the code of the first round (commit 9bab850
 |---|---|---|---|
 | D1 | Where plugins are enabled | project scope `.claude/settings.json` (shared with the team), marketplace path in local scope | local scope only (nothing committed, every teammate runs `kette add`) |
 | D2 | Several editions under one marketplace name | decided in fix round 1: one marketplace per edition (`kette-community`, `kette-enterprise`), the legacy `kette` stays for old projects | one merged marketplace (a Community repo would load Enterprise copies of shared plugins) |
-| D3 | `~/.npmrc` npm token | stays global: bound to licence and device, never in a repo | a token per project `.npmrc` (risk of committing it) |
+| D3 | `~/.npmrc` npm token | decided in fix round 2: the token stays global per device, the scope line only in the project `.npmrc` of Enterprise projects | a token per project `.npmrc` (risk of committing it) |
 | D4 | itdone MCP server of `kette cloud setup` | stays user scope: one itdone account per person | local scope per project (setup in every repo) |
 | D5 | Plugins of older versions in the user scope | kept, `kette doctor` names them with the uninstall commands | removed by `kette add` or `kette update` automatically |
 | D6 | Bundle pin | a check in `kette doctor` | a marketplace per instance with its own version (more IDs, one cache entry per instance) |

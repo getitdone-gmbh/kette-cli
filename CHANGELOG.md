@@ -9,6 +9,10 @@
 - Repo identity by normalised origin (tokens never stored or printed, ssh and https forms equal) or git common folder; a repo belongs to one instance; worktrees and same-named repos without origin are tracked. Every check that can stop a join runs before a project file is written.
 - Locks for `state.json`, `instance.json`, marketplace builds and bundle unpacking, so parallel kette processes stay consistent; atomic writes everywhere.
 - `--from` clones only over https, ssh and local paths, without prompts or stdin; URLs and member ids are printed without user info and control characters; names Windows reserves are refused.
+- npm: only the token is global (`~/.npmrc`, kette block); the `@getitdone-gmbh` scope line lives in the project `.npmrc` of Enterprise projects, so npm in a Community repo never uses the Enterprise registry. `kette update` moves the line out of a block from before 0.10, `kette doctor` names an Enterprise project without it.
+- Leaving Enterprise removes only the exact scope line kette wrote and keeps foreign registry lines and line endings; a repo without an instance is never changed this way. `kette instance use` with an Enterprise instance adds the scope line, `kette doctor` names missing Enterprise templates (`kette add`).
+- `claude plugin marketplace remove` runs from `~/.kette`, so `kette logout` inside a repo never changes its committed `.claude/settings.json`.
+- The whole team needs kette 0.10 or newer: committed settings switch the `<plugin>@kette` IDs of older versions off.
 - New sandbox tests: every command of the help with HOME, `~/.kette`, `~/.npmrc` and the Claude Code config in temp folders against fake servers, with a file system diff after each command, plus regression scenarios for every finding of the review and QA; they run on Linux, macOS and Windows. Test matrix in docs/instances.md.
 
 ## 0.9.4
