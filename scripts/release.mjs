@@ -1,13 +1,14 @@
 // Baut dist/ lokal: CLI-Paket, Community-Paket, Manifest, Installer; das Enterprise-Paket landet in dist/private und wird nie öffentlich gehostet
 // Ohne Option wird nichts veröffentlicht. --publish-enterprise lädt das Enterprise-Paket zusätzlich als Release v<version> in das private Repo alexfriedl/kette-engineering
 // Quellen: KETTE_ENGINEERING (Standard ../kette-engineering, Arbeitsstand), KETTE_AGENT_PACK (Standard ../claude-design-agent-pack) mit KETTE_AGENT_PACK_REF (Standard: neuestes Tag v*)
+// Ticketing (Enterprise, private, docs/adr/0003): KETTE_TICKETING (default ../kette-ticketing) with KETTE_TICKETING_REF (default: newest tag v*), built from git into ticketing/ of the Enterprise bundle
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ENTERPRISE_REPO = 'alexfriedl/kette-engineering';
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? [path.join(dir, e.name), ...walk(path.join(dir, e.name))] : [path.join(dir, e.name)]));
@@ -31,8 +32,8 @@ const { packMismatch, packPluginsFor } = await import('./pack-plugins.mjs');
 const COMMUNITY_PACK_PLUGINS = packPluginsFor(pluginsFor(COMMUNITY), engPlugins);
 const ENTERPRISE_PACK_PLUGINS = packPluginsFor(pluginsFor(ENTERPRISE), engPlugins);
 const agentPack = path.resolve(process.env.KETTE_AGENT_PACK || path.join(root, '..', 'claude-design-agent-pack'));
-const newestTag = () => execFileSync('git', ['-C', agentPack, 'tag', '--list', 'v*', '--sort=-v:refname'], { encoding: 'utf8' }).split('\n').find((tag) => /^v\d+\.\d+\.\d+$/.test(tag)) || '';
-const agentPackRef = process.env.KETTE_AGENT_PACK_REF || newestTag();
+const newestTag = (repo) => execFileSync('git', ['-C', repo, 'tag', '--list', 'v*', '--sort=-v:refname'], { encoding: 'utf8' }).split('\n').find((tag) => /^v\d+\.\d+\.\d+$/.test(tag)) || '';
+const agentPackRef = process.env.KETTE_AGENT_PACK_REF || newestTag(agentPack);
 if (!agentPackRef) throw new Error(`claude-design-agent-pack (${agentPack}) hat kein Tag vX.Y.Z, KETTE_AGENT_PACK_REF setzen`);
 const agentPackCommit = execFileSync('git', ['-C', agentPack, 'rev-parse', `${agentPackRef}^{commit}`], { encoding: 'utf8' }).trim();
 const agentPackTagged = execFileSync('git', ['-C', agentPack, 'tag', '--points-at', agentPackCommit], { encoding: 'utf8' }).trim() !== '';
@@ -42,11 +43,18 @@ const packPlugins = JSON.parse(execFileSync('git', ['-C', agentPack, 'show', `${
 const packDirs = execFileSync('git', ['-C', agentPack, 'ls-tree', '--name-only', agentPackCommit, 'plugins/'], { encoding: 'utf8' }).split('\n').filter(Boolean).map((d) => d.replace(/^plugins\//, ''));
 const mismatch = packMismatch({ ref: agentPackRef, commit: agentPackCommit, packPlugins, packDirs, needed: [...new Set([...COMMUNITY_PACK_PLUGINS, ...ENTERPRISE_PACK_PLUGINS])], renamed: RENAMED_PLUGINS });
 if (mismatch) throw new Error(mismatch);
+// Ticketing at a pinned ref: like the agent pack, the git state is packed, never the working folder
+const ticketingRepo = path.resolve(process.env.KETTE_TICKETING || path.join(root, '..', 'kette-ticketing'));
+const ticketingRef = process.env.KETTE_TICKETING_REF || newestTag(ticketingRepo);
+if (!ticketingRef) throw new Error(`kette-ticketing (${ticketingRepo}) has no tag vX.Y.Z, set KETTE_TICKETING_REF`);
+const ticketingCommit = execFileSync('git', ['-C', ticketingRepo, 'rev-parse', `${ticketingRef}^{commit}`], { encoding: 'utf8' }).trim();
+const ticketingTagged = execFileSync('git', ['-C', ticketingRepo, 'tag', '--points-at', ticketingCommit], { encoding: 'utf8' }).trim() !== '';
+const ticketingCount = execFileSync('git', ['-C', ticketingRepo, 'rev-list', '--count', ticketingCommit], { encoding: 'utf8' }).trim();
 // Semver, damit Claude Code neue Plugin-Versionen erkennt: 0.<Datum>.<Commits kette-engineering plus Commits Agenten-Pack>; ein neuer Stand in einem der beiden Repos ergibt eine neue Version
-const version = `0.${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${Number(count) + Number(packCount)}`;
+const version = `0.${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${Number(count) + Number(packCount) + Number(ticketingCount)}`;
 // Feste Zeit für alle Dateien im Paket (jüngerer der beiden Commits), damit gleicher Inhalt dieselbe Prüfsumme ergibt
 const commitTime = (repo, ref) => Number(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%ct', ref], { encoding: 'utf8' }).trim());
-const sourceTime = new Date(Math.max(commitTime(eng, 'HEAD'), commitTime(agentPack, agentPackCommit)) * 1000);
+const sourceTime = new Date(Math.max(commitTime(eng, 'HEAD'), commitTime(agentPack, agentPackCommit), commitTime(ticketingRepo, ticketingCommit)) * 1000);
 
 const strip = (s) => s.split('\n').filter((l) => !l.startsWith('// Kopie von')).join('\n');
 for (const lib of ['validate.mjs', 'templates.mjs']) {
@@ -83,6 +91,16 @@ for (const f of walk(path.join(packSrc, 'plugins')).filter((f) => f.endsWith('.m
   const text = fs.readFileSync(f, 'utf8');
   if (text.includes('@claude-design-agent-pack')) fs.writeFileSync(f, text.replaceAll('@claude-design-agent-pack', '@kette'));
 }
+// Ticketing is TypeScript: built from the archive of its ref; only what the CLI loads ships, never the backfill data of Get IT Done
+const ticketingSrc = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-ticketing-'));
+execFileSync('tar', ['-x', '-C', ticketingSrc], { input: execFileSync('git', ['-C', ticketingRepo, 'archive', '--format=tar', ticketingCommit], { maxBuffer: 1 << 30 }) });
+execFileSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: ticketingSrc, stdio: 'inherit', shell: process.platform === 'win32' });
+execFileSync('npm', ['run', 'build'], { cwd: ticketingSrc, stdio: 'inherit', shell: process.platform === 'win32' });
+const { CONTRACT } = await import('../src/ticket/module.mjs');
+const { CLI_CONTRACT } = await import(pathToFileURL(path.join(ticketingSrc, 'dist', 'index.js')).href);
+if (CLI_CONTRACT !== CONTRACT) throw new Error(`kette-ticketing ${ticketingRef} speaks contract ${CLI_CONTRACT}, this CLI ${CONTRACT}`);
+const TICKETING_PART = ['dist', 'routing.json', 'package.json', 'agent', 'commands', ...['plan-guard', 'workbase-session', 'intake-hook', 'intake-classify'].map((f) => `scripts/${f}.mjs`)];
+const fromTicketing = TICKETING_PART.map((p) => [path.join(ticketingSrc, p), `ticketing/${p}`]);
 const fromEng = (p) => path.join(eng, p);
 const fromPack = (name) => [path.join(packSrc, 'plugins', name), `plugins/${name}`];
 // macOS-tar packt sonst Metadaten ein, die GNU tar beim Entpacken als Warnung meldet; Besitzer immer 0, damit das Paket nicht vom Rechner abhängt
@@ -136,11 +154,12 @@ const community = pack(`kette-community-${version}.tgz`, [[fromEng('rules'), 'ru
   'profiles/stack/index.json': fs.readFileSync(path.join(eng, 'profiles/stack/index.json'), 'utf8'),
   'VERSION': version + '\n',
 });
-const enterprise = pack(`private/kette-enterprise-${version}.tgz`, [...['rules', 'schema', 'profiles', 'checks', 'plugins', 'LICENSE'].map((p) => [fromEng(p), p]), ...ENTERPRISE_PACK_PLUGINS.map(fromPack)], {
+const enterprise = pack(`private/kette-enterprise-${version}.tgz`, [...['rules', 'schema', 'profiles', 'checks', 'plugins', 'LICENSE'].map((p) => [fromEng(p), p]), ...ENTERPRISE_PACK_PLUGINS.map(fromPack), ...fromTicketing], {
   '.claude-plugin/marketplace.json': JSON.stringify(enterpriseMarket, null, 2) + '\n',
   'VERSION': version + '\n',
 });
 fs.rmSync(packSrc, { recursive: true, force: true });
+fs.rmSync(ticketingSrc, { recursive: true, force: true });
 
 const cliTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-cli-'));
 for (const p of ['bin', 'src', 'package.json', 'LICENSE']) fs.cpSync(path.join(root, p), path.join(cliTmp, p), { recursive: true });
@@ -155,7 +174,7 @@ const manifest = {
   cli: { version: cliVersion, url: path.basename(cli), sha256: hash(cli) },
   bundles: { community: { url: path.basename(community), sha256: hash(community) } },
 };
-const enterpriseMeta = { version, sha256: hash(enterprise), published_at: new Date().toISOString(), agent_pack: { ref: agentPackRef, commit: agentPackCommit.slice(0, 7) } };
+const enterpriseMeta = { version, sha256: hash(enterprise), published_at: new Date().toISOString(), agent_pack: { ref: agentPackRef, commit: agentPackCommit.slice(0, 7) }, ticketing: { ref: ticketingRef, commit: ticketingCommit.slice(0, 7) } };
 
 // Gleiche Version mit anderem Inhalt würde ein schon gebautes oder verteiltes Paket ersetzen, ohne dass Claude Code es bemerkt
 const readJson = (f) => (fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : null);
@@ -177,13 +196,14 @@ fs.rmSync(dist, { recursive: true, force: true });
 fs.renameSync(out, dist);
 const enterpriseFile = path.join(dist, 'private', path.basename(enterprise));
 const enterpriseInfo = path.join(dist, 'private', 'kette-enterprise.json');
-console.log(`release ${version} · cli ${cliVersion} · claude-design-agent-pack ${agentPackRef} (${agentPackCommit.slice(0, 7)})\n${fs.readdirSync(dist).join('\n')}\nprivate/${fs.readdirSync(path.join(dist, 'private')).join('\nprivate/')}`);
+console.log(`release ${version} · cli ${cliVersion} · claude-design-agent-pack ${agentPackRef} (${agentPackCommit.slice(0, 7)}) · kette-ticketing ${ticketingRef} (${ticketingCommit.slice(0, 7)})\n${fs.readdirSync(dist).join('\n')}\nprivate/${fs.readdirSync(path.join(dist, 'private')).join('\nprivate/')}`);
 
 // Release-Argumente für gh; das Enterprise-Paket geht nur in ein privates Repo
-const releaseArgs = ['release', 'create', `v${version}`, enterpriseFile, enterpriseInfo, '--repo', ENTERPRISE_REPO, '--target', commit, '--title', `v${version}`, '--notes', `Enterprise-Paket ${version} (kette-engineering ${sha}, claude-design-agent-pack ${agentPackRef})`];
+const releaseArgs = ['release', 'create', `v${version}`, enterpriseFile, enterpriseInfo, '--repo', ENTERPRISE_REPO, '--target', commit, '--title', `v${version}`, '--notes', `Enterprise-Paket ${version} (kette-engineering ${sha}, claude-design-agent-pack ${agentPackRef}, kette-ticketing ${ticketingRef})`];
 if (publishEnterprise) {
   if (dirty) throw new Error('Mit offenen Änderungen in kette-engineering wird nichts veröffentlicht');
   if (!agentPackTagged) throw new Error(`claude-design-agent-pack ${agentPackRef} ist kein Release-Tag, veröffentlicht wird nur ein getaggter Stand`);
+  if (!ticketingTagged) throw new Error(`kette-ticketing ${ticketingRef} is no release tag, only a tagged state is published`);
   if (!execFileSync('git', ['-C', eng, 'branch', '-r', '--contains', commit], { encoding: 'utf8' }).trim()) throw new Error(`kette-engineering ${sha} ist noch nicht gepusht, das Release-Tag braucht den Commit auf GitHub`);
   const visibility = JSON.parse(execFileSync('gh', ['repo', 'view', ENTERPRISE_REPO, '--json', 'isPrivate'], { encoding: 'utf8' }));
   if (!visibility.isPrivate) throw new Error(`${ENTERPRISE_REPO} ist nicht privat, das Enterprise-Paket wird dort nicht veröffentlicht`);
