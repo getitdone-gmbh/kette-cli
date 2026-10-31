@@ -238,7 +238,8 @@ export function repoName(dir) {
 export function repoIdentity(dir) {
   const abs = fs.realpathSync(dir);
   const top = git(abs, 'rev-parse', '--show-toplevel');
-  const own = top && fs.realpathSync(top) === abs;
+  // git prints forward slashes and Windows may use short 8.3 names, so both sides go through the native real path
+  const own = Boolean(top) && fs.realpathSync.native(top) === fs.realpathSync.native(abs);
   const origin = own ? git(abs, 'remote', 'get-url', 'origin') : '';
   if (origin) {
     const { url, key } = normalizeUrl(origin);
@@ -246,7 +247,7 @@ export function repoIdentity(dir) {
   }
   const common = own ? git(abs, 'rev-parse', '--git-common-dir') : '';
   const gitDir = common ? path.resolve(abs, common) : path.join(abs, '.git');
-  const real = fs.existsSync(gitDir) ? fs.realpathSync(gitDir) : gitDir;
+  const real = fs.existsSync(gitDir) ? fs.realpathSync.native(gitDir) : path.join(fs.realpathSync.native(abs), '.git');
   return { name: repoName(abs), url: null, key: `local:${real.split(path.sep).join('/')}`, path: abs };
 }
 

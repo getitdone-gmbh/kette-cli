@@ -34,7 +34,7 @@ test('D2, QA-02, QA-03: a Community repo on a licensed machine loads and names o
   assert.doesNotMatch(rules.out, /enterprise/i);
   const overview = ok(await kette(box, ['rules'], { ...rec('D2'), cwd: com }));
   assert.match(overview.out, /edition Community/);
-  assert.match(overview.out, /Location: ~\/\.kette\/bundles\/community\//);
+  assert.match(overview.out, /Location: ~[\\/]\.kette[\\/]bundles[\\/]community[\\/]/);
   const note = fs.readFileSync(path.join(com, '.kette', 'README.md'), 'utf8');
   assert.match(note, /~\/\.kette\/bundles\/community\//);
   assert.doesNotMatch(note, /bundles\/enterprise|bundles\/active|@kette-enterprise|design-system-agents/);

@@ -18,18 +18,18 @@ export const pluginNames = (dir) => (fs.existsSync(path.join(dir, 'plugins')) ? 
 
 // Copies, not links (Claude Code refuses entries that leave the marketplace folder); a link inside a plugin is resolved,
 // one pointing outside the bundle is left out, so nothing from elsewhere on the machine lands in the marketplace
-function copyPlugin(bundleDir, from, to) {
-  const root = fs.realpathSync(bundleDir);
-  fs.cpSync(from, to, {
-    recursive: true,
-    dereference: true,
-    filter: (src) => {
-      let real;
-      try { real = fs.realpathSync(src); } catch { return false; }
-      return isInside(root, real);
-    },
-  });
+function copyTree(root, from, to) {
+  let real;
+  try { real = fs.realpathSync(from); } catch { return; }
+  if (!isInside(root, real)) return;
+  const stat = fs.statSync(real);
+  if (stat.isDirectory()) {
+    fs.mkdirSync(to, { recursive: true });
+    for (const name of fs.readdirSync(real)) copyTree(root, path.join(from, name), path.join(to, name));
+  } else if (stat.isFile()) fs.copyFileSync(real, to);
 }
+
+const copyPlugin = (bundleDir, from, to) => copyTree(fs.realpathSync(bundleDir), from, to);
 
 // bundle: { version, dir } of the edition, or null to remove the folder (after kette logout); rebuilt only when the bundle changes
 export function buildMarketplace(edition, bundle) {

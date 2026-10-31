@@ -101,7 +101,8 @@ export function sandbox({ registry = () => [] } = {}) {
   fs.mkdirSync(work);
   // One fake claude per machine: it keeps the global marketplace registry of Claude Code
   const claude = fakeClaude(registry(home));
-  const withClaude = process.env.PATH;
+  // The Windows runners have a real gh.exe, which Windows would find before the gh.cmd stand-in; such folders stay out
+  const withClaude = process.env.PATH.split(path.delimiter).filter((d) => process.platform !== 'win32' || !fs.existsSync(path.join(d, 'gh.exe'))).join(path.delimiter);
   claude.restore();
   const env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), XDG_CONFIG_HOME: path.join(home, '.config'), KETTE_MIRROR: server.url, KETTE_DELIVERY: server.url, KETTE_REGISTRY: `${server.url}/`, KETTE_CLOUD_AUTH_URL: `${server.url}/realms/itdone`, PATH: `${tools}${path.delimiter}${withClaude}`, NO_COLOR: '1', CI: '1', KETTE_WALLET_TRUST: '1', KETTE_WALLET_PROJECT: 'proj-1', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com' };
   for (const k of ['KETTE_HOME', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig', 'FORCE_COLOR', 'KETTE_LICENSE_KEY']) delete env[k];
