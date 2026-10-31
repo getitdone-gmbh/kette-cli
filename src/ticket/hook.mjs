@@ -81,7 +81,8 @@ async function trustCmd(project) {
   const host = modelHost(project);
   if (!host) { console.log(`Instance ${project.instance.name} names no intake model (ticketing.intakeModel), nothing to confirm.`); return 0; }
   if (modelTrusted(project)) { console.log(`${status('ok', 'OK  ')} ${host} is confirmed on this machine already.`); return 0; }
-  if (!process.stdin.isTTY) throw new ExitError(`Confirming the intake model ${host} needs a person at a terminal: run ${cmd('kette ticket hook trust')} yourself.`, 1);
+  // The same rule as for approvals: never an agent, never without a terminal (KT-N2a)
+  if (process.env.CLAUDECODE === '1' || !process.stdin.isTTY) throw new ExitError(`Confirming the intake model ${host} needs a person at a terminal: run ${cmd('kette ticket hook trust')} yourself, not through an agent or CI. Nothing changed.`, 1);
   console.log(`Instance ${project.instance.name} sends unclear prompts of this project to ${host} to decide whether they change the chain.`);
   if (!(await confirm(`Allow prompts of this project to go to ${host} from this machine?`))) throw new ExitError('Not confirmed, nothing changed.', 1);
   updateState((state) => ({ ...state, intake_trust: { ...(state.intake_trust || {}), [project.instance.name]: host } }));
