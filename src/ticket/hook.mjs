@@ -3,6 +3,8 @@ import path from 'node:path';
 import { ExitError } from '../errors.mjs';
 import { cmd, dim, file, status } from '../out.mjs';
 import { apply, describe, print } from '../plan.mjs';
+import { readState, updateState } from '../manifest.mjs';
+import { confirm } from '../prompt.mjs';
 import { SETTINGS_PATH } from '../project-plugins.mjs';
 import { loadTicketing } from './module.mjs';
 import { contextOf, ticketProject } from './project.mjs';
@@ -62,12 +64,38 @@ function change(root, renew, opts, done) {
   return 0;
 }
 
-function statusCmd(root) {
+// The model host an instance names is asked only after this machine confirmed it, again after every change of the host (KETTE-32);
+// KETTE_INTAKE_MODEL_URL is the machine's own choice and needs no confirmation
+export const modelHost = (project) => { try { return new URL(project.effective.ticketing.intakeModel).origin; } catch { return null; } };
+export const modelTrusted = (project) => { const host = modelHost(project); return Boolean(host) && readState().intake_trust?.[project.instance.name] === host; };
+
+function modelLine(project) {
+  const host = modelHost(project);
+  if (process.env.KETTE_INTAKE_MODEL_URL) return `${status('info', 'INFO')} Unclear prompts go to the model of this machine (KETTE_INTAKE_MODEL_URL)`;
+  if (!host) return `${status('info', 'INFO')} No intake model: unclear prompts get a hint, no prompt leaves this machine`;
+  if (modelTrusted(project)) return `${status('ok', 'OK  ')} Intake model ${host} of instance ${project.instance.name}, confirmed on this machine`;
+  return `${status('warn', 'WARN')} Intake model ${host} of instance ${project.instance.name} is not confirmed on this machine, unclear prompts only get a hint. Confirm with: ${cmd('kette ticket hook trust')}`;
+}
+
+async function trustCmd(project) {
+  const host = modelHost(project);
+  if (!host) { console.log(`Instance ${project.instance.name} names no intake model (ticketing.intakeModel), nothing to confirm.`); return 0; }
+  if (modelTrusted(project)) { console.log(`${status('ok', 'OK  ')} ${host} is confirmed on this machine already.`); return 0; }
+  if (!process.stdin.isTTY) throw new ExitError(`Confirming the intake model ${host} needs a person at a terminal: run ${cmd('kette ticket hook trust')} yourself.`, 1);
+  console.log(`Instance ${project.instance.name} sends unclear prompts of this project to ${host} to decide whether they change the chain.`);
+  if (!(await confirm(`Allow prompts of this project to go to ${host} from this machine?`))) throw new ExitError('Not confirmed, nothing changed.', 1);
+  updateState((state) => ({ ...state, intake_trust: { ...(state.intake_trust || {}), [project.instance.name]: host } }));
+  console.log(`${status('ok', 'OK  ')} ${host} confirmed for instance ${project.instance.name} on this machine.`);
+  return 0;
+}
+
+function statusCmd(root, project) {
   const f = path.join(root, SETTINGS_PATH);
   const settings = fs.existsSync(f) ? parse(fs.readFileSync(f, 'utf8')) : {};
   if (settings === null) throw new ExitError(`${SETTINGS_PATH} is not a JSON object.`, 1);
   if (installed(settings)) console.log(`${status('ok', 'OK  ')} Intake hook on in ${file(SETTINGS_PATH)} for this project ${dim(`(${HOOK_COMMAND})`)}`);
   else console.log(`${status('info', 'INFO')} Intake hook off for this project. Switch it on with: ${cmd('kette ticket hook install')}`);
+  if (project) console.log(modelLine(project));
   return 0;
 }
 
@@ -85,8 +113,8 @@ async function run(deps) {
     const project = ticketProject(deps.root, deps);
     const { lib } = await loadTicketing(project.bundleDir);
     const routing = lib.routingFor({ ...contextOf(project), ticketing: project.effective.ticketing || { adapter: 'workload-zero', project: '' } });
-    // A model is only asked when the instance names one (ticketing.intakeModel) or the environment does (KETTE-26)
-    const modelUrl = project.effective.ticketing?.intakeModel;
+    // A model is only asked when the instance names one this machine confirmed, or the machine names one itself (KETTE-26, KETTE-32)
+    const modelUrl = modelTrusted(project) ? project.effective.ticketing.intakeModel : undefined;
     const context = await lib.decide(String(input?.prompt ?? ''), { routing, lastAssistant: lib.lastAssistantText(input?.transcript_path), ...(modelUrl ? { modelUrl } : {}) });
     if (context) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: EVENT, additionalContext: context } }));
   } catch {
@@ -98,8 +126,13 @@ async function run(deps) {
 export async function hook(action, opts, deps) {
   const root = deps.root;
   if (action === 'run') return run(deps);
-  if (action === 'install') return change(root, withHook, opts, { already: `The intake hook is on in ${SETTINGS_PATH} already.`, now: `Intake hook on in ${SETTINGS_PATH}. Commit it so the team gets it; it runs only in this project.` });
+  if (action === 'install') {
+    const code = change(root, withHook, opts, { already: `The intake hook is on in ${SETTINGS_PATH} already.`, now: `Intake hook on in ${SETTINGS_PATH}. Commit it so the team gets it; it runs only in this project.` });
+    if (deps.project) console.log(modelLine(deps.project));
+    return code;
+  }
+  if (action === 'trust') return trustCmd(deps.project);
   if (action === 'remove') return change(root, withoutHook, opts, { already: `No kette intake hook in ${SETTINGS_PATH}.`, now: `Intake hook removed from ${SETTINGS_PATH}, other hooks stay.` });
-  if (!action || action === 'status') return statusCmd(root);
-  throw new ExitError('Usage: kette ticket hook install | status | remove');
+  if (!action || action === 'status') return statusCmd(root, deps.project);
+  throw new ExitError('Usage: kette ticket hook install | status | remove | trust');
 }
