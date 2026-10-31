@@ -96,23 +96,36 @@ test('KETTE-31: a new killed after its first write is named by list and report, 
   assert.equal(fs.existsSync(lock), false, 'no lock left behind');
 });
 
-test('KETTE-29: two parallel ticket new from two homes on one board end with two distinct ids, without a manual step', needsBoard, async () => {
-  const token = 'tok-two-homes-0123456789';
-  const boxes = [sandbox(), sandbox()];
-  const apps = [];
-  for (const box of boxes) {
-    await kit.licensed(box);
-    apps.push(await kit.connected(box, 'acme', 'p-shared', token));
-  }
-  const runs = await Promise.all(boxes.map((box, i) => run(box, apps[i], ['ticket', 'new', `From home ${i + 1}`, '--by', 'lead@acme.test', '--source', `chat:h${i + 1}`, '--stations', 'app', '--yes'])));
-  assert.deepEqual(runs.map((r) => r.code), [0, 0], runs.map((r) => r.out).join('\n'));
-  const board = await decisions(boxes[0], apps[0]);
-  assert.deepEqual(board.map((d) => d.decision.id).sort(), ['KD-0001', 'KD-0002']);
-  assert.deepEqual(board.map((d) => d.items.length), [1, 1], 'each decision has its own station item');
-  const said = runs.map((r) => r.out).join('\n');
-  assert.match(said, /Written to project p-shared as KD-0001/);
-  assert.match(said, /Written to project p-shared as KD-0002/);
-});
+// QA T14-02: several homes (machines) record decisions on one empty board at the same moment, round after round
+for (const [homes, rounds] of [[2, 1], [4, 4], [7, 1]]) {
+  test(`KETTE-29 (T14-02): ${homes} homes x ${rounds} rounds of parallel ticket new on one empty board end with distinct ids, without a manual step`, needsBoard, async () => {
+    const token = `tok-homes-${homes}x${rounds}-0123456789`;
+    const project = `p-homes-${homes}x${rounds}`;
+    const boxes = Array.from({ length: homes }, () => sandbox());
+    const apps = [];
+    for (const box of boxes) {
+      await kit.licensed(box);
+      apps.push(await kit.connected(box, 'acme', project, token));
+    }
+    const statements = [];
+    for (let round = 1; round <= rounds; round++) {
+      const runs = await Promise.all(boxes.map((box, i) => {
+        const words = `Round ${round} home ${i + 1}`;
+        statements.push(words);
+        return run(box, apps[i], ['ticket', 'new', words, '--by', 'lead@acme.test', '--source', `chat:r${round}h${i + 1}`, '--stations', 'app', '--yes']);
+      }));
+      assert.deepEqual(runs.map((r) => r.code), runs.map(() => 0), runs.map((r) => r.out).join('\n'));
+      // KT-N7: a run only reports a twin when it moved itself
+      for (const r of runs) for (const l of r.out.split('\n').filter((x) => /WARN/.test(x))) assert.match(l, /this decision is KD-\d{4} now \(revision written\)/);
+    }
+    const board = await decisions(boxes[0], apps[0]);
+    const ids = board.map((d) => d.decision.id);
+    assert.equal(new Set(ids).size, ids.length, `ids on the board: ${ids.join(', ')}`);
+    assert.deepEqual(board.map((d) => d.decision.statement).sort(), statements.sort(), 'every statement on the board once');
+    assert.ok(board.every((d) => d.items.length === 1 && d.items[0].key === `${d.decision.id}/app/acme-app`), 'each decision has its own station');
+    assert.doesNotMatch(ok(await kit.step(boxes[0], ['ticket', 'list'], { cwd: apps[0] })).out, /WARN/);
+  });
+}
 
 test('KETTE-32 (KT-N2): the intake model of the instance is asked only after this machine confirmed its host, again after a change', { ...needsBoard, skip: needsBoard.skip || posixOnly }, async () => {
   const { serve } = await import('./helpers.mjs');
@@ -133,6 +146,11 @@ test('KETTE-32 (KT-N2): the intake model of the instance is asked only after thi
     assert.equal(asked.length, 0, 'no prompt reached the model before the confirmation');
     assert.match(ok(await kit.step(box, ['ticket', 'hook', 'trust'], { cwd: app }), 1).out, /needs a person at a terminal/);
     box.env = { ...box.env, ...kit.env() };
+    // KT-N2a: an agent in a terminal is no person, the confirmation is refused and nothing is stored
+    const agent = await interactive({ ...box, env: { ...box.env, CLAUDECODE: '1' } }, ['ticket', 'hook', 'trust'], [['Allow prompts of this project to go to', 'y']], { cwd: app, scenario: 'ticket-model-trust-agent' });
+    assert.notEqual(agent.code, 0, agent.out);
+    assert.match(agent.out, /needs a person at a terminal: run kette ticket hook trust yourself, not through an agent or CI/);
+    assert.match(ok(await kit.step(box, ['ticket', 'hook', 'status'], { cwd: app })).out, /is not confirmed on this machine/);
     const t = await interactive(box, ['ticket', 'hook', 'trust'], [['Allow prompts of this project to go to', 'y']], { cwd: app, scenario: 'ticket-model-trust' });
     assert.equal(t.code, 0, t.out);
     assert.match(ok(await kit.step(box, ['ticket', 'hook', 'status'], { cwd: app })).out, /confirmed on this machine/);

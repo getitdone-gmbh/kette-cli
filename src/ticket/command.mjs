@@ -84,10 +84,10 @@ async function write({ lib, p }, opts, op, args, summary, { lock = null } = {}) 
   if (opts.dryRun) { console.log(dim('--dry-run: nothing written.')); return planned; }
   if (!(await approved(opts, 'Write this to the board?'))) throw new ExitError('Not confirmed, nothing written.', 1);
   const commit = () => refused(lib, () => p.write(op, args, new Date().toISOString(), writes));
-  const { result, unsent, renumbered, twins } = lock ? await withLockAsync(lock, commit) : await commit();
+  const { result, unsent, renumbered } = lock ? await withLockAsync(lock, commit) : await commit();
   if (unsent) throw new ExitError(`${unsent} planned requests were not sent. Check the board with ${cmd('kette ticket list')} before running it again.`, 1);
+  // Only a real move is reported (KT-N7)
   for (const r of renumbered ?? []) say('warn', `${r.from} was recorded at the same moment by a parallel run on another machine; this decision is ${r.to} now (revision written)`);
-  if (twins?.length) say('warn', `${printable(result.decision.id)} was also recorded at the same moment by a parallel run (${twins.map(printable).join(', ')}); the later one moves itself to the next free id`);
   if (op === 'new' && result.decision.id !== planned.decision.id && !renumbered?.length) say('info', `${planned.decision.id} was taken meanwhile, written as ${result.decision.id}`);
   say('ok', `Written to project ${printable(p.projectId)}${op === 'new' ? ` as ${result.decision.id}` : ''}`);
   return result;
@@ -180,7 +180,7 @@ async function route(project, opts, args) {
 // kette ticket repair <KD>: completes what an interrupted run left out (first revision, planned station items) (KETTE-31)
 async function repair(project, opts, args) {
   const id = decisionId(args, 'kette ticket repair <KD>');
-  await write(await open(project, opts), opts, 'repair', { id, actor: actorOf(opts) }, (r) => (r.added.length || r.revision ? `Repair ${id}: ${[r.revision && 'first revision', ...r.added].filter(Boolean).map(printable).join(', ')}` : `${id} is complete, nothing to repair.`));
+  await write(await open(project, opts), opts, 'repair', { id, actor: actorOf(opts) }, (r) => (r.added.length || r.revision || r.moved?.length ? `Repair ${id}: ${[...(r.moved ?? []).map((m) => `twin moved to ${m.to}`), r.revision && 'first revision', ...r.added].filter(Boolean).map(printable).join(', ')}` : `${id} is complete, nothing to repair.`));
   return 0;
 }
 
