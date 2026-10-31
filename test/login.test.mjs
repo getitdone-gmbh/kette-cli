@@ -403,16 +403,15 @@ test('Enterprise update that is up to date enables the plugins of the project in
   });
 });
 
-test('CR-MIG-1: a registration of kette-enterprise in another folder under ~/.kette is removed and added again, the legacy kette stays', { skip: process.platform === 'win32' }, async () => {
+test('CR-MIG-1, QA-28: a registration of kette-enterprise in another folder under ~/.kette is repointed with add, never removed; the legacy kette stays', { skip: process.platform === 'win32' }, async () => {
   const old = path.join(kh, 'bundles', 'marketplace');
   const legacy = path.join(kh, 'bundles', 'active');
   const claude = fakeClaude([{ name: 'kette-enterprise', source: 'directory', path: old }, { name: 'kette', source: 'directory', path: legacy }]);
   await inProject('enterprise', async () => {
     try { await run('login', KEYS.ok, '--no-npm'); } finally { claude.restore(); }
     const calls = claude.calls();
-    const rm = calls.indexOf('plugin marketplace remove kette-enterprise');
-    assert.ok(rm >= 0, calls.join('\n'));
-    assert.ok(calls.indexOf(`plugin marketplace add --scope local ${market()}`) > rm);
+    assert.ok(!calls.includes('plugin marketplace remove kette-enterprise'), 'remove would uninstall its plugins everywhere');
+    assert.ok(calls.includes(`plugin marketplace add --scope local ${market()}`), calls.join('\n'));
     assert.ok(!calls.includes('plugin marketplace remove kette'), 'the legacy marketplace of older versions stays');
     assert.ok(calls.includes('plugin install design-system-agents@kette-enterprise --scope project'));
   });

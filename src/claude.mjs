@@ -112,16 +112,12 @@ export function enablePlugins(source, plugins, root, market) {
   const all = marketplaces();
   const migrated = migrateLegacy(all);
   if (!migrated.ok) return migrated;
-  let known = all.find((m) => m.name === market);
-  if (known?.path && !samePath(known.path, source)) {
-    if (!insideKette(known.path)) return { ok: false, reason: `Marketplace ${market} points to ${known.path}. Switch with: claude plugin marketplace remove ${market}, then run kette add again` };
-    // From a neutral folder: inside a project Claude Code also strips the marketplace from its committed settings.json (QA-23)
-    const rm = runClaude(['plugin', 'marketplace', 'remove', market], { cwd: neutralCwd() });
-    if (rm.status !== 0 && !/not found/i.test(output(rm))) return { ok: false, reason: output(rm) };
-    known = null;
-  }
+  const known = all.find((m) => m.name === market);
+  if (known?.path && !samePath(known.path, source) && !insideKette(known.path)) return { ok: false, reason: `Marketplace ${market} points to ${known.path}. Switch with: claude plugin marketplace remove ${market}, then run kette add again` };
   packDuplicates(all, plugins);
-  if (!known) {
+  // add also repoints a registration in another folder under ~/.kette and keeps what is installed from it; remove would uninstall
+  // its plugins in every project and empty their entries in the user settings (checked with the real Claude Code, QA-28)
+  if (!known || !samePath(known.path, source)) {
     const add = runClaude(['plugin', 'marketplace', 'add', '--scope', 'local', source], { cwd: root });
     if (add.status !== 0 && !/already/i.test(output(add))) return { ok: false, reason: output(add) };
   }
@@ -141,6 +137,12 @@ export function enablePlugins(source, plugins, root, market) {
 export function uninstallPlugin(id) {
   if (!hasClaude()) return { ok: false, reason: 'claude not found' };
   return uninstall(id);
+}
+
+// Points a registered marketplace to another folder from a neutral folder (user scope); what was installed from it stays installed
+export function repointMarketplace(source) {
+  const r = runClaude(['plugin', 'marketplace', 'add', source], { cwd: neutralCwd() });
+  return r.status === 0 || /already/i.test(output(r)) ? { ok: true } : { ok: false, reason: output(r) };
 }
 
 // Marketplaces Claude Code has registered on this folder (e.g. the shared folder of an unreleased 0.10 build, QA-24)

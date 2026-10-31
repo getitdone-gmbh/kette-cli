@@ -265,8 +265,8 @@ test('CR-MIG-1: a machine set up before 0.10 (legacy marketplace kette, user-sco
   const r = seeded(await kette(box, ['init', app, '--instance', 'oss', ...SETUP], { ...rec('migration'), projects: [app], allow: CLAUDE_REGISTRY }));
   assert.doesNotMatch(r.out, /not enabled/);
   const calls = box.claude.calls();
-  const rm = calls.indexOf('plugin marketplace remove kette-community');
-  assert.ok(rm >= 0 && calls.indexOf(`plugin marketplace add --scope local ${path.join(box.home, '.kette', 'bundles', 'marketplace-community')}`) > rm, calls.join('\n'));
+  assert.ok(!calls.includes('plugin marketplace remove kette-community'), 'repointed, not removed (QA-28)');
+  assert.ok(calls.includes(`plugin marketplace add --scope local ${path.join(box.home, '.kette', 'bundles', 'marketplace-community')}`), calls.join('\n'));
   assert.ok(!calls.includes('plugin marketplace remove kette'), 'the legacy marketplace stays for projects without settings');
   assert.equal(fs.readFileSync(userSettings, 'utf8'), before, 'kette never writes the user settings');
   assert.equal(settings(app)['design-system-agents@kette'], false, 'the legacy user-scope plugin is switched off in the project');
@@ -393,15 +393,26 @@ test('QA-22: a Community repo that joins an Enterprise instance gets the scope l
   assert.doesNotMatch((await kette(box, ['doctor'], { ...rec('r2-up'), cwd: com })).out, /Enterprise templates not in this project/);
 });
 
-test('QA-24: the shared marketplace folder of the first 0.10 build and its registration are cleaned by update, doctor names them', async () => {
+test('QA-24, QA-28: update repoints the legacy marketplace kette from the folder of the first 0.10 build to bundles/active, user-scope plugins of 0.9 stay', async () => {
   const box = sandbox({ registry: (home) => [{ name: 'kette', source: 'directory', path: path.join(home, '.kette', 'bundles', 'marketplace') }] });
+  ok(await kette(box, ['update'], rec('r2-r1')));
   const old = path.join(box.home, '.kette', 'bundles', 'marketplace');
   write(old, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'kette', plugins: [] }));
+  // As 0.9 left a machine: Kette plugins in the user scope, from the marketplace kette
+  const userSettings = path.join(box.home, '.claude', 'settings.json');
+  write(path.dirname(userSettings), 'settings.json', JSON.stringify({ enabledPlugins: { 'ui-laws@kette': true, 'kette-engineering-core@kette': true } }, null, 2));
+  const before = fs.readFileSync(userSettings, 'utf8');
+  const seeded = (r) => { assert.equal(r.code, 0, r.out); assert.deepEqual(r.outside, [], r.outside.join('\n')); return r; };
   const doc = await kette(box, ['doctor'], rec('r2-r1'));
   assert.match(doc.out, /WARN .*bundles.marketplace is left from an earlier 0\.10 build and Claude Code still has kette registered on it\. Clean up with: kette update/);
-  ok(await kette(box, ['update'], { ...rec('r2-r1'), allow: CLAUDE_REGISTRY }));
+  // Repointing a user-scope marketplace changes its declared folder in the user settings, the enabled plugins stay (QA-28)
+  seeded(await kette(box, ['update'], { ...rec('r2-r1'), allow: [/^\.claude\/settings\.json$/, ...CLAUDE_REGISTRY] }));
   assert.equal(exists(old), false);
-  assert.ok(box.claude.calls().includes('plugin marketplace remove kette'));
+  const calls = box.claude.calls();
+  assert.ok(!calls.includes('plugin marketplace remove kette'), 'removing kette would empty the user-scope plugins of 0.9');
+  assert.ok(calls.includes(`plugin marketplace add ${path.join(box.home, '.kette', 'bundles', 'active')}`), calls.join('\n'));
+  assert.deepEqual(JSON.parse(fs.readFileSync(userSettings, 'utf8')).enabledPlugins, JSON.parse(before).enabledPlugins, 'the user-scope plugins of 0.9 stay');
+  assert.equal(JSON.parse(fs.readFileSync(userSettings, 'utf8')).extraKnownMarketplaces.kette.source.path, path.join(box.home, '.kette', 'bundles', 'active'));
 });
 
 test('QA-14, QA-21: a wrong edition answer is asked again; answering n at the plan leaves no new instance behind', { skip: (posixOnly || spawnSync('python3', ['--version']).status !== 0) && 'needs python3 for a pseudo terminal' }, async () => {
@@ -414,4 +425,73 @@ test('QA-14, QA-21: a wrong edition answer is asked again; answering n at the pl
   assert.equal(exists(path.join(box.home, '.kette', 'instances', 'fresh')), false, 'no instance from a cancelled onboarding');
   ok(await interactive(box, ['init', 'two', ...flags], [['Choose (numbers', '2'], ['Name of the new instance', 'fresh'], ['Choose (numbers', '1'], ['Create these files?', 'y']]));
   assert.deepEqual(readInstanceFile(box, 'fresh').repos.map((r) => r.name), ['two']);
+});
+
+// Fix round 3
+
+test('CR-NEW-8: update and login keep the global scope line of a block from before 0.10 without a terminal; move-scope moves it; doctor names it in a Community repo', async () => {
+  const box = sandbox();
+  const { com } = await twoInstances(box, 'r3-scope', { npm: true });
+  const rc = path.join(box.home, '.npmrc');
+  const registry = stateOf(box).npm.registry;
+  const host = registry.replace(/^https?:/, '');
+  const tok = fs.readFileSync(rc, 'utf8').match(/kt_[A-Za-z0-9_-]{43}/)[0];
+  const old = `# >>> kette: managed by kette login, removed by kette logout\n@getitdone-gmbh:registry=${registry}\n${host}:_authToken=${tok}\n# <<< kette\n`;
+  fs.writeFileSync(rc, old);
+  const up = ok(await kette(box, ['update'], { ...rec('r3-scope'), allow: NPMRC }));
+  assert.match(up.out, /It stays until you move it: kette npm move-scope/);
+  assert.match(fs.readFileSync(rc, 'utf8'), /^@getitdone-gmbh:registry=/m, 'never removed without a yes');
+  const login = ok(await kette(box, ['login', KEY], { ...rec('r3-scope'), allow: NPMRC }));
+  assert.match(login.out, /kette npm move-scope/);
+  assert.match(fs.readFileSync(rc, 'utf8'), /^@getitdone-gmbh:registry=/m, 'login keeps it too');
+  const doctor = ok(await kette(box, ['doctor'], { ...rec('r3-scope'), cwd: com }), 1);
+  assert.match(doctor.out, /FAIL npm in this Community project resolves @getitdone-gmbh from the Enterprise registry .*Move it with: kette npm move-scope/);
+  ok(await kette(box, ['npm', 'move-scope'], { ...rec('r3-scope'), allow: NPMRC }));
+  const moved = fs.readFileSync(rc, 'utf8');
+  assert.doesNotMatch(moved, /@getitdone-gmbh:registry/);
+  assert.match(moved, /:_authToken=kt_/, 'the token stays');
+  ok(await kette(box, ['doctor'], { ...rec('r3-scope'), cwd: com }));
+});
+
+test('CR-NEW-8: in a terminal update asks before the global scope line moves, and only after yes it moves', { skip: (posixOnly || spawnSync('python3', ['--version']).status !== 0) && 'needs python3 for a pseudo terminal' }, async () => {
+  const box = sandbox();
+  ok(await kette(box, ['login', KEY], { ...rec('r3-scope'), allow: NPMRC }));
+  const rc = path.join(box.home, '.npmrc');
+  const registry = stateOf(box).npm.registry;
+  const tok = fs.readFileSync(rc, 'utf8').match(/kt_[A-Za-z0-9_-]{43}/)[0];
+  fs.writeFileSync(rc, `# >>> kette: managed by kette login, removed by kette logout\n@getitdone-gmbh:registry=${registry}\n${registry.replace(/^https?:/, '')}:_authToken=${tok}\n# <<< kette\n`);
+  const no = await interactive(box, ['update'], [['Move the line out of the user npmrc now?', 'n']]);
+  assert.equal(no.code, 0, no.out);
+  assert.match(no.out, /Other apps that install @getitdone-gmbh packages then need the same line/);
+  assert.match(fs.readFileSync(rc, 'utf8'), /^@getitdone-gmbh:registry=/m);
+  const yes = await interactive(box, ['update'], [['Move the line out of the user npmrc now?', 'y']]);
+  assert.equal(yes.code, 0, yes.out);
+  assert.doesNotMatch(fs.readFileSync(rc, 'utf8'), /@getitdone-gmbh:registry/);
+});
+
+test('QA-29: SIGKILLs between the writes never leave a repo without origin in two instances (5 runs, 40 kills each)', { timeout: 600000 }, async () => {
+  const box = sandbox();
+  ok(await kette(box, ['update'], rec('r3-kill')));
+  ok(await kette(box, ['instance', 'create', 'acme', '--edition', 'community'], rec('r3-kill')));
+  ok(await kette(box, ['instance', 'create', 'beta', '--edition', 'community'], rec('r3-kill')));
+  const repos = [];
+  for (let i = 0; i < 4; i++) { const d = path.join(box.work, `k${i}`); repos.push(d); ok(await kette(box, ['init', d, ...SETUP, '--no-plugins'], { ...rec('r3-kill'), projects: [d] })); }
+  const killed = (cwd, argv, ms) => new Promise((resolve) => {
+    const c = spawn(process.execPath, [BIN, ...argv], { cwd, env: box.env, stdio: 'ignore' });
+    // Only the PID of this child is killed
+    const t = setTimeout(() => c.kill('SIGKILL'), ms);
+    c.on('close', () => { clearTimeout(t); resolve(); });
+  });
+  for (let run = 0; run < 5; run++) {
+    for (let k = 0; k < 40; k++) {
+      const repo = repos[k % repos.length];
+      await killed(repo, ['instance', 'use', k % 2 ? 'beta' : 'acme', '--no-plugins'], 40 + Math.floor(Math.random() * 260));
+    }
+    const target = run % 2 ? 'beta' : 'acme';
+    const rs = await parallel(box, repos.map((cwd) => ({ cwd, argv: ['instance', 'use', target, '--no-plugins'] })));
+    assert.deepEqual(rs.map((r) => r.code), [0, 0, 0, 0], rs.map((r) => r.out).join('\n'));
+    const all = [...readInstanceFile(box, 'acme').repos, ...readInstanceFile(box, 'beta').repos];
+    assert.equal(all.length, 4, `run ${run}: each repo in exactly one instance: ${JSON.stringify(all)}`);
+    assert.deepEqual(readInstanceFile(box, target).repos.map((r) => r.name).sort(), ['k0', 'k1', 'k2', 'k3']);
+  }
 });

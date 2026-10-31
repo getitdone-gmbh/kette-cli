@@ -45,6 +45,7 @@ The project profile names the edition in the field `tier`: `community` or `enter
 | `kette login [key]` | Unlock Enterprise: check the key, download and verify the bundle, add npm access for the design system packages to `~/.npmrc`; in a project also enable its plugins. Without a key it reads `KETTE_LICENSE_KEY`, otherwise it asks with hidden input |
 | `kette logout` | Remove key, Enterprise bundle and npm access from this machine and revoke the npm token (support frees the device seat); Enterprise projects keep their settings, their Enterprise plugins no longer load here |
 | `kette token ci create <name>` / `list` / `revoke <id>` | CI tokens for `npm ci` in pipelines: Solo 2, Team 5, take no device seat, shown only when created |
+| `kette npm move-scope` | Take the `@getitdone-gmbh` scope line out of the kette block in `~/.npmrc` (set up before 0.10); Enterprise projects carry it in their own `.npmrc` |
 | `kette figma` | Download the current Figma release of Die Kette, verify checksums, show the import order; `--out folder`. The Figma files follow as an update by 2026-11-30 |
 | `kette cloud setup` / `status` | Live deploy to itdone.cloud: account link and the itdone MCP server in Claude Code, see below |
 | `kette wallet …` | Secret wallet (Enterprise): names in `.kette/wallet.json`, values in Infisical or your own provider, see Secret wallet |
@@ -86,7 +87,7 @@ Stacks: `nextjs-ts-tailwind`, `nestjs-prisma`, `nestjs-mongoose`, `python-fastap
 If the CLI does not know the template format of the installed rulebook (newer format, unknown placeholders or directives), it writes rules and profile, leaves out templates and checks, and names the command to reinstall the CLI. An older rulebook without templates by profile gives the hint `kette update`.
 
 ## npm packages of the design system (Enterprise)
-Since 0.10 only the token is in the user npmrc; the scope line `@getitdone-gmbh:registry=` is in the project `.npmrc` of Enterprise projects (`kette add` writes it), so npm in a Community repo never uses the Enterprise registry. `kette update` moves the line out of a block from before 0.10.
+Since 0.10 only the token is in the user npmrc; the scope line `@getitdone-gmbh:registry=` is in the project `.npmrc` of Enterprise projects (`kette add` writes it), so npm in a Community repo never uses the Enterprise registry. A block from before 0.10 keeps its line until you agree: `kette update` asks in a terminal, otherwise it names `kette npm move-scope`. Other apps that install `@getitdone-gmbh` packages then need the line in their own `.npmrc`.
 
 The registry `https://npm.kette.itdone.de/` is live since 2026-10-22 and works with CLI 0.6.1 or newer. It serves `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/kette-design-enterprise`, `@getitdone-gmbh/zero` and `@getitdone-gmbh/zero-pages`, plus the old names `@getitdone-gmbh/figma-design-tokens` and `@getitdone-gmbh/component-library-react` for the versions published before the rename (contract: [docs/install-api.md](docs/install-api.md)). The free MIT library `@getitdone-gmbh/kette-design-community` is not part of it.
 

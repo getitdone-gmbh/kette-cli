@@ -121,8 +121,11 @@ else if (a === 'mcp' && b === 'add') {
 else if (a === 'plugin' && b === 'marketplace' && c === 'add') {
   const source = argv[argv.length - 1];
   const name = JSON.parse(fs.readFileSync(path.join(source, '.claude-plugin', 'marketplace.json'), 'utf8')).name;
-  // Claude Code refuses a second registration of a known name, whatever folder it points to
-  if (s.list.some((m) => m.name === name)) { console.error("Marketplace '" + name + "' is already installed"); process.exit(1); }
+  // As Claude Code does (checked by hand): a known name in the same folder is "already on disk", in another folder it is repointed
+  // and keeps what was installed from it
+  const known = s.list.find((m) => m.name === name);
+  if (known && path.resolve(known.path) === path.resolve(source)) { console.log("Marketplace '" + name + "' already on disk"); }
+  else if (known) console.log("Marketplace '" + name + "' was already added from dir:" + known.path + ' and now points at dir:' + source + '.');
   s.list = [...s.list.filter((m) => m.name !== name), { name, source: 'directory', path: source }]; save();
   edit(scope, (cur) => { cur.extraKnownMarketplaces = { ...cur.extraKnownMarketplaces, [name]: { source: { source: 'directory', path: source } } }; });
   // The registry of marketplace names is global in Claude Code, also for a marketplace declared in a project
@@ -131,11 +134,13 @@ else if (a === 'plugin' && b === 'marketplace' && c === 'add') {
 else if (a === 'plugin' && b === 'marketplace' && c === 'remove') {
   const name = argv[3];
   if (!s.list.some((m) => m.name === name)) { console.error('Marketplace ' + name + ' not found'); process.exit(1); }
-  s.list = s.list.filter((m) => m.name !== name); save();
-  // As Claude Code does (checked with mrm.sh): run inside a project, it also strips the marketplace from that project's settings
-  for (const sc of ['project', 'local']) {
+  s.list = s.list.filter((m) => m.name !== name);
+  s.plugins = s.plugins.filter((id) => !id.endsWith('@' + name)); save();
+  // As Claude Code does (checked with mrm.sh and by hand): its plugins are uninstalled and their entries leave the user settings,
+  // and run inside a project also that project's settings
+  for (const sc of ['user', 'project', 'local']) {
     const f = settingsFile(sc);
-    if (!fs.existsSync(f)) continue;
+    if (!f || !fs.existsSync(f)) continue;
     edit(sc, (cur) => {
       if (cur.enabledPlugins) for (const id of Object.keys(cur.enabledPlugins)) if (id.endsWith('@' + name)) delete cur.enabledPlugins[id];
       if (cur.extraKnownMarketplaces) delete cur.extraKnownMarketplaces[name];

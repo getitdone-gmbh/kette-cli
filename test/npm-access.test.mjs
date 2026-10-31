@@ -334,14 +334,18 @@ test('Figma noch nicht eingerichtet: kette figma nennt das Update und lädt nich
   await assert.rejects(run('token', 'ci', 'list'), /npm access is not available right now\. Try again later with kette update\./);
 });
 
-test('D3: kette update moves the scope line of a block from before 0.10 out of the user npmrc, the token stays', async () => {
+test('D3, CR-NEW-8: without a terminal kette update keeps the scope line of a block from before 0.10 and names move-scope, which moves it', async () => {
   await run('login', KEY, '--no-plugins');
   const before = rc();
   const host = registry.replace('http:', '');
   const tok = before.match(/kt_[A-Za-z0-9_-]{43}/)[0];
   write(path.dirname(userrc), path.basename(userrc), `save-exact=true\n\n${BLOCK_START}\n@getitdone-gmbh:registry=${registry}\n${host}:_authToken=${tok}\n# <<< kette\n`);
+  const old = rc();
   const { out } = await run('update', '--no-plugins');
-  assert.match(out, /scope line left .*Enterprise projects carry it in their own \.npmrc/);
+  assert.match(out, /It stays until you move it: kette npm move-scope/);
+  assert.equal(rc(), old, 'never removed without a yes');
+  const moved = await run('npm', 'move-scope');
+  assert.match(moved.out, /scope line left .*Enterprise projects carry it in their own \.npmrc/);
   assert.equal(rc(), `save-exact=true\n\n${BLOCK_START}\n${host}:_authToken=${tok}\n# <<< kette\n`);
 });
 

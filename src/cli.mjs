@@ -7,17 +7,18 @@ import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { renderTemplates, TemplateError } from './templates.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
-import { hasClaude, installedPlugins, pluginId, pluginInstalled, registeredAt, removeMarketplace } from './claude.mjs';
+import { MARKETPLACE, hasClaude, installedPlugins, pluginId, pluginInstalled, registeredAt, removeMarketplace, repointMarketplace } from './claude.mjs';
 import { LOCAL_SETTINGS_PATH, SETTINGS_PATH, enableHints, enableProjectPlugins, settingsItems, settingsStatus, userScopePlugins, writeProjectSettings } from './project-plugins.mjs';
 import { marketName } from './marketplace.mjs';
 import { RECORD_PATH, enterpriseLeftovers, recordTemplates, removeLeftovers } from './leftovers.mjs';
-import { bundlesDir, credentialsFile, delivery, home, mirror } from './paths.mjs';
+import { activeBundleLink, bundlesDir, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginContents, pluginDetails, pluginsFor, pluginSummary } from './editions.mjs';
 import { NOTE_PATH, COMMUNITY_REVIEWERS, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
 import { cliHint, cliUpgradeHint, credentialsStatus, formatDate, loginState, login, logout, tierOf, updateEnterprise } from './enterprise.mjs';
 import { SCOPE } from './npmrc.mjs';
-import { ciToken, figma, npmChecks, npmGranted, scopeLine } from './npm-access.mjs';
+import { MOVE_SCOPE, ciToken, figma, globalScope, npmChecks, npmCommand, npmGranted, scopeLine } from './npm-access.mjs';
+import { projectScope, readFile } from './npmrc.mjs';
 import { accent, bold, brandLine, cmd, configure, dim, error, file, num, status, symbols } from './out.mjs';
 import { othersCanRead, privateHint } from './files.mjs';
 import { ExitError } from './errors.mjs';
@@ -74,6 +75,7 @@ Commands:
   kette token ci create <name> | list | revoke <id>
                         CI tokens for npm ci in pipelines (Solo 2, Team 5, no device seat)
   kette figma           Download the current Figma release of Die Kette (--out folder)
+  kette npm move-scope  Take the @getitdone-gmbh line out of ~/.npmrc (set up before 0.10), Enterprise projects carry it themselves
   kette cloud setup     Live deploy to itdone.cloud: account link and the itdone MCP server in Claude Code
                         (--have-account skips the link, --dcr skips the fixed sign-in client, --dry-run changes nothing)
   kette cloud status    Show whether the itdone MCP server is registered and how it signs in
@@ -647,6 +649,8 @@ function instanceChecks(profile, { line, warn }) {
 function leftoverChecks(root, instanceName, { line }) {
   const { files, npmrc } = enterpriseLeftovers(root, scopeLine().trim());
   const fix = cmd(`kette instance use ${instanceName}`);
+  // A user npmrc from before 0.10 still points the scope to Die Kette for every folder; only a project line can override it (CR-NEW-8)
+  if (globalScope() && !projectScope(readFile(path.join(root, '.npmrc')))) line(false, '', `npm in this Community project resolves ${SCOPE} from the Enterprise registry (line in the user npmrc from before 0.10). Move it with: ${cmd(MOVE_SCOPE)}`);
   if (npmrc) line(false, '', `.npmrc of this Community project points ${SCOPE} to the Enterprise registry. Remove the line with: ${fix}`);
   const changed = files.filter((f) => f.changed).map((f) => f.path);
   const unchanged = files.filter((f) => !f.changed).map((f) => f.path);
@@ -744,13 +748,21 @@ async function refreshProjectPlugins(root, opts) {
 // The shared marketplace folder of the unreleased first 0.10 build (~/.kette/bundles/marketplace), with what Claude Code registered on it
 const roundOneDir = () => path.join(bundlesDir(), 'marketplace');
 
+// The legacy marketplace kette goes back to ~/.kette/bundles/active (repointed, never removed: removing it would empty the user-scope
+// plugins of 0.9 in the user settings, QA-28); without that folder everything stays as it is and doctor keeps naming it
 function cleanRoundOne(opts) {
   if (opts.dryRun || !fs.existsSync(roundOneDir())) return;
-  for (const name of registeredAt(roundOneDir())) {
-    const r = removeMarketplace(name);
-    if (r.ok) console.log(`Marketplace ${name} on ${tilde(roundOneDir())} (an earlier 0.10 build) removed from Claude Code.`);
+  const names = registeredAt(roundOneDir());
+  if (names.length && !fs.existsSync(activeBundleLink())) {
+    console.log(`${status('warn', 'WARN')} ${names.join(', ')} still point to ${tilde(roundOneDir())} (an earlier 0.10 build). Load the rulebook first, then run ${cmd('kette update')} again.`);
+    return;
   }
-  if (fs.existsSync(roundOneDir())) fs.rmSync(roundOneDir(), { recursive: true, force: true });
+  for (const name of names) {
+    const r = name === MARKETPLACE ? repointMarketplace(activeBundleLink()) : removeMarketplace(name);
+    if (r.ok) console.log(`Marketplace ${name} no longer points to ${tilde(roundOneDir())} (an earlier 0.10 build)${name === MARKETPLACE ? `, it points to ${tilde(activeBundleLink())} again` : ''}.`);
+    else return;
+  }
+  fs.rmSync(roundOneDir(), { recursive: true, force: true });
 }
 
 async function update(opts) {
@@ -850,6 +862,7 @@ export async function main(argv) {
       return await ciToken(action, value);
     }
     if (command === 'figma') return await figma(opts);
+    if (command === 'npm') return await npmCommand(arg);
     // The licence email only prefills the signup of an active Enterprise licence
     if (command === 'cloud') return await cloud(arg, opts, { email: tierOf() === ENTERPRISE ? loginState()?.email : null });
     // The wallet is Enterprise: in a Community instance, or one that cannot be used, it stays locked even on a machine with a licence

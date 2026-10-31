@@ -8,6 +8,7 @@ import { isSecureUrl, npmUserConfig, registryDefault } from './paths.mjs';
 import { cmd, file as fileName, isoDate, status } from './out.mjs';
 import { SCOPE, TOKEN_PATTERN, authKey, blockHasScope, blockToken, foreignScopeLines, hasBlock, projectScope, readFile, withBlock, withoutBlock } from './npmrc.mjs';
 import { othersCanRead, privateHint, writePrivate } from './files.mjs';
+import { confirm } from './prompt.mjs';
 
 const GITHUB_PACKAGES = 'npm.pkg.github.com';
 const WARN = status('warn', 'WARN');
@@ -66,7 +67,8 @@ async function writeNpmAccess(key, opts, file) {
     console.log(`${WARN} npm access not set up: incomplete response from the delivery service. Set it up later with: ${cmd('kette update')}`);
     return false;
   }
-  writePrivate(file, withBlock(current, grant.registry, grant.token, { replace: opts.npmReplace }));
+  const keepScope = blockHasScope(current) && !(await moveScopeAsked(file, grant.registry, opts));
+  writePrivate(file, withBlock(current, grant.registry, grant.token, { replace: opts.npmReplace, keepScope }));
   writeState({ npm: { registry: grant.registry, file } });
   console.log(`npm access set up: ${SCOPE} via ${new URL(grant.registry).host} (token in ${fileName(file)}).`);
   return true;
@@ -106,17 +108,48 @@ export async function ensureNpm(key, opts) {
   const current = readFile(file);
   const token = blockToken(current);
   if (token && (await whoami(registryUrl(), token)) !== 401) {
-    // Migration of a block from before 0.10: same token, without the global scope line
-    if (blockHasScope(current)) {
-      writePrivate(file, withBlock(current, registryUrl(), token));
-      console.log(`npm access: the ${SCOPE} scope line left ${fileName(file)}, Enterprise projects carry it in their own .npmrc (${cmd('kette add')} in each).`);
-    }
+    // Migration of a block from before 0.10: only after a yes in a terminal (CR-NEW-8)
+    if (blockHasScope(current) && (await moveScopeAsked(file, registryUrl(), opts))) moveScope(file, current, token);
     return;
   }
   if (token) console.log('npm token no longer accepted, issuing a new one ...');
   else if (!readState().npm?.pending) console.log('npm access missing, setting it up ...');
   await setupNpm(key, opts);
 }
+
+export const MOVE_SCOPE = 'kette npm move-scope';
+
+// Asks before the global scope line of a block from before 0.10 leaves the user npmrc; without a terminal or with --yes it stays,
+// with a warning naming the command; other tools that install @getitdone-gmbh packages then need the line in their own .npmrc
+async function moveScopeAsked(file, registry, opts) {
+  const line = `${SCOPE}:registry=${registry}`;
+  if (opts.yes || !process.stdin.isTTY || !process.stdout.isTTY) {
+    console.log(`${WARN} ${fileName(file)} points ${SCOPE} to Die Kette for every folder (set up before 0.10), so Community projects resolve it there too. It stays until you move it: ${cmd(MOVE_SCOPE)}`);
+    return false;
+  }
+  console.log(`${fileName(file)} points ${SCOPE} to Die Kette for every folder (set up before 0.10):\n  ${line}\nSince 0.10 that line belongs into the .npmrc of each Enterprise project (kette add writes it there). Other apps that install ${SCOPE} packages then need the same line in their own .npmrc.`);
+  return confirm('Move the line out of the user npmrc now?');
+}
+
+function moveScope(file, current, token) {
+  writePrivate(file, withBlock(current, registryUrl(), token));
+  console.log(`npm access: the ${SCOPE} scope line left ${fileName(file)}, Enterprise projects carry it in their own .npmrc (${cmd('kette add')} in each).`);
+}
+
+// kette npm move-scope: the explicit way to take the scope line out of the kette block; only the marked block is touched
+export async function npmCommand(sub) {
+  if (sub !== 'move-scope') throw new Error(`Usage: ${MOVE_SCOPE}`);
+  const file = readState().npm?.file || npmUserConfig();
+  const current = readFile(file);
+  const token = blockToken(current);
+  if (!token) throw new Error(`No kette block in ${file}. Set up npm access with: kette login <key>`);
+  if (!blockHasScope(current)) { console.log(`${fileName(file)} has no ${SCOPE} scope line in the kette block, nothing to move.`); return 0; }
+  moveScope(file, current, token);
+  return 0;
+}
+
+// The user npmrc points the scope to Die Kette for every folder: true for a block from before 0.10 that kept its line
+export const globalScope = () => blockHasScope(readFile(readState().npm?.file || npmUserConfig()));
 
 // Lines for kette doctor: block, token valid (not with --ci), project .npmrc, tokens in tracked files
 export async function npmChecks(root, { line, warn }, opts) {
@@ -135,7 +168,7 @@ export async function npmChecks(root, { line, warn }, opts) {
   const project = projectScope(readFile(path.join(root, '.npmrc')));
   // Since 0.10 the scope line is per project, an Enterprise project without it cannot install the design system packages
   if (token && !project) line(false, '', `.npmrc of this Enterprise project has no ${SCOPE} scope line, npm cannot find the design system packages. Add it with: ${cmd('kette add')}`);
-  if (blockHasScope(readFile(file))) warn(`${fileName(file)} still points ${SCOPE} to Die Kette for every folder (set up before 0.10). Move the line into the projects with: ${cmd('kette update')}`);
+  if (blockHasScope(readFile(file))) warn(`${fileName(file)} still points ${SCOPE} to Die Kette for every folder (set up before 0.10). Move the line into the projects with: ${cmd(MOVE_SCOPE)}`);
   if (project?.includes(GITHUB_PACKAGES)) warn(`.npmrc in the project points ${SCOPE} to ${GITHUB_PACKAGES}. For Die Kette customers: ${scopeLine().trim()}`);
   const leaked = trackedTokenFiles(root);
   line(leaked.length === 0, leaked.length ? `npm token in files tracked by git: ${leaked.join(', ')}. Revoke the token and clean the file` : 'no npm token in files tracked by git');

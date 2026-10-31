@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -67,6 +68,10 @@ export function normalizeUrl(raw) {
 }
 
 const repoKey = (r) => (r.url ? normalizeUrl(r.url).key : null);
+// A repo without origin is identified in instance.json by a hash of its local identity: no machine path reaches the shared file,
+// and the entry is found again without state.json, so a kette killed between the two writes cannot put it into two instances (QA-29)
+const LOCAL_ID = /^[0-9a-f]{24}$/;
+export const localId = (key) => crypto.createHash('sha256').update(key).digest('hex').slice(0, 24);
 
 // Entries of a list field, each checked by check(entry, at) which returns its errors; key(entry) must be unique
 function listErrors(value, field, check, key) {
@@ -85,7 +90,8 @@ function listErrors(value, field, check, key) {
 
 const repoErrors = (r, at) => {
   if (!isObject(r)) return [`${at} must be an object`];
-  const errs = unknown(r, ['name', 'url'], `${at}.`);
+  const errs = unknown(r, ['name', 'url', 'local'], `${at}.`);
+  if ('local' in r && (typeof r.local !== 'string' || !LOCAL_ID.test(r.local))) errs.push(`${at}.local must be the identity hash kette wrote`);
   if (typeof r.name !== 'string' || !REPO_PATTERN.test(r.name)) errs.push(`${at}.name must be a folder name (letters, digits, . _ -, at most ${REPO_MAX})`);
   if ('url' in r && !isText(r.url)) errs.push(`${at}.url must be one line`);
   else if ('url' in r && /^[a-z][a-z0-9+.-]*:\/\/[^/\s]*@/i.test(r.url)) errs.push(`${at}.url must not hold user info (a token or password)`);
@@ -255,8 +261,9 @@ export function repoIdentity(dir) {
 // The repo entry of an identity in an instance: by origin key, or for a repo without origin by a local checkout with the same key
 function findRepo(instance, id, local) {
   if (id.url) return instance.repos.find((r) => repoKey(r) === id.key) || null;
+  const hash = localId(id.key);
   const names = new Set(Object.values(local).filter((c) => c.key === id.key).map((c) => c.repo));
-  return instance.repos.find((r) => !r.url && names.has(r.name)) || null;
+  return instance.repos.find((r) => !r.url && (r.local === hash || (!r.local && names.has(r.name)))) || null;
 }
 
 // A free name: the folder name, or with -2, -3 when another repo has it already
@@ -273,7 +280,7 @@ function freeName(instance, name) {
 export function withRepo(instance, id, local = {}) {
   const same = findRepo(instance, id, local);
   if (same) return { instance, repo: same, added: false };
-  const repo = id.url ? { name: freeName(instance, id.name), url: id.url } : { name: freeName(instance, id.name) };
+  const repo = id.url ? { name: freeName(instance, id.name), url: id.url } : { name: freeName(instance, id.name), local: localId(id.key) };
   return { instance: { ...instance, repos: [...instance.repos, repo] }, repo, added: true };
 }
 

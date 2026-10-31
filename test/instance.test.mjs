@@ -4,12 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmp, write } from './helpers.mjs';
-import { inherit, newInstance, normalizeUrl, printable, readInstance, redact, repoIdentity, validName, validateInstance, withRepo, writeInstance } from '../src/instance/config.mjs';
+import { inherit, localId, newInstance, normalizeUrl, printable, readInstance, redact, repoIdentity, validName, validateInstance, withRepo, writeInstance } from '../src/instance/config.mjs';
 import { projectPlugins, renewLocalSettings, renewSettings, settingsStatus, userScopePlugins } from '../src/project-plugins.mjs';
 import { buildMarketplace, marketDir } from '../src/marketplace.mjs';
 import { enterpriseLeftovers, recordTemplates, removeLeftovers } from '../src/leftovers.mjs';
 import { isInside } from '../src/files.mjs';
-import { lockDir, takeOver, withLock } from '../src/lock.mjs';
+import { lockFile, removeIfToken, withLock } from '../src/lock.mjs';
 import { parse, renewProfile } from '../src/cli.mjs';
 
 beforeEach(() => { process.env.KETTE_HOME = tmp(); });
@@ -72,6 +72,15 @@ test('CR-INST-2: withRepo matches the same origin in another form; QA-08: two re
   assert.equal(b.added, true);
   assert.equal(b.repo.name, 'site-2');
   assert.equal(withRepo(a.instance, { name: 'site', url: null, key: 'local:/a/.git' }, { '/a': { repo: 'site', key: 'local:/a/.git' } }).added, false, 'the same repo without origin is matched by its checkout');
+});
+
+test('QA-29: a repo without origin is found again by the identity hash in its entry, also without a checkout in state.json', () => {
+  const id = { name: 'site', url: null, key: 'local:/repos/site/.git' };
+  const { instance, repo } = withRepo(newInstance('acme', 'community'), id);
+  assert.equal(repo.local, localId(id.key));
+  assert.doesNotMatch(JSON.stringify(instance), /repos\/site/, 'no machine path in instance.json');
+  assert.equal(withRepo(instance, id, {}).added, false, 'no second entry when state.json lost the checkout');
+  assert.deepEqual(validateInstance({ ...instance, repos: [{ name: 'x', local: 'nothex' }] }).filter((e) => /local/.test(e)).length, 1);
 });
 
 test('QA-08: a worktree and its main checkout are one repo, a folder inside another repo is its own, the key survives git init', () => {
@@ -202,36 +211,26 @@ test('CR-PLAT-2: a folder on another Windows drive is never inside ~/.kette', ()
   assert.equal(isInside('/home/jo/.kette/bundles', '/home/jo/.kette/bundles-old', path.posix), false);
 });
 
-test('QA-01: a lock of a process that is gone is taken over, a held lock waits', () => {
-  const dir = lockDir('state');
-  fs.mkdirSync(dir, { recursive: true });
-  const dead = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }).stdout.trim();
-  fs.writeFileSync(path.join(dir, 'owner.json'), JSON.stringify({ pid: Number(dead), at: Date.now() }));
+const deadPid = () => Number(spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }).stdout.trim());
+const putLock = (name, owner) => { const f = lockFile(name); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, typeof owner === 'string' ? owner : JSON.stringify(owner)); return f; };
+
+test('QA-01, CR-NEW-7: a lock of a process that is gone is taken over, one of a live process is never', () => {
+  const f = putLock('state', { pid: deadPid(), at: Date.now(), token: 'dead' });
   assert.equal(withLock('state', () => 'ran'), 'ran');
-  assert.equal(fs.existsSync(dir), false, 'released after the run');
-  assert.throws(() => withLock('nested', () => withLock('nested', () => 0)), /Another kette process is changing nested/, 'the same lock is never taken twice');
+  assert.equal(fs.existsSync(f), false, 'released after the run');
+  putLock('live', { pid: process.pid, at: Date.now(), token: 'live' });
+  assert.throws(() => withLock('live', () => 0), /Another kette process is changing live/);
 });
 
-const KETTE_LINE = '@getitdone-gmbh:registry=https://npm.kette.itdone.de/';
-
-test('CR-NEW-2: a lock that another process created after the stale check is put back, never taken over', () => {
-  const dir = lockDir('race');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'owner.json'), JSON.stringify({ pid: process.pid, at: Date.now(), token: 'fresh' }));
-  takeOver(dir, { pid: 1, at: 0, token: 'stale' });
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'owner.json'), 'utf8')).token, 'fresh');
-  assert.deepEqual(fs.readdirSync(path.dirname(dir)).filter((n) => n.startsWith('race.lock.')), [], 'no folder left aside');
-});
-
-test('CR-NEW-3, QA-27: a lock folder without or with a damaged owner file does not block', () => {
-  for (const content of [null, '{ broken']) {
-    const dir = lockDir('owner');
-    fs.mkdirSync(dir, { recursive: true });
-    if (content !== null) fs.writeFileSync(path.join(dir, 'owner.json'), content);
-    const started = Date.now();
-    assert.equal(withLock('owner', () => 'ran'), 'ran');
-    assert.ok(Date.now() - started < 5000, `taken over at once (${content === null ? 'no owner' : 'damaged owner'})`);
-  }
+test('CR-NEW-2, CR-NEW-7: a lock is only removed by its own token, a lock without readable owner is never taken over', () => {
+  const f = putLock('race', { pid: deadPid(), at: 0, token: 'fresh' });
+  assert.equal(removeIfToken(f, 'stale'), false);
+  assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).token, 'fresh');
+  assert.deepEqual(fs.readdirSync(path.dirname(f)).filter((n) => n.includes('.claim')), [], 'no claim left');
+  assert.equal(removeIfToken(f, 'fresh'), true);
+  assert.equal(fs.existsSync(f), false);
+  putLock('broken', '{ broken');
+  assert.throws(() => withLock('broken', () => 0), /Another kette process is changing broken/, 'unreadable owner: wait, never take over');
 });
 
 test('QA-26: temp folders of a marketplace build that was killed are removed at the next build, those of a live process stay', () => {
@@ -252,6 +251,8 @@ test('CR-NEW-5: a link from a plugin back to a parent folder does not make the c
   assert.ok(fs.existsSync(path.join(m.dir, 'plugins', 'ui-laws', 'EDITION')));
   assert.equal(fs.existsSync(path.join(m.dir, 'plugins', 'ui-laws', 'skills', 'loop', 'skills')), false);
 });
+
+const KETTE_LINE = '@getitdone-gmbh:registry=https://npm.kette.itdone.de/';
 
 test('D7: kette records the Enterprise templates and the exact scope line it wrote; leaving removes those, keeps changed files', () => {
   const d = tmp();
@@ -305,4 +306,20 @@ test('--instance takes a name, alone it means the instance of the repo in this f
   assert.equal(parse(['doctor', '--instance', '--ci']).instance, true);
   assert.equal(parse(['add', '--instance', 'acme', '--yes']).instance, 'acme');
   assert.equal(parse(['instance', 'create', 'acme', '--edition', 'community', '--from', 'git@x:y.git']).from, 'git@x:y.git');
+});
+
+test('QA-29: a join killed after instance.json but before state.json is repaired by the next run, the repo ends up in one instance', async () => {
+  const { joinInstance } = await import('../src/instance/command.mjs');
+  const { readInstance: read, writeInstance: save, repoIdentity: identity, withRepo: add } = await import('../src/instance/config.mjs');
+  save(newInstance('acme', 'community'));
+  save(newInstance('beta', 'community'));
+  const dir = tmp();
+  // The window of a SIGKILL: the entry is in acme, the checkout never reached state.json
+  save(add(read('acme'), identity(dir)).instance);
+  joinInstance('acme', dir);
+  assert.equal(read('acme').repos.length, 1, 'no second entry for the same repo');
+  // Same window on the way to beta: the acme entry must go although state.json has no checkout for it
+  fs.writeFileSync(path.join(process.env.KETTE_HOME, 'state.json'), '{}');
+  joinInstance('beta', dir);
+  assert.deepEqual([read('acme').repos.length, read('beta').repos.length], [0, 1]);
 });
