@@ -124,7 +124,21 @@ A repo is identified by its origin, normalised: user info (a token or password) 
 
 One repo belongs to one instance: joining with any checkout (`kette instance use`, `kette add --instance`, `kette instance add-repo`) removes it from every other instance. Every local checkout is tracked by path in `state.json`, so `kette doctor --instance` checks each checkout, also a main checkout and its worktrees. Everything that can stop a join (a damaged or read-only `instance.json`, an unwritable `state.json`) is checked before a file of the project is written.
 
-## Several kette processes at once
+## Several kette processes at once, and a kette that was killed
+
+Every file kette writes into a project (`.kette/profile.json`, the block in `.kette/README.md`, `.claude/settings.json`, `.claude/settings.local.json`, `.gitignore`, `CLAUDE.md`, `.npmrc`, `.kette/templates.json`, `.kette/wallet.json`, templates, `theme.css`, Figma downloads) is written to a temp file next to it, flushed to disk and then renamed into place (a new file is hard-linked, so an existing one is never replaced). A kette killed in the middle leaves the old file or the new one, never an empty or half one. On Windows a rename that is refused for a moment is retried.
+
+What a crash can leave behind and who removes it:
+
+| Left behind | Where | Removed |
+|---|---|---|
+| A temp file `.<name>.<pid>.<hex>.tmp` | next to the project file | by the next write of that file, once the process is gone |
+| A lock `<name>.lck` of the killed process | `~/.kette/locks` | by the next kette that needs the lock (its process is gone) |
+| A claim `<name>.lck.<token>.claim` | `~/.kette/locks` | 10 seconds after the crash, by the next kette that needs the lock |
+| A temp owner `<name>.lck.<pid>.<hex>.tmp` | `~/.kette/locks` | by the next kette that takes any lock |
+| A half-built marketplace `marketplace-<edition>.<pid>.tmp` | `~/.kette/bundles` | by the next build of that marketplace |
+| A half-unpacked bundle | `~/.kette/bundles/<edition>/.<version>.<pid>.<hex>.tmp` | by the next unpacking |
+
 
 Every read-modify-write of a machine file runs under a lock: `state.json`, each `instance.json`, the build of each marketplace folder and the unpacking of each bundle version. A lock is a file `~/.kette/locks/<name>.lck`, hard-linked into place from a temp file that already holds its owner (PID, time, token), so it never appears half written. It is removed only by the one process that claimed its token, the holder at release or a waiter that found it stale (readable owner, process gone or older than 2 minutes); a missing lock is tried again at once. A waiting process gives up after 30 seconds. Temp files of processes that died are removed at the next run. ADR-0002 decision 17 explains the design. Tested with 4 and 8 processes x 100 runs on one lock name with a counter and with a holder killed by SIGKILL, also on Windows. Files are written to a temp file of the own process and renamed. Tested with 6 repos switching instance in parallel for 5 rounds and 4 repos building the marketplaces at once.
 
@@ -145,7 +159,7 @@ Every read-modify-write of a machine file runs under a lock: `state.json`, each 
 | `~/.kette/credentials`, `device-id`, `state.json`, `bundles/**`, `instances/**`, `locks` | machine store, the instances themselves, locks (empty after every command) | all |
 | `~/.claude/plugins/**` | Claude Code's own registry of marketplace names, its plugin cache and `installed_plugins.json` (project-scope entries with their project path); it changes for project-scope installs too and kette cannot avoid it | commands that enable plugins |
 | `~/.claude/.claude.json`, `~/.claude/backups/**` | Claude Code keeps its own state and backups there on every run (QA-19); with `kette cloud setup` it also holds the itdone MCP server in the user scope (open decision D4) | every command that runs `claude`, `cloud setup` |
-| `~/.npmrc` (marked Kette block, the token only) | npm access per device (D3, decided in fix round 2) | `login`, `update`, `logout` |
+| `~/.npmrc` (marked Kette block, the token only) | npm access per device (D3, decided in fix round 2); `kette npm move-scope` takes the scope line of a block from before 0.10 out of it | `login`, `update`, `logout`, `npm move-scope` |
 | `~/.claude/settings.json` | only `kette logout`, and only to remove Enterprise plugins an older kette put in the user scope | `logout` on a machine set up before 0.10 |
 
 After every command the test also checks that the user settings of Claude Code contain no Kette plugin. The real Claude Code also adds `.claude/settings.local.json` to the global git ignore (`~/.config/git/ignore`) on the first local-scope declaration, and `claude plugin list` lists every installed plugin of every project with its status (an Enterprise plugin of another repo shows as disabled in a Community repo, QA-18); that happens in Claude Code, not in kette. `kette logout` removes the marketplace `kette-enterprise` from Claude Code, which uninstalls its plugins in every project (checked with the real Claude Code 2.1.310: `installed_plugins.json` is empty afterwards and `claude plugin list` shows nothing). Claude Code keeps the unused copies in `~/.claude/plugins/cache/kette-enterprise`; kette does not delete inside the Claude Code folder, `kette logout` names the folder instead.

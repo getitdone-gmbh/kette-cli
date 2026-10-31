@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isSecureUrl } from '../paths.mjs';
+import { writeAtomic } from '../files.mjs';
 
 // .kette/wallet.json holds names, environments and the provider, never a value; the values stay in the provider
 export const WALLET_PATH = '.kette/wallet.json';
@@ -47,7 +48,7 @@ export function writeWallet(root, wallet) {
   const errs = validateWallet(wallet);
   if (errs.length) throw new Error(`Wallet not valid: ${errs.join('; ')}`);
   fs.mkdirSync(path.join(root, '.kette'), { recursive: true });
-  fs.writeFileSync(walletFile(root), `${JSON.stringify(wallet, null, 2)}\n`);
+  writeAtomic(walletFile(root), `${JSON.stringify(wallet, null, 2)}\n`);
 }
 
 const isList = (v, check) => Array.isArray(v) && v.every(check) && new Set(v).size === v.length;

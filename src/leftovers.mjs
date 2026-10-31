@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isInside } from './files.mjs';
+import { isInside, writeAtomic } from './files.mjs';
 
 // What kette wrote for Enterprise into a project, so it can be removed when the project joins a Community instance (docs/adr/0002, decision 9):
 // the template files it created with the hash they had, and the exact scope line it put into the project .npmrc
@@ -24,7 +24,7 @@ function writeRecord(root, record) {
   if (!Object.keys(record.files).length && !record.npmrc) { fs.rmSync(f, { force: true }); return; }
   fs.mkdirSync(path.dirname(f), { recursive: true });
   const next = { version: 1, files: Object.fromEntries(Object.entries(record.files).sort()), ...(record.npmrc ? { npmrc: record.npmrc } : {}) };
-  fs.writeFileSync(f, `${JSON.stringify(next, null, 2)}\n`);
+  writeAtomic(f, `${JSON.stringify(next, null, 2)}\n`);
 }
 
 // After a plan was applied: every template file kette created with its content hash, and the scope line it added to .npmrc
@@ -95,7 +95,7 @@ export function removeLeftovers(root, ketteLine = null) {
     const wanted = scopeLines(record, ketteLine);
     const rest = text.split(/\r?\n/).filter((l) => !wanted.includes(l.trim()));
     while (rest.length && rest.at(-1) === '') rest.pop();
-    if (rest.length) fs.writeFileSync(f, rest.join(eol) + eol); else fs.rmSync(f);
+    if (rest.length) writeAtomic(f, rest.join(eol) + eol); else fs.rmSync(f);
     removed.push(`${NPMRC} (the scope line kette wrote)`);
   }
   delete record.npmrc;

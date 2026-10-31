@@ -7,6 +7,7 @@ import { ExitError } from '../errors.mjs';
 import { parseHex } from './color.mjs';
 import { EDITION_NOTE, HEADER_MARK, NEUTRAL_NAMES, RADIUS_NAMES, describeInputs, fontStack, generateTheme, parseThemeOptions } from './generate.mjs';
 import { PREVIEW_MARK, previewHtml } from './preview.mjs';
+import { writeAtomic } from '../files.mjs';
 
 export const DEFAULT_OUT = 'theme.css';
 export const PREVIEW_FILE = 'theme-preview.html';
@@ -101,8 +102,8 @@ export async function theme(opts, { version, tty = Boolean(process.stdin.isTTY &
     await guardOverwrite(paths.css, HEADER_MARK, { yes: opts.yes, tty });
     if (raw.preview) await guardOverwrite(paths.preview, PREVIEW_MARK, { yes: opts.yes, tty });
     fs.mkdirSync(path.dirname(paths.css), { recursive: true });
-    fs.writeFileSync(paths.css, result.css);
-    if (raw.preview) fs.writeFileSync(paths.preview, previewHtml(result));
+    writeAtomic(paths.css, result.css);
+    if (raw.preview) writeAtomic(paths.preview, previewHtml(result));
   }
   if (opts.json) {
     const json = JSON.stringify({ ...result.tokens, files: { css: paths.css, preview: raw.preview ? paths.preview : null }, written: !opts.dryRun }, null, 2);

@@ -59,12 +59,26 @@ export function renewLocalSettings(current, edition, dir) {
   return JSON.stringify(next) === JSON.stringify(settings) ? current : json(next);
 }
 
+// Temp files kette writes next to a project file (.<name>.<pid>.<hex>.tmp); one left by a killed kette never ends up in git (CR-AT-5)
+export const TEMP_PATTERN = '.*.[0-9]*.[0-9a-f]*.tmp';
+const IGNORED = [LOCAL_SETTINGS_PATH, TEMP_PATTERN];
+
+// Adds the lines that are missing at the end, keeps every other line and the line endings
+export function renewIgnore(current) {
+  const lines = current.split(/\r?\n/).map((l) => l.trim());
+  const missing = IGNORED.filter((l) => !lines.includes(l));
+  if (!missing.length) return current;
+  const eol = current.includes('\r\n') ? '\r\n' : '\n';
+  const head = current && !current.endsWith('\n') ? `${current}${eol}` : current;
+  return `${head}${missing.join(eol)}${eol}`;
+}
+
 export function settingsItems(edition) {
   const dir = marketDir(edition);
   return [
     { path: SETTINGS_PATH, mode: 'renew', content: renewSettings('', edition), renew: (current) => renewSettings(current, edition), note: `Claude Code plugins of ${editionLabel(edition)} for this project` },
     { path: LOCAL_SETTINGS_PATH, mode: 'renew', content: renewLocalSettings('', edition, dir), renew: (current) => renewLocalSettings(current, edition, dir), note: 'marketplace path on this machine, git ignored' },
-    { path: '.gitignore', mode: 'append', marker: LOCAL_SETTINGS_PATH, content: `${LOCAL_SETTINGS_PATH}\n`, note: 'machine path of the marketplace stays local' },
+    { path: '.gitignore', mode: 'renew', content: renewIgnore(''), renew: renewIgnore, note: 'machine path of the marketplace and temp files of kette stay local' },
   ];
 }
 

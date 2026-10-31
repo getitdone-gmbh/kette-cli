@@ -5,10 +5,10 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmp, write } from './helpers.mjs';
 import { inherit, localId, newInstance, normalizeUrl, printable, readInstance, redact, repoIdentity, validName, validateInstance, withRepo, writeInstance } from '../src/instance/config.mjs';
-import { projectPlugins, renewLocalSettings, renewSettings, settingsStatus, userScopePlugins } from '../src/project-plugins.mjs';
+import { TEMP_PATTERN, projectPlugins, renewIgnore, renewLocalSettings, renewSettings, settingsStatus, userScopePlugins } from '../src/project-plugins.mjs';
 import { buildMarketplace, marketDir } from '../src/marketplace.mjs';
 import { enterpriseLeftovers, recordTemplates, removeLeftovers } from '../src/leftovers.mjs';
-import { isInside } from '../src/files.mjs';
+import { createAtomic, isInside, writeAtomic } from '../src/files.mjs';
 import { lockFile, removeIfToken, withLock } from '../src/lock.mjs';
 import { parse, renewProfile } from '../src/cli.mjs';
 
@@ -322,4 +322,32 @@ test('QA-29: a join killed after instance.json but before state.json is repaired
   fs.writeFileSync(path.join(process.env.KETTE_HOME, 'state.json'), '{}');
   joinInstance('beta', dir);
   assert.deepEqual([read('acme').repos.length, read('beta').repos.length], [0, 1]);
+});
+
+test('CR-AT-2: a new file gets 0o666 less the umask, a renewed file keeps its mode exactly', { skip: process.platform === 'win32' && 'no POSIX modes on Windows' }, () => {
+  const d = tmp();
+  const saved = process.umask(0o002);
+  try {
+    createAtomic(path.join(d, 'new.txt'), 'x');
+    assert.equal(fs.statSync(path.join(d, 'new.txt')).mode & 0o777, 0o664);
+    process.umask(0o022);
+    fs.chmodSync(path.join(d, 'new.txt'), 0o664);
+    writeAtomic(path.join(d, 'new.txt'), 'y');
+    assert.equal(fs.statSync(path.join(d, 'new.txt')).mode & 0o777, 0o664, 'not reduced by the umask');
+    writeAtomic(path.join(d, 'fresh.txt'), 'z');
+    assert.equal(fs.statSync(path.join(d, 'fresh.txt')).mode & 0o777, 0o644);
+  } finally {
+    process.umask(saved);
+  }
+});
+
+test('CR-AT-5: the .gitignore kette keeps ignores the temp files of a killed kette, existing lines and line endings stay', () => {
+  assert.equal(renewIgnore(''), `.claude/settings.local.json\n${TEMP_PATTERN}\n`);
+  assert.equal(renewIgnore('node_modules\r\n.claude/settings.local.json\r\n'), `node_modules\r\n.claude/settings.local.json\r\n${TEMP_PATTERN}\r\n`);
+  assert.equal(renewIgnore(`dist\n.claude/settings.local.json\n${TEMP_PATTERN}\n`), `dist\n.claude/settings.local.json\n${TEMP_PATTERN}\n`);
+  const d = tmp();
+  execFileSync('git', ['init', '-q', d]);
+  fs.writeFileSync(path.join(d, '.gitignore'), renewIgnore(''));
+  for (const f of ['.kette/.profile.json.4242.0a1b2c3d4e5f.tmp', '.claude/.settings.json.17.abcdef012345.tmp']) assert.equal(spawnSync('git', ['-C', d, 'check-ignore', '-q', f]).status, 0, f);
+  assert.notEqual(spawnSync('git', ['-C', d, 'check-ignore', '-q', '.kette/profile.json']).status, 0, 'the real file is not ignored');
 });
