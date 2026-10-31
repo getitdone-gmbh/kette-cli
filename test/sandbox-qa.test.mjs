@@ -105,10 +105,13 @@ test('D7, QA-05, CR-SCOPE-3: joining a Community instance removes the Enterprise
   assert.match(doctor.out, /FAIL Enterprise templates changed by hand in this Community project: compose\.yaml/);
   fs.rmSync(path.join(app, 'compose.yaml'));
   ok(await kette(box, ['doctor'], { ...rec('D7'), cwd: app }));
-  // A Community project with the registry line kette did not record still fails doctor
-  write(app, '.npmrc', '@getitdone-gmbh:registry=https://npm.kette.itdone.de/\n');
+  // The kette registry line in a Community instance repo fails doctor even when it was written before the record (CR-NEW-1: only that line)
+  const registry = stateOf(box).npm.registry;
+  write(app, '.npmrc', `@getitdone-gmbh:registry=${registry}\n`);
   const npm = ok(await kette(box, ['doctor'], { ...rec('D7'), cwd: app }), 1);
   assert.match(npm.out, /FAIL \.npmrc of this Community project points @getitdone-gmbh to the Enterprise registry\. Remove the line with: kette instance use oss/);
+  write(app, '.npmrc', '@getitdone-gmbh:registry=https://npm.pkg.github.com\n');
+  ok(await kette(box, ['doctor'], { ...rec('D7'), cwd: app }));
 });
 
 test('QA-07, CR-SCOPE-2, QA-08: a repo is in one instance only; repos without origin, same names and worktrees are all tracked', async () => {
@@ -331,4 +334,84 @@ test('CR-TEST-1: the Enterprise plugins never reach the user scope on any platfo
   for (const d of [ent, com]) assert.match(fs.readFileSync(path.join(d, '.gitignore'), 'utf8'), /^\.claude\/settings\.local\.json$/m);
   for (const id of ENTERPRISE_ONLY) assert.equal(settings(com)[id], false, id);
   assert.equal(exists(path.join(box.home, '.claude', 'settings.json')), false);
+});
+
+// Fix round 2
+
+test('QA-23: kette logout inside an Enterprise repo leaves its committed .claude/settings.json byte for byte', async () => {
+  const box = sandbox();
+  const { ent } = await twoInstances(box, 'r2-logout');
+  const before = fs.readFileSync(path.join(ent, '.claude', 'settings.json'), 'utf8');
+  ok(await kette(box, ['logout', '--no-npm'], { ...rec('r2-logout'), cwd: ent, allow: CLAUDE_REGISTRY }));
+  assert.equal(fs.readFileSync(path.join(ent, '.claude', 'settings.json'), 'utf8'), before);
+  const i = box.claude.calls().indexOf('plugin marketplace remove kette-enterprise');
+  assert.ok(i >= 0);
+  assert.equal(fs.realpathSync(box.claude.cwds()[i]), fs.realpathSync(path.join(box.home, '.kette')), 'run from a neutral folder');
+});
+
+// npm of this Node, so the test asks the real npm which registry it would use in a folder
+const npmCli = [path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'), path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')].find((f) => fs.existsSync(f));
+const npmGet = (box, cwd, key) => spawnSync(process.execPath, [npmCli, 'config', 'get', key], { cwd, env: box.env, encoding: 'utf8' }).stdout.trim();
+
+test('D3, QA-25: the token stays in the user npmrc, the scope line only in Enterprise projects; npm in a Community repo does not use the Enterprise registry', { skip: !npmCli && 'npm of this Node not found' }, async () => {
+  const box = sandbox();
+  const { ent, com } = await twoInstances(box, 'r2-npm', { npm: true });
+  const user = fs.readFileSync(path.join(box.home, '.npmrc'), 'utf8');
+  assert.doesNotMatch(user, /@getitdone-gmbh:registry/);
+  assert.match(user, /:_authToken=kt_/);
+  const registry = stateOf(box).npm.registry;
+  assert.notEqual(npmGet(box, com, '@getitdone-gmbh:registry'), registry, 'Community repo');
+  assert.equal(npmGet(box, ent, '@getitdone-gmbh:registry'), registry, 'Enterprise repo still installs');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ent, '.kette', 'templates.json'), 'utf8')).npmrc, `@getitdone-gmbh:registry=${registry}`, 'the exact line is recorded');
+});
+
+test('CR-NEW-1: a repo without instance keeps a foreign scope line (CRLF), add and doctor behave as before 0.10', async () => {
+  const box = sandbox();
+  const app = path.join(box.work, 'app');
+  ok(await kette(box, ['init', app, ...SETUP], { ...rec('r2-foreign'), projects: [app], allow: CLAUDE_REGISTRY }));
+  const foreign = '@getitdone-gmbh:registry=https://npm.pkg.github.com\r\n//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}\r\n';
+  write(app, '.npmrc', foreign);
+  ok(await kette(box, ['add', ...SETUP], { ...rec('r2-foreign'), cwd: app, allow: CLAUDE_REGISTRY }));
+  ok(await kette(box, ['doctor'], { ...rec('r2-foreign'), cwd: app }));
+  assert.equal(fs.readFileSync(path.join(app, '.npmrc'), 'utf8'), foreign);
+  // A repo joining a Community instance: the foreign line still stays
+  ok(await kette(box, ['instance', 'create', 'oss', '--edition', 'community'], rec('r2-foreign')));
+  ok(await kette(box, ['instance', 'use', 'oss'], { ...rec('r2-foreign'), cwd: app, allow: CLAUDE_REGISTRY }));
+  assert.equal(fs.readFileSync(path.join(app, '.npmrc'), 'utf8'), foreign);
+  ok(await kette(box, ['doctor'], { ...rec('r2-foreign'), cwd: app }));
+});
+
+test('QA-22: a Community repo that joins an Enterprise instance gets the scope line, doctor names the templates with kette add', async () => {
+  const box = sandbox();
+  const { com } = await twoInstances(box, 'r2-up', { npm: true });
+  ok(await kette(box, ['instance', 'use', 'acme'], { ...rec('r2-up'), cwd: com, allow: CLAUDE_REGISTRY }));
+  assert.match(fs.readFileSync(path.join(com, '.npmrc'), 'utf8'), /^@getitdone-gmbh:registry=/m);
+  const doc = await kette(box, ['doctor'], { ...rec('r2-up'), cwd: com });
+  assert.match(doc.out, /WARN Enterprise templates not in this project yet: .*Dockerfile.*Add them with: kette add/);
+  ok(await kette(box, ['add', ...SETUP], { ...rec('r2-up'), cwd: com, allow: CLAUDE_REGISTRY }));
+  assert.ok(exists(path.join(com, 'Dockerfile')));
+  assert.doesNotMatch((await kette(box, ['doctor'], { ...rec('r2-up'), cwd: com })).out, /Enterprise templates not in this project/);
+});
+
+test('QA-24: the shared marketplace folder of the first 0.10 build and its registration are cleaned by update, doctor names them', async () => {
+  const box = sandbox({ registry: (home) => [{ name: 'kette', source: 'directory', path: path.join(home, '.kette', 'bundles', 'marketplace') }] });
+  const old = path.join(box.home, '.kette', 'bundles', 'marketplace');
+  write(old, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'kette', plugins: [] }));
+  const doc = await kette(box, ['doctor'], rec('r2-r1'));
+  assert.match(doc.out, /WARN .*bundles.marketplace is left from an earlier 0\.10 build and Claude Code still has kette registered on it\. Clean up with: kette update/);
+  ok(await kette(box, ['update'], { ...rec('r2-r1'), allow: CLAUDE_REGISTRY }));
+  assert.equal(exists(old), false);
+  assert.ok(box.claude.calls().includes('plugin marketplace remove kette'));
+});
+
+test('QA-14, QA-21: a wrong edition answer is asked again; answering n at the plan leaves no new instance behind', { skip: (posixOnly || spawnSync('python3', ['--version']).status !== 0) && 'needs python3 for a pseudo terminal' }, async () => {
+  const box = sandbox();
+  ok(await kette(box, ['update'], rec('r2-onboarding')));
+  const flags = ['--no-plugins', '--stack', 'nestjs-prisma', '--platform', 'github-docker', '--patterns', 'layered'];
+  const no = ok(await interactive(box, ['init', 'one', ...flags], [['Choose (numbers', '2'], ['Name of the new instance', 'fresh'], ['Choose (numbers', '7'], ['Choose 1 or 2', '1'], ['Create these files?', 'n']]), 1);
+  assert.match(no.out, /Choose 1 or 2\./);
+  assert.match(no.out, /Cancelled, nothing written/);
+  assert.equal(exists(path.join(box.home, '.kette', 'instances', 'fresh')), false, 'no instance from a cancelled onboarding');
+  ok(await interactive(box, ['init', 'two', ...flags], [['Choose (numbers', '2'], ['Name of the new instance', 'fresh'], ['Choose (numbers', '1'], ['Create these files?', 'y']]));
+  assert.deepEqual(readInstanceFile(box, 'fresh').repos.map((r) => r.name), ['two']);
 });

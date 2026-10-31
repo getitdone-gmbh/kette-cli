@@ -7,11 +7,11 @@ import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { renderTemplates, TemplateError } from './templates.mjs';
 import { ask, choose, confirm, close } from './prompt.mjs';
-import { hasClaude, installedPlugins, pluginId, pluginInstalled } from './claude.mjs';
+import { hasClaude, installedPlugins, pluginId, pluginInstalled, registeredAt, removeMarketplace } from './claude.mjs';
 import { LOCAL_SETTINGS_PATH, SETTINGS_PATH, enableHints, enableProjectPlugins, settingsItems, settingsStatus, userScopePlugins, writeProjectSettings } from './project-plugins.mjs';
 import { marketName } from './marketplace.mjs';
 import { RECORD_PATH, enterpriseLeftovers, recordTemplates, removeLeftovers } from './leftovers.mjs';
-import { credentialsFile, delivery, home, mirror } from './paths.mjs';
+import { bundlesDir, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginContents, pluginDetails, pluginsFor, pluginSummary } from './editions.mjs';
 import { NOTE_PATH, COMMUNITY_REVIEWERS, agentNote, renewNote } from './note.mjs';
 import { rules, tilde } from './rules.mjs';
@@ -24,7 +24,7 @@ import { ExitError } from './errors.mjs';
 import { cloud, doctorLine } from './cloud.mjs';
 import { theme } from './theme/command.mjs';
 import { WALLET_HELP, hasWallet, offerWallet, wallet, walletDoctor } from './wallet/command.mjs';
-import { INSTANCE_HELP, askInstance, doctorInstance, instance as instanceCommand, joinInstance, prepareJoin, requireEdition } from './instance/command.mjs';
+import { INSTANCE_HELP, askInstance, createPending, doctorInstance, instance as instanceCommand, joinInstance, prepareJoin, requireEdition } from './instance/command.mjs';
 import { inherit, instanceSource, printable, readInstance } from './instance/config.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -271,7 +271,7 @@ function planFor(root, profile, bundleDir, tier, noteTier, templates, apps, { in
   if (tier === ENTERPRISE) {
     // Only the scope line, never a token: the file may be committed, the token comes from ~/.npmrc or the CI secret
     // No line without npm access, otherwise the project points to a registry that does not answer yet
-    if (npmGranted()) plan.push({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'design system packages via Die Kette, no token' });
+    if (npmGranted()) plan.push(npmrcItem());
     // template: recorded with its hash in .kette/templates.json, so a later switch to Community can remove it again
     for (const f of templates?.files || []) plan.push({ path: f.path, content: f.content, note: f.note, template: true });
   }
@@ -374,9 +374,12 @@ function resolveProject(root) {
   return { profile, instance, edition: instance ? instance.edition : COMMUNITY, problem };
 }
 
-// Leaving Enterprise: the template files kette created unchanged and the registry scope line go, changed files stay for doctor
+// The scope line of Enterprise projects: only in the project .npmrc (the token stays global per device, D3); npmrc marks it for the record
+const npmrcItem = () => ({ path: '.npmrc', mode: 'append', marker: `${SCOPE}:registry=`, content: scopeLine(), note: 'design system packages via Die Kette, no token', npmrc: true });
+
+// Leaving Enterprise: the template files kette created unchanged and the scope line kette wrote go, changed files and foreign lines stay
 function leaveEnterprise(root) {
-  const { removed, kept } = removeLeftovers(root);
+  const { removed, kept } = removeLeftovers(root, scopeLine().trim());
   for (const r of removed) console.log(`  ${status('ok', '- remove')} ${file(r)} ${dim('(Enterprise, not part of a Community project)')}`);
   for (const k of kept) console.log(`${status('warn', 'WARN')} ${file(k)} is an Enterprise template that was changed, it stays. Delete it if the project does not need it; ${cmd('kette doctor')} lists it until then.`);
 }
@@ -389,8 +392,14 @@ function forSchema(schema, profile) {
 }
 
 async function setup(root, opts, isNew) {
-  // Only a project without a profile is asked, so kette add on a connected repo stays quiet
-  const instance = projectInstance(root, opts) ?? (opts.yes || opts.dryRun || existingProfile(root) ? null : await askInstance(root));
+  // Only a project without a profile is asked, so kette add on a connected repo stays quiet; a new instance is written after the confirmation
+  let instance = projectInstance(root, opts);
+  let pending = null;
+  if (!instance && !opts.yes && !opts.dryRun && !existingProfile(root)) {
+    const answer = await askInstance(root);
+    instance = answer?.instance || null;
+    if (answer?.create) pending = answer.instance;
+  }
   const tier = instance ? requireEdition(instance) : tierOf();
   const bundleDir = await ensureBundle(tier);
   if (isNew) fs.mkdirSync(root, { recursive: true });
@@ -421,7 +430,7 @@ async function setup(root, opts, isNew) {
   const templates = workspace?.templates || rendered.templates || null;
   const noteTier = projectTier(root, tier, instance);
   // Everything that can stop the join is checked before a file of the project is written (QA-09)
-  if (instance && !opts.dryRun) prepareJoin(instance.name, root);
+  if (instance && !pending && !opts.dryRun) prepareJoin(instance.name, root);
   const plan = planFor(root, profile, bundleDir, tier, noteTier, templates, target.apps, { instance, plugins: !opts.noPlugins });
   const described = describe(workspace ? [...plan, workspace.item] : plan, root);
   console.log(`\n${opts.dryRun ? 'Would create' : 'Plan'} in ${file(path.resolve(root))} (edition ${editionLabel(tier)}${instance ? `, instance ${instance.name}` : ''}):`);
@@ -433,11 +442,16 @@ async function setup(root, opts, isNew) {
   for (const s of templates?.skipped || []) console.log(`  No templates for ${s.stack}: ${s.reason}`);
   if (opts.dryRun) return 0;
   if (!(await confirm('\nCreate these files?', opts.yes))) { console.log('Cancelled, nothing written.'); return 1; }
+  if (pending) {
+    createPending(pending);
+    prepareJoin(pending.name, root);
+  }
 
   if (isNew && !fs.existsSync(path.join(root, '.git'))) spawnSync('git', ['init', '-q', root]);
   apply(described, root);
   recordTemplates(root, described);
-  if (noteTier === COMMUNITY) leaveEnterprise(root);
+  // Only a repo that joins a Community instance leaves Enterprise; a repo without instance keeps what it had before 0.10
+  if (instance && noteTier === COMMUNITY) leaveEnterprise(root);
   if (instance) for (const l of joinInstance(instance.name, root)) console.log(l);
   let plugins = { ok: false };
   if (!opts.noPlugins) {
@@ -493,6 +507,7 @@ async function useInstance(root, instance, opts) {
     { path: '.kette/profile.json', mode: 'renew', content: '', renew: (current) => renewProfile(current, edition, null, instance.name) },
     noteItem(edition, profile?.flow),
     ...(opts.noPlugins ? [] : settingsItems(edition)),
+    ...(edition === ENTERPRISE && npmGranted() ? [npmrcItem()] : []),
   ];
   const described = describe(plan, root);
   console.log(`${opts.dryRun ? 'Would change' : 'Plan'} in ${file(path.resolve(root))} (instance ${instance.name}, ${editionLabel(edition)}):`);
@@ -504,8 +519,11 @@ async function useInstance(root, instance, opts) {
   }
   if (opts.dryRun) return 0;
   apply(described, root);
+  recordTemplates(root, described);
   if (edition === COMMUNITY) leaveEnterprise(root);
   for (const l of joinInstance(instance.name, root)) console.log(l);
+  // Templates follow the profile and are rendered by kette add; doctor names them until then (QA-22)
+  if (edition === ENTERPRISE) console.log(`Enterprise templates for CI, Docker and checks: ${cmd('kette add')}`);
   if (!opts.noPlugins) {
     const r = enableProjectPlugins(root, edition, installedBundle(edition));
     if (r.ok && r.present.length) console.log(`Claude Code plugins enabled for this project: ${r.present.map((p) => pluginId(p, r.market)).join(', ')}`);
@@ -550,6 +568,8 @@ async function doctor(root, opts, { machine = true, project = true } = {}) {
     // Plugins of CLI versions before 0.10 stay usable; they load in every project that has no .claude/settings.json of its own
     if (legacy.length) warn(`Claude Code has Kette plugins on for all projects (user scope, set up by an older kette): ${legacy.join(', ')}. Projects now enable their own plugins in ${SETTINGS_PATH}. Once each project ran ${cmd('kette add')}, switch them off with: ${cmd(legacy.map((id) => `claude plugin uninstall ${id}`).join(' && '))}`);
     if (!opts.ci && hasClaude()) doctorLine(line, info);
+    const roundOne = opts.ci || !fs.existsSync(roundOneDir()) ? [] : registeredAt(roundOneDir());
+    if (fs.existsSync(roundOneDir())) warn(`${tilde(roundOneDir())} is left from an earlier 0.10 build${roundOne.length ? ` and Claude Code still has ${roundOne.join(', ')} registered on it` : ''}. Clean up with: ${cmd('kette update')}`);
   }
   let editionHere = tier;
   if (project) {
@@ -591,10 +611,15 @@ async function doctor(root, opts, { machine = true, project = true } = {}) {
       const enterpriseOnly = reviewers.filter((r) => !COMMUNITY_REVIEWERS.includes(r));
       if (editionHere !== ENTERPRISE && enterpriseOnly.length) warn(`flow.review names ${enterpriseOnly.join(', ')}, these are agents of Die Kette (Enterprise). On Community only kette-check runs. Unlock with: ${cmd('kette login <key>')}`);
     }
-    if (profile && editionHere === COMMUNITY) leftoverChecks(root, profile.instance, { line });
+    if (profile?.instance && editionHere === COMMUNITY) leftoverChecks(root, profile.instance, { line });
     if (profile && !opts.ci) projectPluginChecks(root, editionHere, profile.instance, { line, warn });
     if (!opts.ci && own && profile) printPluginDetails(editionHere, info);
     if (tier === ENTERPRISE && editionHere === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
+    // A repo that came to Enterprise through kette instance use has no templates yet; kette add renders them (QA-22)
+    if (profile && own && editionHere === ENTERPRISE && !opts.ci) {
+      const missing = (templatesFor(own.dir, profile, detectWorkspace(root)).templates?.files || []).map((f) => f.path).filter((p) => !fs.existsSync(path.join(root, p)));
+      if (missing.length) warn(`Enterprise templates not in this project yet: ${missing.join(', ')}. Add them with: ${cmd('kette add')}`);
+    }
     walletDoctor(root, editionHere === ENTERPRISE ? tier : COMMUNITY, { line, warn, info }, { project: Boolean(profile) });
     const md = path.join(root, 'CLAUDE.md');
     if (profile) line(fs.existsSync(md) && fs.readFileSync(md, 'utf8').includes('@.kette/README.md'), 'CLAUDE.md points to the Die Kette rules', `CLAUDE.md does not point to the Die Kette rules (line @.kette/README.md missing), add it with: ${cmd('kette add')}`);
@@ -620,8 +645,8 @@ function instanceChecks(profile, { line, warn }) {
 
 // A Community project holds nothing kette wrote for Enterprise: no registry scope line, no Enterprise template it recorded
 function leftoverChecks(root, instanceName, { line }) {
-  const { files, npmrc } = enterpriseLeftovers(root);
-  const fix = cmd(instanceName ? `kette instance use ${instanceName}` : 'kette add');
+  const { files, npmrc } = enterpriseLeftovers(root, scopeLine().trim());
+  const fix = cmd(`kette instance use ${instanceName}`);
   if (npmrc) line(false, '', `.npmrc of this Community project points ${SCOPE} to the Enterprise registry. Remove the line with: ${fix}`);
   const changed = files.filter((f) => f.changed).map((f) => f.path);
   const unchanged = files.filter((f) => !f.changed).map((f) => f.path);
@@ -716,7 +741,20 @@ async function refreshProjectPlugins(root, opts) {
   }
 }
 
+// The shared marketplace folder of the unreleased first 0.10 build (~/.kette/bundles/marketplace), with what Claude Code registered on it
+const roundOneDir = () => path.join(bundlesDir(), 'marketplace');
+
+function cleanRoundOne(opts) {
+  if (opts.dryRun || !fs.existsSync(roundOneDir())) return;
+  for (const name of registeredAt(roundOneDir())) {
+    const r = removeMarketplace(name);
+    if (r.ok) console.log(`Marketplace ${name} on ${tilde(roundOneDir())} (an earlier 0.10 build) removed from Claude Code.`);
+  }
+  if (fs.existsSync(roundOneDir())) fs.rmSync(roundOneDir(), { recursive: true, force: true });
+}
+
 async function update(opts) {
+  cleanRoundOne(opts);
   let code = await (credentialsStatus() === 'valid' ? updateEnterprise(opts, VERSION) : updateCommunity(opts));
   // A Community project on a machine with a licence needs the Community bundle as well; an instance that cannot be used counts as Community
   if (code === 0 && credentialsStatus() === 'valid' && safeEdition('.') === COMMUNITY) code = await updateCommunity(opts, { activate: false });

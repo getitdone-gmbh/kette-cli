@@ -132,6 +132,15 @@ else if (a === 'plugin' && b === 'marketplace' && c === 'remove') {
   const name = argv[3];
   if (!s.list.some((m) => m.name === name)) { console.error('Marketplace ' + name + ' not found'); process.exit(1); }
   s.list = s.list.filter((m) => m.name !== name); save();
+  // As Claude Code does (checked with mrm.sh): run inside a project, it also strips the marketplace from that project's settings
+  for (const sc of ['project', 'local']) {
+    const f = settingsFile(sc);
+    if (!fs.existsSync(f)) continue;
+    edit(sc, (cur) => {
+      if (cur.enabledPlugins) for (const id of Object.keys(cur.enabledPlugins)) if (id.endsWith('@' + name)) delete cur.enabledPlugins[id];
+      if (cur.extraKnownMarketplaces) delete cur.extraKnownMarketplaces[name];
+    });
+  }
 }
 else if (a === 'plugin' && b === 'install') { if (!s.plugins.includes(c)) s.plugins.push(c); save(); edit(scope, (cur) => { cur.enabledPlugins = { ...cur.enabledPlugins, [c]: true }; }); }
 else if (a === 'plugin' && b === 'uninstall') {

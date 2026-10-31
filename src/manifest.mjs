@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { activeBundleLink, bundlesDir, isSecureUrl, mirror, stateFile } from './paths.mjs';
 import { writePrivate } from './files.mjs';
-import { withLock } from './lock.mjs';
+import { sweepDead, withLock } from './lock.mjs';
 import { toStderr } from './out.mjs';
 
 export async function fetchManifest() {
@@ -90,6 +90,9 @@ export async function installEntry(tier, version, entry, { anyHost = false } = {
   const ready = () => fs.existsSync(path.join(dir, '.claude-plugin', 'marketplace.json'));
   if (!ready()) {
     // Download and unpack into folders of this process, then move into place under the lock: a parallel kette finds either nothing or the whole bundle
+    // Leftovers of a kette that was killed while unpacking go first (QA-26)
+    sweepDead(bundlesDir(), /^\.[a-z]+-.+\.(\d+)\.[0-9a-f]+\.tgz$/);
+    sweepDead(path.join(bundlesDir(), tier), /^\..+\.(\d+)\.[0-9a-f]+\.tmp$/);
     const own = `${process.pid}.${crypto.randomBytes(4).toString('hex')}`;
     const tgz = await download(entry, path.join(bundlesDir(), `.${tier}-${version}.${own}.tgz`), { anyHost });
     const temp = path.join(bundlesDir(), tier, `.${version}.${own}.tmp`);

@@ -1,6 +1,7 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { bundlesDir } from './paths.mjs';
+import { bundlesDir, home } from './paths.mjs';
 import { RENAMED_PLUGINS } from './editions.mjs';
 import { cmd, status } from './out.mjs';
 import { isInside } from './files.mjs';
@@ -34,6 +35,12 @@ export function runClaude(args, { cwd } = {}) {
   return spawnSync(line, { ...base, shell: true });
 }
 // Reply of Claude Code for a message; a stack trace of a crash is cut off, the first lines say what went wrong
+// ~/.kette is never a project, so a command run there cannot touch the settings of the project kette was started in
+const neutralCwd = () => {
+  fs.mkdirSync(home(), { recursive: true });
+  return home();
+};
+
 export const output = (r) => {
   const lines = ((r.stdout || '') + (r.stderr || '')).trim().split('\n');
   const stack = lines.findIndex((l) => /^\s+at /.test(l));
@@ -53,7 +60,7 @@ const listed = (list, id) => list !== null && new RegExp(`(^|\\s)${id.replace(/[
 
 // Success is decided by the plugin list afterwards, not the reply text; if the list is not readable, the exit status decides
 function uninstall(id) {
-  const r = runClaude(['plugin', 'uninstall', id]);
+  const r = runClaude(['plugin', 'uninstall', id], { cwd: neutralCwd() });
   const list = installedPlugins();
   // Reply of Claude Code when the plugin is already gone: counts as removed
   const absent = /not found in installed plugins/i.test(output(r));
@@ -77,7 +84,7 @@ function migrateLegacy(all) {
       const r = uninstall(pluginId(p, LEGACY_MARKETPLACE));
       if (!r.ok) return r;
     }
-    const rm = runClaude(['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE]);
+    const rm = runClaude(['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE], { cwd: neutralCwd() });
     return rm.status === 0 ? { ok: true } : { ok: false, reason: output(rm) };
   }
   duplicateHint(legacy, ALL_PLUGINS.map((p) => pluginId(p, LEGACY_MARKETPLACE)), installedPlugins());
@@ -95,6 +102,7 @@ export const manualInstall = (source, plugins, market) => ['', `claude plugin ma
 
 const samePath = (a, b) => path.resolve(a) === path.resolve(b);
 
+
 // Plugins for one project only: kette declares the marketplace in .claude/settings.local.json itself (local scope, the path differs
 // per machine), each plugin is installed with scope project and lands in .claude/settings.json, never in the user settings
 // Claude Code keeps one path per marketplace name for all projects: a registration of this name in another folder under ~/.kette
@@ -107,7 +115,8 @@ export function enablePlugins(source, plugins, root, market) {
   let known = all.find((m) => m.name === market);
   if (known?.path && !samePath(known.path, source)) {
     if (!insideKette(known.path)) return { ok: false, reason: `Marketplace ${market} points to ${known.path}. Switch with: claude plugin marketplace remove ${market}, then run kette add again` };
-    const rm = runClaude(['plugin', 'marketplace', 'remove', market], { cwd: root });
+    // From a neutral folder: inside a project Claude Code also strips the marketplace from its committed settings.json (QA-23)
+    const rm = runClaude(['plugin', 'marketplace', 'remove', market], { cwd: neutralCwd() });
     if (rm.status !== 0 && !/not found/i.test(output(rm))) return { ok: false, reason: output(rm) };
     known = null;
   }
@@ -134,10 +143,13 @@ export function uninstallPlugin(id) {
   return uninstall(id);
 }
 
+// Marketplaces Claude Code has registered on this folder (e.g. the shared folder of an unreleased 0.10 build, QA-24)
+export const registeredAt = (dir) => (hasClaude() ? marketplaces().filter((m) => m.path && samePath(m.path, dir)).map((m) => m.name) : []);
+
 // After kette logout: Claude Code forgets the Enterprise marketplace and its copies; "not found" counts as done
 export function removeMarketplace(market) {
   if (!hasClaude()) return { ok: true };
-  const r = runClaude(['plugin', 'marketplace', 'remove', market]);
+  const r = runClaude(['plugin', 'marketplace', 'remove', market], { cwd: neutralCwd() });
   return r.status === 0 || /not found/i.test(output(r)) ? { ok: true } : { ok: false, reason: output(r) };
 }
 

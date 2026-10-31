@@ -16,8 +16,10 @@ const linesOf = (content) => (content ? content.split(/\r?\n/) : []);
 // //host/path/ without protocol, the way npm maps a token to a registry
 export const authKey = (registry) => registry.replace(/^https?:/, '').replace(/\/?$/, '/');
 
+// Only the token is global, per device; the scope line lives in the project .npmrc of Enterprise projects (docs/adr/0002, D3),
+// so npm in a Community repo never resolves the design system packages from the Enterprise registry
 export function blockLines(registry, token) {
-  return [BLOCK_START, `${SCOPE}:registry=${registry}`, `${authKey(registry)}:_authToken=${token}`, BLOCK_END];
+  return [BLOCK_START, `${authKey(registry)}:_authToken=${token}`, BLOCK_END];
 }
 
 // Lines outside the block and the block itself (null when missing)
@@ -48,6 +50,9 @@ export function blockToken(content) {
 export function hasBlock(content) {
   return split(content).block !== null;
 }
+
+// A block written before 0.10 still holds the scope line; kette login and kette update write it again without
+export const blockHasScope = (content) => (split(content).block || []).some((l) => SCOPE_LINE.test(l));
 
 // New content with the renewed block at the end; replace comments out foreign scope lines
 export function withBlock(content, registry, token, { replace = false } = {}) {

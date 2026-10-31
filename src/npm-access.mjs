@@ -6,7 +6,7 @@ import { DeliveryError, FIGMA_PENDING, NPM_PENDING, createCiToken, deviceId, fig
 import { readState, writeState } from './manifest.mjs';
 import { isSecureUrl, npmUserConfig, registryDefault } from './paths.mjs';
 import { cmd, file as fileName, isoDate, status } from './out.mjs';
-import { SCOPE, TOKEN_PATTERN, authKey, blockToken, foreignScopeLines, hasBlock, projectScope, readFile, withBlock, withoutBlock } from './npmrc.mjs';
+import { SCOPE, TOKEN_PATTERN, authKey, blockHasScope, blockToken, foreignScopeLines, hasBlock, projectScope, readFile, withBlock, withoutBlock } from './npmrc.mjs';
 import { othersCanRead, privateHint, writePrivate } from './files.mjs';
 
 const GITHUB_PACKAGES = 'npm.pkg.github.com';
@@ -102,8 +102,17 @@ export async function whoami(registry, token) {
 // kette update: issue a new token when the block is missing or the registry rejects the token
 export async function ensureNpm(key, opts) {
   if (opts.noNpm) return;
-  const token = blockToken(readFile(readState().npm?.file || npmUserConfig()));
-  if (token && (await whoami(registryUrl(), token)) !== 401) return;
+  const file = readState().npm?.file || npmUserConfig();
+  const current = readFile(file);
+  const token = blockToken(current);
+  if (token && (await whoami(registryUrl(), token)) !== 401) {
+    // Migration of a block from before 0.10: same token, without the global scope line
+    if (blockHasScope(current)) {
+      writePrivate(file, withBlock(current, registryUrl(), token));
+      console.log(`npm access: the ${SCOPE} scope line left ${fileName(file)}, Enterprise projects carry it in their own .npmrc (${cmd('kette add')} in each).`);
+    }
+    return;
+  }
   if (token) console.log('npm token no longer accepted, issuing a new one ...');
   else if (!readState().npm?.pending) console.log('npm access missing, setting it up ...');
   await setupNpm(key, opts);
@@ -124,6 +133,9 @@ export async function npmChecks(root, { line, warn }, opts) {
     else line(code === 200, 'npm token valid', `npm token rejected (response ${code}), issue a new one with: ${cmd('kette update')}`);
   }
   const project = projectScope(readFile(path.join(root, '.npmrc')));
+  // Since 0.10 the scope line is per project, an Enterprise project without it cannot install the design system packages
+  if (token && !project) line(false, '', `.npmrc of this Enterprise project has no ${SCOPE} scope line, npm cannot find the design system packages. Add it with: ${cmd('kette add')}`);
+  if (blockHasScope(readFile(file))) warn(`${fileName(file)} still points ${SCOPE} to Die Kette for every folder (set up before 0.10). Move the line into the projects with: ${cmd('kette update')}`);
   if (project?.includes(GITHUB_PACKAGES)) warn(`.npmrc in the project points ${SCOPE} to ${GITHUB_PACKAGES}. For Die Kette customers: ${scopeLine().trim()}`);
   const leaked = trackedTokenFiles(root);
   line(leaked.length === 0, leaked.length ? `npm token in files tracked by git: ${leaked.join(', ')}. Revoke the token and clean the file` : 'no npm token in files tracked by git');

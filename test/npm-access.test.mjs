@@ -92,7 +92,7 @@ test('login richtet den npm-Zugang als Block mit Rechten 600 ein, nach dem Regis
   assert.equal(result, 0);
   assert.match(out, /npm access set up: @getitdone-gmbh via 127\.0\.0\.1:\d+/);
   const host = registry.replace('http:', '');
-  assert.equal(rc(), `save-exact=true\n\n${BLOCK_START}\n@getitdone-gmbh:registry=${registry}\n${host}:_authToken=${token('a')}\n# <<< kette\n`);
+  assert.equal(rc(), `save-exact=true\n\n${BLOCK_START}\n${host}:_authToken=${token('a')}\n# <<< kette\n`);
   if (process.platform !== 'win32') assert.equal(fs.statSync(userrc).mode & 0o777, 0o600);
   const order = calls.map((c) => c.path);
   assert.ok(order.indexOf('/install/token') < order.indexOf('/registry/token'));
@@ -332,4 +332,25 @@ test('Figma noch nicht eingerichtet: kette figma nennt das Update und lädt nich
   assert.equal(r.out, 'Figma files are not available right now. Try again later with kette figma.');
   assert.equal(fs.existsSync(out), false);
   await assert.rejects(run('token', 'ci', 'list'), /npm access is not available right now\. Try again later with kette update\./);
+});
+
+test('D3: kette update moves the scope line of a block from before 0.10 out of the user npmrc, the token stays', async () => {
+  await run('login', KEY, '--no-plugins');
+  const before = rc();
+  const host = registry.replace('http:', '');
+  const tok = before.match(/kt_[A-Za-z0-9_-]{43}/)[0];
+  write(path.dirname(userrc), path.basename(userrc), `save-exact=true\n\n${BLOCK_START}\n@getitdone-gmbh:registry=${registry}\n${host}:_authToken=${tok}\n# <<< kette\n`);
+  const { out } = await run('update', '--no-plugins');
+  assert.match(out, /scope line left .*Enterprise projects carry it in their own \.npmrc/);
+  assert.equal(rc(), `save-exact=true\n\n${BLOCK_START}\n${host}:_authToken=${tok}\n# <<< kette\n`);
+});
+
+test('D3: doctor names an Enterprise project without the scope line in its own .npmrc', async () => {
+  await run('login', KEY, '--no-plugins');
+  const project = tmp();
+  write(project, 'package.json', '{}');
+  await inDir(project, () => run('add', '--yes', '--no-plugins', '--stack', 'nextjs-ts-tailwind', '--platform', 'github-docker', '--patterns', 'modular-monolith'));
+  fs.rmSync(path.join(project, '.npmrc'));
+  const { out } = await inDir(project, () => run('doctor', '--ci'));
+  assert.match(out, /FAIL \.npmrc of this Enterprise project has no @getitdone-gmbh scope line.*kette add/);
 });

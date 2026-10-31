@@ -320,23 +320,33 @@ export async function askInstance(root) {
     if (picked.length === 1) { [pick] = picked; break; }
     console.log(`Choose one number from 1 to ${options.length}.`);
   }
-  if (pick !== NEW) return pick ? load(pick) : null;
+  if (pick !== NEW) return pick ? { instance: load(pick), create: false } : null;
   const suggested = path.basename(path.resolve(root)).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+/, '').slice(0, 63) || 'project';
   for (;;) {
     const name = await ask('Name of the new instance', suggested);
     if (!validName(name)) { console.log('Use lowercase letters, digits and dashes.'); continue; }
     if (instanceExists(name)) {
-      if (await confirm(`Instance ${name} exists already. Join it instead?`)) return load(name);
+      if (await confirm(`Instance ${name} exists already. Join it instead?`)) return { instance: load(name), create: false };
       continue;
     }
     const editions = [{ value: COMMUNITY, label: editionLabel(COMMUNITY) }, { value: ENTERPRISE, label: `${editionLabel(ENTERPRISE)}, needs the licence on this machine` }];
-    const [edition = COMMUNITY] = await choose('Edition of the instance', editions, tierOf() === ENTERPRISE ? '2' : '1');
+    let edition;
+    for (;;) {
+      const picked = await choose('Edition of the instance', editions, tierOf() === ENTERPRISE ? '2' : '1');
+      if (picked.length === 1) { [edition] = picked; break; }
+      console.log('Choose 1 or 2.');
+    }
     const instance = newInstance(name, edition);
     requireEdition(instance);
-    writeInstance(instance);
-    say('ok', `Instance ${name} (${editionLabel(edition)}) in ${file(tilde(instanceDir(name)))}`);
-    return instance;
+    // Written by createPending after the person confirmed the plan, so "n" leaves no instance behind (QA-21)
+    return { instance, create: true };
   }
+}
+
+// The new instance from the onboarding question, once the plan is confirmed
+export function createPending(instance) {
+  writeInstance(instance);
+  say('ok', `Instance ${instance.name} (${editionLabel(instance.edition)}) in ${file(tilde(instanceDir(instance.name)))}`);
 }
 
 export async function instance(sub, opts, deps) {

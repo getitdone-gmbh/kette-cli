@@ -9,7 +9,7 @@ import { projectPlugins, renewLocalSettings, renewSettings, settingsStatus, user
 import { buildMarketplace, marketDir } from '../src/marketplace.mjs';
 import { enterpriseLeftovers, recordTemplates, removeLeftovers } from '../src/leftovers.mjs';
 import { isInside } from '../src/files.mjs';
-import { lockDir, withLock } from '../src/lock.mjs';
+import { lockDir, takeOver, withLock } from '../src/lock.mjs';
 import { parse, renewProfile } from '../src/cli.mjs';
 
 beforeEach(() => { process.env.KETTE_HOME = tmp(); });
@@ -212,12 +212,53 @@ test('QA-01: a lock of a process that is gone is taken over, a held lock waits',
   assert.throws(() => withLock('nested', () => withLock('nested', () => 0)), /Another kette process is changing nested/, 'the same lock is never taken twice');
 });
 
-test('D7: kette records the Enterprise templates it wrote; leaving removes unchanged ones and the scope line, keeps changed ones', () => {
+const KETTE_LINE = '@getitdone-gmbh:registry=https://npm.kette.itdone.de/';
+
+test('CR-NEW-2: a lock that another process created after the stale check is put back, never taken over', () => {
+  const dir = lockDir('race');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'owner.json'), JSON.stringify({ pid: process.pid, at: Date.now(), token: 'fresh' }));
+  takeOver(dir, { pid: 1, at: 0, token: 'stale' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'owner.json'), 'utf8')).token, 'fresh');
+  assert.deepEqual(fs.readdirSync(path.dirname(dir)).filter((n) => n.startsWith('race.lock.')), [], 'no folder left aside');
+});
+
+test('CR-NEW-3, QA-27: a lock folder without or with a damaged owner file does not block', () => {
+  for (const content of [null, '{ broken']) {
+    const dir = lockDir('owner');
+    fs.mkdirSync(dir, { recursive: true });
+    if (content !== null) fs.writeFileSync(path.join(dir, 'owner.json'), content);
+    const started = Date.now();
+    assert.equal(withLock('owner', () => 'ran'), 'ran');
+    assert.ok(Date.now() - started < 5000, `taken over at once (${content === null ? 'no owner' : 'damaged owner'})`);
+  }
+});
+
+test('QA-26: temp folders of a marketplace build that was killed are removed at the next build, those of a live process stay', () => {
+  const bundles = path.join(process.env.KETTE_HOME, 'bundles');
+  const dead = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }).stdout.trim();
+  fs.mkdirSync(path.join(bundles, `marketplace-community.${dead}.tmp`, 'plugins'), { recursive: true });
+  fs.mkdirSync(path.join(bundles, `marketplace-community.${process.ppid}.tmp`), { recursive: true });
+  buildMarketplace('community', { version: '1', dir: bundle(['ui-laws'], 'community') });
+  assert.equal(fs.existsSync(path.join(bundles, `marketplace-community.${dead}.tmp`)), false);
+  assert.ok(fs.existsSync(path.join(bundles, `marketplace-community.${process.ppid}.tmp`)), 'a running process keeps its folder');
+});
+
+test('CR-NEW-5: a link from a plugin back to a parent folder does not make the copy recurse', { skip: process.platform === 'win32' && 'symlinks need admin rights on Windows' }, () => {
+  const d = bundle(['ui-laws'], 'community');
+  fs.mkdirSync(path.join(d, 'plugins', 'ui-laws', 'skills'));
+  fs.symlinkSync(path.join(d, 'plugins', 'ui-laws'), path.join(d, 'plugins', 'ui-laws', 'skills', 'loop'));
+  const m = buildMarketplace('community', { version: '1', dir: d });
+  assert.ok(fs.existsSync(path.join(m.dir, 'plugins', 'ui-laws', 'EDITION')));
+  assert.equal(fs.existsSync(path.join(m.dir, 'plugins', 'ui-laws', 'skills', 'loop', 'skills')), false);
+});
+
+test('D7: kette records the Enterprise templates and the exact scope line it wrote; leaving removes those, keeps changed files', () => {
   const d = tmp();
   write(d, '.github/workflows/ci.yml', 'jobs: {}\n');
   write(d, 'compose.yaml', 'services: {}\n');
-  write(d, '.npmrc', 'save-exact=true\n@getitdone-gmbh:registry=https://npm.kette.itdone.de/\n');
-  recordTemplates(d, [{ path: '.github/workflows/ci.yml', content: 'jobs: {}\n', template: true, action: 'create' }, { path: 'compose.yaml', content: 'services: {}\n', template: true, action: 'create' }, { path: 'README.md', content: 'x', action: 'create' }]);
+  write(d, '.npmrc', `save-exact=true\n${KETTE_LINE}\n`);
+  recordTemplates(d, [{ path: '.github/workflows/ci.yml', content: 'jobs: {}\n', template: true, action: 'create' }, { path: 'compose.yaml', content: 'services: {}\n', template: true, action: 'create' }, { path: 'README.md', content: 'x', action: 'create' }, { path: '.npmrc', content: `${KETTE_LINE}\n`, npmrc: true, action: 'append' }]);
   fs.writeFileSync(path.join(d, 'compose.yaml'), 'services: { mine: {} }\n');
   assert.deepEqual(enterpriseLeftovers(d), { files: [{ path: '.github/workflows/ci.yml', changed: false }, { path: 'compose.yaml', changed: true }], npmrc: true });
   const r = removeLeftovers(d);
@@ -225,6 +266,30 @@ test('D7: kette records the Enterprise templates it wrote; leaving removes uncha
   assert.equal(fs.existsSync(path.join(d, '.github')), false, 'empty folders go with the file');
   assert.equal(fs.readFileSync(path.join(d, '.npmrc'), 'utf8'), 'save-exact=true\n');
   assert.deepEqual(enterpriseLeftovers(d), { files: [{ path: 'compose.yaml', changed: true }], npmrc: false });
+});
+
+test('CR-NEW-1: a scope line kette did not write stays, also with CRLF; only the kette line goes and the line endings stay', () => {
+  const d = tmp();
+  const foreign = '@getitdone-gmbh:registry=https://npm.pkg.github.com\r\nsave-exact=true\r\n';
+  write(d, '.npmrc', foreign);
+  assert.equal(enterpriseLeftovers(d, KETTE_LINE).npmrc, false);
+  removeLeftovers(d, KETTE_LINE);
+  assert.equal(fs.readFileSync(path.join(d, '.npmrc'), 'utf8'), foreign, 'byte for byte');
+  write(d, '.npmrc', `save-exact=true\r\n${KETTE_LINE}\r\n`);
+  assert.equal(enterpriseLeftovers(d, KETTE_LINE).npmrc, true, 'the kette line of a project from before the record');
+  removeLeftovers(d, KETTE_LINE);
+  assert.equal(fs.readFileSync(path.join(d, '.npmrc'), 'utf8'), 'save-exact=true\r\n');
+});
+
+test('CR-NEW-4: a recorded template behind a symlinked folder that leaves the project is never deleted', { skip: process.platform === 'win32' && 'symlinks need admin rights on Windows' }, () => {
+  const d = tmp();
+  const outside = tmp();
+  write(outside, 'ci.yml', 'jobs: {}\n');
+  fs.symlinkSync(outside, path.join(d, 'out'));
+  recordTemplates(d, [{ path: 'out/ci.yml', content: 'jobs: {}\n', template: true, action: 'create' }]);
+  assert.deepEqual(enterpriseLeftovers(d).files, []);
+  removeLeftovers(d);
+  assert.ok(fs.existsSync(path.join(outside, 'ci.yml')));
 });
 
 test('renewProfile with an instance sets instance after project and follows its edition down to Community', () => {

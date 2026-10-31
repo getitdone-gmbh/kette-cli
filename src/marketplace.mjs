@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { bundlesDir } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE } from './editions.mjs';
-import { withLock } from './lock.mjs';
+import { sweepDead, withLock } from './lock.mjs';
 import { isInside } from './files.mjs';
 
 // One Claude Code marketplace per edition, built only from that edition's bundle (docs/adr/0002, decision 8): a plugin ID resolves to
@@ -18,14 +18,17 @@ export const pluginNames = (dir) => (fs.existsSync(path.join(dir, 'plugins')) ? 
 
 // Copies, not links (Claude Code refuses entries that leave the marketplace folder); a link inside a plugin is resolved,
 // one pointing outside the bundle is left out, so nothing from elsewhere on the machine lands in the marketplace
-function copyTree(root, from, to) {
+// seen: real paths of the folders on the current path, so a link back to a parent folder cannot recurse forever (CR-NEW-5)
+function copyTree(root, from, to, seen = new Set()) {
   let real;
   try { real = fs.realpathSync(from); } catch { return; }
   if (!isInside(root, real)) return;
   const stat = fs.statSync(real);
   if (stat.isDirectory()) {
+    if (seen.has(real)) return;
     fs.mkdirSync(to, { recursive: true });
-    for (const name of fs.readdirSync(real)) copyTree(root, path.join(from, name), path.join(to, name));
+    const inner = new Set(seen).add(real);
+    for (const name of fs.readdirSync(real)) copyTree(root, path.join(from, name), path.join(to, name), inner);
   } else if (stat.isFile()) fs.copyFileSync(real, to);
 }
 
@@ -35,6 +38,8 @@ const copyPlugin = (bundleDir, from, to) => copyTree(fs.realpathSync(bundleDir),
 export function buildMarketplace(edition, bundle) {
   const dir = marketDir(edition);
   return withLock(`marketplace-${edition}`, () => {
+    // A build killed half way (SIGKILL, power loss) leaves its temp folder; the next build removes those of dead processes (QA-26)
+    sweepDead(bundlesDir(), new RegExp(`^marketplace-${edition}\\.(\\d+)\\.tmp$`));
     if (!bundle) {
       fs.rmSync(dir, { recursive: true, force: true });
       return { dir, plugins: [] };
