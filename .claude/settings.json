@@ -14,5 +14,18 @@
     "design-review-pack@kette": false,
     "kette-ticketing@kette": false,
     "ui-gesetze@kette": false
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "kette ticket hook run",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
   }
 }
