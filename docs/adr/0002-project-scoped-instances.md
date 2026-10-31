@@ -63,6 +63,12 @@ Claude Code (2.1.310, checked in a sandbox HOME) keeps one path per marketplace 
     - **No tight loop (LK-5).** A lock that looks gone but is still there (a pending delete on Windows) is tried again after a millisecond.
     - **Async holders renew their lock (LK-6).** `withLockAsync` renews the file time of its lock every 10 seconds while the work runs; a lock counts from the later of its owner time and its file time.
 
+    - **Review follow-ups.** On Windows the stamped start of Node and the StartTime of the system may differ by 30 seconds (a cold start with a virus scan); a reused pid is still caught by the 2 minutes. Without a boot id (some containers) Linux compares the start ticks alone (LK-7). On a drive without hard links whose inodes are not stable, an exclusive create whose inode differs still counts as the own file when the name holds exactly the content just written, which carries the own token or claimant (LK-8).
+    - **Not supported (LK-9).** A `~/.kette` that several containers share: each container has its own pid namespace, so a pid in a lock or claim means nothing to another container.
+23. **KETTE-42, leftovers of a killed run.**
+    - **K16-02.** A `kette ticket new` killed at its first write leaves its lock with a dead owner, and its decision may reach the board only after the next command read it. `kette ticket list` and `report` then say that the last `ticket new` of the instance on this machine was interrupted and to look again, until the decision shows as incomplete with `kette ticket repair <KD>`. `repair` runs under the same lock as `new` and takes the dead one over.
+    - **K16-03.** A claim whose lock is gone or holds another token can no longer be used by anyone; the next kette run that takes a lock removes it at once, whatever its age. A claimant still at work stops at its own check of the claim (decision 22).
+
 ## Alternatives considered
 - A marketplace per edition (`kette-community`, `kette-enterprise`): separate by name, but every existing user gets new plugin IDs and the bundles would need renamed manifests. Rejected for now (D2 in docs/instances.md).
 - A marketplace per instance, which would also make the bundle pin a real switch: same ID problem, plus one plugin cache per instance. Rejected for now (D6); the pin is a check.

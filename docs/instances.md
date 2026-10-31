@@ -156,7 +156,7 @@ Every read-modify-write of a machine file runs under a lock: `state.json`, each 
 
 | Path | Why | Commands |
 |---|---|---|
-| `~/.kette/credentials`, `device-id`, `state.json`, `bundles/**`, `instances/**`, `locks` | machine store, the instances themselves, locks (empty after every command) | all |
+| `~/.kette/credentials`, `device-id`, `state.json`, `bundles/**`, `instances/**`, `locks` | machine store, the instances themselves, locks (empty after every command that ended normally; what a killed run left, the next kette run that takes a lock removes) | all |
 | `~/.claude/plugins/**` | Claude Code's own registry of marketplace names, its plugin cache and `installed_plugins.json` (project-scope entries with their project path); it changes for project-scope installs too and kette cannot avoid it | commands that enable plugins |
 | `~/.claude/.claude.json`, `~/.claude/backups/**` | Claude Code keeps its own state and backups there on every run (QA-19); with `kette cloud setup` it also holds the itdone MCP server in the user scope (open decision D4) | every command that runs `claude`, `cloud setup` |
 | `~/.npmrc` (marked Kette block, the token only) | npm access per device (D3, decided in fix round 2); `kette npm move-scope` takes the scope line of a block from before 0.10 out of it | `login`, `update`, `logout`, `npm move-scope` |
