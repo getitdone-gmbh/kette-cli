@@ -43,6 +43,7 @@ test('CR-SEC-1, CR-INST-2: origins are normalised, user info dropped, ssh, scp a
   assert.deepEqual([...keys], ['github.com/acme/web']);
   for (const u of forms) assert.doesNotMatch(normalizeUrl(u).url, /ghp_secret|x-access-token/);
   assert.equal(normalizeUrl('ssh://git@github.com/acme/web').url, 'ssh://git@github.com/acme/web', 'the ssh user git stays, it is needed to clone');
+  assert.equal(normalizeUrl('C:/repos/app.git').url, path.resolve('C:/repos/app.git'), 'a Windows drive path is a local repo, not a URL with the scheme c:');
 });
 
 test('CR-SEC-3, CR-SEC-4: printed text loses user info, escape sequences and control characters', () => {

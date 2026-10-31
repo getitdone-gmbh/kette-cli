@@ -49,7 +49,8 @@ export function normalizeUrl(raw) {
     return { url: `${user === 'git' ? 'git@' : ''}${h}:${rest}`, key: `${h}/${trimPath(rest)}` };
   }
   let u;
-  try { u = new URL(text); } catch { u = null; }
+  // A Windows drive path (C:/repos/app.git) would parse as a URL with the scheme c:
+  try { u = /^[a-z]:[\\/]/i.test(text) ? null : new URL(text); } catch { u = null; }
   if (!u || u.protocol === 'file:') {
     const local = path.resolve(u ? decodeURIComponent(u.pathname) : text);
     return { url: local, key: `path:${trimPath(local.split(path.sep).join('/'))}` };
