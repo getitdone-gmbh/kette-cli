@@ -51,6 +51,10 @@ test('KETTE-28: an approval or acting as a person needs that person at a termina
   assert.match(r.out, /done \(approved by lead@acme\.test \(declared\)\)/);
   const [d] = await decisions(box, app);
   assert.deepEqual(d.items[0].approval?.how, 'declared');
+  // The closing revision names the person who approved, marked as declared, not the CLI
+  const why = ok(await kit.step(box, ['ticket', 'why', 'KD-0001'], { cwd: app })).out;
+  assert.match(why, /rev \d+ \S+ close by human lead@acme\.test \(declared\) via cli/);
+  assert.doesNotMatch(why, /close by human kette-cli/);
 });
 
 test('KETTE-29: two parallel ticket new on one machine end with two distinct ids', needsBoard, async () => {
@@ -78,13 +82,69 @@ test('KETTE-31: a new killed after its first write is named by list and report, 
   const list = ok(await kit.step(box, ['ticket', 'list'], { cwd: app }));
   assert.match(list.out, /WARN KD-0001 is incomplete \(missing [^)]*\): kette ticket repair KD-0001/);
   assert.match(ok(await kit.step(box, ['ticket', 'report'], { cwd: app })).out, /KD-0001 is incomplete/);
-  // The killed run left its lock; the next new takes the stale lock over and removes it
-  const again = ok(await kit.step(box, argv, { cwd: app, allow: [/^\.kette\/locks\/ticket-new-acme\.lck$/] }), 1);
-  assert.equal(fs.existsSync(path.join(box.home, '.kette', 'locks', 'ticket-new-acme.lck')), false, 'no lock left behind');
+  const again = ok(await kit.step(box, argv, { cwd: app }), 1);
   assert.match(again.out, /KD-0001 is this decision, recorded half by an interrupted run\. Complete it with: kette ticket repair KD-0001/);
   assert.match(ok(await kit.step(box, ['ticket', 'repair', 'KD-0001', '--yes'], { cwd: app })).out, /Repair KD-0001: .*KD-0001\/app\/acme-app/);
   const ds = await decisions(box, app);
   assert.deepEqual(ds.map((d) => [d.decision.id, d.items.length]), [['KD-0001', 2]]);
   assert.doesNotMatch(ok(await kit.step(box, ['ticket', 'list'], { cwd: app })).out, /incomplete/);
   assert.match(ok(await kit.step(box, ['ticket', 'repair', 'KD-0001', '--yes'], { cwd: app })).out, /KD-0001 is complete, nothing to repair/);
+  // The killed run left its lock; the next new takes the stale lock over and removes it
+  const lock = path.join(box.home, '.kette', 'locks', 'ticket-new-acme.lck');
+  assert.equal(fs.existsSync(lock), true, 'the kill left the lock');
+  ok(await kit.step(box, ['ticket', 'new', 'After the kill', '--by', 'lead@acme.test', '--source', 'chat:after', '--stations', 'app', '--yes'], { cwd: app, allow: [/^\.kette\/locks\/ticket-new-acme\.lck$/] }));
+  assert.equal(fs.existsSync(lock), false, 'no lock left behind');
+});
+
+test('KETTE-29: two parallel ticket new from two homes on one board end with two distinct ids, without a manual step', needsBoard, async () => {
+  const token = 'tok-two-homes-0123456789';
+  const boxes = [sandbox(), sandbox()];
+  const apps = [];
+  for (const box of boxes) {
+    await kit.licensed(box);
+    apps.push(await kit.connected(box, 'acme', 'p-shared', token));
+  }
+  const runs = await Promise.all(boxes.map((box, i) => run(box, apps[i], ['ticket', 'new', `From home ${i + 1}`, '--by', 'lead@acme.test', '--source', `chat:h${i + 1}`, '--stations', 'app', '--yes'])));
+  assert.deepEqual(runs.map((r) => r.code), [0, 0], runs.map((r) => r.out).join('\n'));
+  const board = await decisions(boxes[0], apps[0]);
+  assert.deepEqual(board.map((d) => d.decision.id).sort(), ['KD-0001', 'KD-0002']);
+  assert.deepEqual(board.map((d) => d.items.length), [1, 1], 'each decision has its own station item');
+  const said = runs.map((r) => r.out).join('\n');
+  assert.match(said, /Written to project p-shared as KD-0001/);
+  assert.match(said, /Written to project p-shared as KD-0002/);
+});
+
+test('KETTE-32 (KT-N2): the intake model of the instance is asked only after this machine confirmed its host, again after a change', { ...needsBoard, skip: needsBoard.skip || posixOnly }, async () => {
+  const { serve } = await import('./helpers.mjs');
+  const asked = [];
+  const model = await serve((req, res, body) => { asked.push(body); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message: { content: '{"change":true,"stations":["app"]}' } }] })); });
+  try {
+    const box = sandbox();
+    await kit.licensed(box);
+    const app = await kit.connected(box, 'acme', 'p-acme', 'tok-model-0123456789');
+    const f = path.join(box.home, '.kette', 'instances', 'acme', 'instance.json');
+    const setModel = (url) => { const i = JSON.parse(fs.readFileSync(f, 'utf8')); fs.writeFileSync(f, JSON.stringify({ ...i, ticketing: { ...i.ticketing, intakeModel: url } })); };
+    setModel(`${model.url}/v1/chat/completions`);
+    const prompt = JSON.stringify({ prompt: 'das sollte anders funktionieren als bisher, finde ich, schon seit einer ganzen Weile eigentlich' });
+    const hook = (env = {}) => kit.step(box, ['ticket', 'hook', 'run'], { cwd: app, input: prompt, env }).then((r) => ok(r));
+    assert.match(ok(await kit.step(box, ['ticket', 'hook', 'status'], { cwd: app })).out, new RegExp(`Intake model ${model.url.replace(/[.]/g, '\\.')} of instance acme is not confirmed on this machine.*kette ticket hook trust`));
+    assert.match(ok(await kit.step(box, ['ticket', 'hook', 'install'], { cwd: app })).out, /is not confirmed on this machine/);
+    assert.match(JSON.parse((await hook()).out).hookSpecificOutput.additionalContext, /^Kette intake: if this prompt asks to change/);
+    assert.equal(asked.length, 0, 'no prompt reached the model before the confirmation');
+    assert.match(ok(await kit.step(box, ['ticket', 'hook', 'trust'], { cwd: app }), 1).out, /needs a person at a terminal/);
+    box.env = { ...box.env, ...kit.env() };
+    const t = await interactive(box, ['ticket', 'hook', 'trust'], [['Allow prompts of this project to go to', 'y']], { cwd: app, scenario: 'ticket-model-trust' });
+    assert.equal(t.code, 0, t.out);
+    assert.match(ok(await kit.step(box, ['ticket', 'hook', 'status'], { cwd: app })).out, /confirmed on this machine/);
+    assert.match(JSON.parse((await hook()).out).hookSpecificOutput.additionalContext, /this prompt asks for a change to the chain\. Stations touched \(first guess\): app/);
+    assert.equal(asked.length, 1, 'the confirmed model was asked');
+    setModel(`http://localhost:${new URL(model.url).port}/v1/chat/completions`);
+    assert.match(JSON.parse((await hook()).out).hookSpecificOutput.additionalContext, /^Kette intake: if this prompt asks to change/);
+    assert.equal(asked.length, 1, 'a changed host is not asked before a new confirmation');
+    // The model of this machine itself (environment) needs no confirmation
+    assert.match(JSON.parse((await hook({ KETTE_INTAKE_MODEL_URL: `${model.url}/v1/chat/completions` })).out).hookSpecificOutput.additionalContext, /Stations touched \(first guess\): app/);
+    assert.equal(asked.length, 2);
+  } finally {
+    await model.close();
+  }
 });

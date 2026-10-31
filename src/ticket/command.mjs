@@ -19,8 +19,9 @@ export const TICKET_HELP = `kette ticket connect [workload-zero] --project <id>
   kette ticket pick <item> --as <member> | link <item> --pr|--commit|--figma|--review <url> | check <item>
   kette ticket check <KD>
                         Follow-through: per station its definition of done and what is still open (reads only)
-  kette ticket hook install | status | remove
-                        The intake hook in this project's .claude/settings.json (never the user settings)`;
+  kette ticket hook install | status | remove | trust
+                        The intake hook in this project's .claude/settings.json (never the user settings); trust confirms
+                        the intake model host of the instance on this machine`;
 
 const USAGE = `Usage: ${TICKET_HELP.split('\n').filter((l) => l.trim().startsWith('kette')).map((l) => l.trim()).join(' | ')}`;
 const say = (kind, msg) => console.log(`${status(kind, kind === 'ok' ? 'OK  ' : kind.toUpperCase())} ${msg}`);
@@ -29,8 +30,9 @@ const SOURCE_KINDS = ['chat', 'note', 'meeting', 'ticket', 'review'];
 const LINK_FLAGS = { pr: 'pr', commit: 'commit', figma: 'figma-node', review: 'review' };
 const isAgent = () => process.env.CLAUDECODE === '1';
 
-// Who writes: an agent when Claude Code runs kette, otherwise a person; always marked on the ticket (REQ-24)
-const authorOf = (opts) => ({ type: isAgent() ? 'agent' : 'human', name: opts.as || opts.by || 'kette-cli', via: 'cli' });
+// Who writes: an agent when Claude Code runs kette, otherwise a person; always marked on the ticket (REQ-24). An approval names the
+// person who confirmed it at the terminal, marked as declared
+const authorOf = (opts) => (opts['approved-by'] ? { type: 'human', name: `${opts['approved-by']} (declared)`, via: 'cli' } : { type: isAgent() ? 'agent' : 'human', name: opts.as || opts.by || 'kette-cli', via: 'cli' });
 const actorOf = (opts) => opts.as || opts.by || 'kette-cli';
 
 // A write goes to the board only after a yes in a terminal or --yes; agents and CI pass --yes on purpose
@@ -69,22 +71,25 @@ const describeWrite = (w) => {
   return [`${w.method} ${w.path.replace(/[0-9a-f]{24}/g, ':id')}`, b.title && `"${printable(b.title)}"`, b.status && `status ${b.status}`, b.content && `comment "${printable(b.content.split('\n')[0])}"`].filter(Boolean).join(' · ');
 };
 
-// Every write runs twice: first on a copy of the board (the plan, also what --dry-run prints), then for real, where each request is
-// compared with the plan before it leaves the process; a refusal by the chain rules stops in the first run, before anything is sent.
+// Every write runs twice: first on a copy of the board (the plan, also what --dry-run prints), then for real after the yes, planned
+// again with a fresh time; each request is compared with that plan before it leaves the process. A refusal by the chain rules stops
+// in the first run, before anything is sent. A new decision takes its id only after the yes, under the lock of its instance (KT-N3).
 // --dry-run reads the board, and with the shared session file that read may renew the session (docs/ticketing.md)
-async function write({ lib, p }, opts, op, args, summary) {
-  const at = new Date().toISOString();
-  const { result: planned, writes } = await refused(lib, () => p.plan(op, args, at));
+async function write({ lib, p }, opts, op, args, summary, { lock = null } = {}) {
+  const { result: planned, writes } = await refused(lib, () => p.plan(op, args, new Date().toISOString()));
   console.log(summary(planned));
   if (!writes.length) { console.log(dim('Nothing to change on the board.')); return planned; }
   console.log(`${opts.dryRun ? 'Would send' : 'Sends'} ${writes.length} request${writes.length === 1 ? '' : 's'} to project ${printable(p.projectId)}:`);
   for (const w of writes) console.log(`  ${dim(describeWrite(w))}`);
   if (opts.dryRun) { console.log(dim('--dry-run: nothing written.')); return planned; }
   if (!(await approved(opts, 'Write this to the board?'))) throw new ExitError('Not confirmed, nothing written.', 1);
-  const { result, unsent, duplicates } = await refused(lib, () => p.write(op, args, at, writes));
+  const commit = () => refused(lib, () => p.write(op, args, new Date().toISOString(), writes));
+  const { result, unsent, renumbered, twins } = lock ? await withLockAsync(lock, commit) : await commit();
   if (unsent) throw new ExitError(`${unsent} planned requests were not sent. Check the board with ${cmd('kette ticket list')} before running it again.`, 1);
-  if (duplicates?.length > 1) throw new ExitError(`${result.decision.id} is on the board ${duplicates.length} times now (tickets ${duplicates.map(printable).join(', ')}): another kette recorded it at the same moment on another machine. Keep one and withdraw the other on the board.`, 1);
-  say('ok', `Written to project ${printable(p.projectId)}`);
+  for (const r of renumbered ?? []) say('warn', `${r.from} was recorded at the same moment by a parallel run on another machine; this decision is ${r.to} now (revision written)`);
+  if (twins?.length) say('warn', `${printable(result.decision.id)} was also recorded at the same moment by a parallel run (${twins.map(printable).join(', ')}); the later one moves itself to the next free id`);
+  if (op === 'new' && result.decision.id !== planned.decision.id && !renumbered?.length) say('info', `${planned.decision.id} was taken meanwhile, written as ${result.decision.id}`);
+  say('ok', `Written to project ${printable(p.projectId)}${op === 'new' ? ` as ${result.decision.id}` : ''}`);
   return result;
 }
 
@@ -139,8 +144,9 @@ async function newDecision(project, opts, args) {
   if (!stations.length) throw new ExitError('--stations names the stations the decision reaches, e.g. --stations prototype,app:<repo>');
   const board = await open(project, opts);
   const op = { words, statement: opts.statement, paraphrase: Boolean(opts.paraphrase), proposedBy: opts['proposed-by'], acceptance: opts.acceptance, by: opts.by, source: parseSource(opts.source), stations, labels: list(opts.label), rationale: opts.rationale, actor: actorOf(opts) };
-  // One new decision at a time per instance on this machine, so two parallel runs never take the same id (KETTE-29)
-  await withLockAsync(`ticket-new-${project.instance.name}`, () => write(board, opts, 'new', op, (made) => `New decision ${made.decision.id} with ${made.items.length} station item${made.items.length === 1 ? '' : 's'}:\n${made.items.map(itemLine).join('\n')}`));
+  // One new decision at a time per instance on this machine, so two parallel runs never take the same id (KETTE-29); the lock is held
+  // only for the commit after the yes, never while a person reads the plan
+  await write(board, opts, 'new', op, (made) => `New decision ${made.decision.id} with ${made.items.length} station item${made.items.length === 1 ? '' : 's'}:\n${made.items.map(itemLine).join('\n')}`, { lock: `ticket-new-${project.instance.name}` });
   return 0;
 }
 
