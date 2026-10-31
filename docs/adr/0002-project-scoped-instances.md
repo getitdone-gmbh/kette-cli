@@ -55,6 +55,14 @@ Claude Code (2.1.310, checked in a sandbox HOME) keeps one path per marketplace 
 
     Tested with a claimant stopped for 12 seconds before its unlink while a second process waits, 4 processes x 50 runs with each link error, an unreadable lock, a lock of a reused pid and orphaned claims, on Linux, macOS and Windows.
 
+## Decisions of fix round 5 (coordinator, 2026-10-31)
+22. **KETTE-41, lock edge cases (amends 21).**
+    - **Start as the system says it (LK-1, LK-2).** The owner keeps the start of its process in the raw form of the system and compares it unchanged: Linux the start ticks of field 22 of `/proc/<pid>/stat` with the boot id from `/proc/sys/kernel/random/boot_id`, macOS the `lstart` text of `ps` with `TZ=UTC` and `LC_ALL=C`. No clock time is computed, so a clock jump, a time zone or a DST hour changes nothing. Windows has no cheap call for the own process (PowerShell would cost a second per kette run), so the owner keeps the start Node stamped and the checker reads the StartTime of the system as UTC FILETIME; both are stamped once at the start, a later clock jump moves neither, and they may differ by 2 seconds.
+    - **A claimant checks its claim before the unlink (LK-3).** It reads the claim once more right before it unlinks the lock and removes the claim only if its own content is still there, so a clearer that could not put back a claim it moved never makes two claimants act.
+    - **Without hard links, the name must lead to the written file (LK-4).** After the exclusive create and the write, `fstat` of the descriptor and `stat` of the name must show the same file (device and inode or file id); otherwise the lock or claim counts as taken.
+    - **No tight loop (LK-5).** A lock that looks gone but is still there (a pending delete on Windows) is tried again after a millisecond.
+    - **Async holders renew their lock (LK-6).** `withLockAsync` renews the file time of its lock every 10 seconds while the work runs; a lock counts from the later of its owner time and its file time.
+
 ## Alternatives considered
 - A marketplace per edition (`kette-community`, `kette-enterprise`): separate by name, but every existing user gets new plugin IDs and the bundles would need renamed manifests. Rejected for now (D2 in docs/instances.md).
 - A marketplace per instance, which would also make the bundle pin a real switch: same ID problem, plus one plugin cache per instance. Rejected for now (D6); the pin is a check.
