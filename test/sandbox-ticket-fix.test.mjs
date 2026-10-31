@@ -26,6 +26,8 @@ function run(box, cwd, argv) {
   });
 }
 
+// The lock a killed ticket new left, which the repair takes over and removes
+const STALE_NEW_LOCK = [/^\.kette\/locks\/ticket-new-acme\.lck$/];
 const decisions = async (box, cwd) => JSON.parse((await kit.step(box, ['ticket', 'list', '--json'], { cwd })).out);
 
 test('KETTE-28: an approval or acting as a person needs that person at a terminal; an agent or a run without terminal is refused', { ...needsBoard, skip: needsBoard.skip || posixOnly }, async () => {
@@ -84,16 +86,41 @@ test('KETTE-31: a new killed after its first write is named by list and report, 
   assert.match(ok(await kit.step(box, ['ticket', 'report'], { cwd: app })).out, /KD-0001 is incomplete/);
   const again = ok(await kit.step(box, argv, { cwd: app }), 1);
   assert.match(again.out, /KD-0001 is this decision, recorded half by an interrupted run\. Complete it with: kette ticket repair KD-0001/);
-  assert.match(ok(await kit.step(box, ['ticket', 'repair', 'KD-0001', '--yes'], { cwd: app })).out, /Repair KD-0001: .*KD-0001\/app\/acme-app/);
+  assert.match(ok(await kit.step(box, ['ticket', 'repair', 'KD-0001', '--yes'], { cwd: app, allow: STALE_NEW_LOCK })).out, /Repair KD-0001: .*KD-0001\/app\/acme-app/);
   const ds = await decisions(box, app);
   assert.deepEqual(ds.map((d) => [d.decision.id, d.items.length]), [['KD-0001', 2]]);
   assert.doesNotMatch(ok(await kit.step(box, ['ticket', 'list'], { cwd: app })).out, /incomplete/);
   assert.match(ok(await kit.step(box, ['ticket', 'repair', 'KD-0001', '--yes'], { cwd: app })).out, /KD-0001 is complete, nothing to repair/);
-  // The killed run left its lock; the next new takes the stale lock over and removes it
-  const lock = path.join(box.home, '.kette', 'locks', 'ticket-new-acme.lck');
-  assert.equal(fs.existsSync(lock), true, 'the kill left the lock');
-  ok(await kit.step(box, ['ticket', 'new', 'After the kill', '--by', 'lead@acme.test', '--source', 'chat:after', '--stations', 'app', '--yes'], { cwd: app, allow: [/^\.kette\/locks\/ticket-new-acme\.lck$/] }));
-  assert.equal(fs.existsSync(lock), false, 'no lock left behind');
+  // The killed run left its lock; the repair ran under it and took it over (K16-02)
+  assert.equal(fs.existsSync(path.join(box.home, '.kette', 'locks', 'ticket-new-acme.lck')), false, 'no lock left behind');
+});
+
+test('K16-02: a list right after a new killed at its first write warns, also while that write is still on its way to the board', needsBoard, async () => {
+  let kill = null;
+  // The board takes the first write, the run is killed at once, the board applies it 3 s later
+  const slow = await startBoard({ delayMs: 3000, onWrite: () => { kill?.(); kill = null; } });
+  try {
+    const k = ticketKit(slow);
+    const box = sandbox();
+    await k.licensed(box);
+    const app = await k.connected(box, 'acme', 'p-k16', 'tok-k16-0123456789');
+    const c = spawn(process.execPath, [BIN, 'ticket', 'new', 'Killed at once', '--by', 'lead@acme.test', '--source', 'chat:k16', '--stations', 'prototype,app', '--yes'], { cwd: app, env: { ...box.env, ...k.env() }, stdio: 'ignore' });
+    // Only the PID of the child this test started is killed
+    kill = () => c.kill('SIGKILL');
+    await new Promise((r) => c.on('close', r));
+    const early = ok(await k.step(box, ['ticket', 'list'], { cwd: app }));
+    assert.match(early.out, /WARN The last kette ticket new of instance acme on this machine was interrupted.*kette ticket list.*kette ticket repair <KD>/s);
+    let later = '';
+    for (let i = 0; i < 40 && !/KD-0001 is incomplete/.test(later); i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      later = ok(await k.step(box, ['ticket', 'list'], { cwd: app })).out;
+    }
+    assert.match(later, /WARN KD-0001 is incomplete \(missing [^)]*\): kette ticket repair KD-0001/);
+    assert.match(ok(await k.step(box, ['ticket', 'repair', 'KD-0001', '--yes'], { cwd: app, allow: STALE_NEW_LOCK })).out, /Repair KD-0001/);
+    assert.doesNotMatch(ok(await k.step(box, ['ticket', 'list'], { cwd: app })).out, /WARN/);
+  } finally {
+    await slow.close();
+  }
 });
 
 // QA T14-02 and S8M: several homes (machines) record decisions on one empty board at the same moment, round after round; 8 x 4 is the QA scenario S8M of KETTE-40

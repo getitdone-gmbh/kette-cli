@@ -2,7 +2,7 @@ import { ExitError } from '../errors.mjs';
 import { ask, confirm } from '../prompt.mjs';
 import { bold, cmd, dim, file, status } from '../out.mjs';
 import { tilde } from '../rules.mjs';
-import { withLockAsync } from '../lock.mjs';
+import { interrupted, withLockAsync } from '../lock.mjs';
 import { PROJECT_PATTERN, instanceFile, instanceSource, printable, updateInstance } from '../instance/config.mjs';
 import { WALLET_PATH, readWallet, writeWallet } from '../wallet/config.mjs';
 import { loadTicketing, ticketingDir } from './module.mjs';
@@ -118,8 +118,15 @@ function showDecision(found) {
   console.log(dim(`  ${found.revisions?.length ?? 0} revisions, history with ${cmd(`kette ticket why ${d.id}`)}`));
 }
 
-// Decisions an interrupted run left half written, named with their repair
-const incompleteLines = (half) => half.map((h) => `${status('warn', 'WARN')} ${printable(h.id)} is incomplete (missing ${h.missing.map(printable).join(', ')}): ${cmd(`kette ticket repair ${h.id}`)}`);
+const newLock = (project) => `ticket-new-${project.instance.name}`;
+
+// Decisions an interrupted run left half written, named with their repair. A ticket new killed on this machine whose decision is
+// not on the board yet (its last write may still be on the way) is named too, so a list right after the kill never stays silent (K16-02)
+function incompleteLines(project, half) {
+  const lines = half.map((h) => `${status('warn', 'WARN')} ${printable(h.id)} is incomplete (missing ${h.missing.map(printable).join(', ')}): ${cmd(`kette ticket repair ${h.id}`)}`);
+  if (!half.length && interrupted(newLock(project))) lines.push(`${status('warn', 'WARN')} The last ${cmd('kette ticket new')} of instance ${printable(project.instance.name)} on this machine was interrupted; its decision may still reach the board. Run ${cmd('kette ticket list')} again in a moment: it then shows the decision as incomplete with ${cmd('kette ticket repair <KD>')}.`);
+  return lines;
+}
 
 function parseSource(raw) {
   if (!raw) throw new ExitError('--source names where the decision was made, e.g. --source chat:<session> or --source meeting:<date>');
@@ -146,7 +153,7 @@ async function newDecision(project, opts, args) {
   const op = { words, statement: opts.statement, paraphrase: Boolean(opts.paraphrase), proposedBy: opts['proposed-by'], acceptance: opts.acceptance, by: opts.by, source: parseSource(opts.source), stations, labels: list(opts.label), rationale: opts.rationale, actor: actorOf(opts) };
   // One new decision at a time per instance on this machine, so two parallel runs never take the same id (KETTE-29); the lock is held
   // only for the commit after the yes, never while a person reads the plan
-  await write(board, opts, 'new', op, (made) => `New decision ${made.decision.id} with ${made.items.length} station item${made.items.length === 1 ? '' : 's'}:\n${made.items.map(itemLine).join('\n')}`, { lock: `ticket-new-${project.instance.name}` });
+  await write(board, opts, 'new', op, (made) => `New decision ${made.decision.id} with ${made.items.length} station item${made.items.length === 1 ? '' : 's'}:\n${made.items.map(itemLine).join('\n')}`, { lock: newLock(project) });
   return 0;
 }
 
@@ -180,7 +187,8 @@ async function route(project, opts, args) {
 // kette ticket repair <KD>: completes what an interrupted run left out (first revision, planned station items) (KETTE-31)
 async function repair(project, opts, args) {
   const id = decisionId(args, 'kette ticket repair <KD>');
-  await write(await open(project, opts), opts, 'repair', { id, actor: actorOf(opts) }, (r) => (r.added.length || r.revision || r.moved?.length ? `Repair ${id}: ${[...(r.moved ?? []).map((m) => `twin moved to ${m.to}`), r.revision && 'first revision', ...r.added].filter(Boolean).map(printable).join(', ')}` : `${id} is complete, nothing to repair.`));
+  // Under the lock of ticket new: a repair never races a new of this machine, and it takes over the lock a killed new left (K16-02)
+  await write(await open(project, opts), opts, 'repair', { id, actor: actorOf(opts) }, (r) => (r.added.length || r.revision || r.moved?.length ? `Repair ${id}: ${[...(r.moved ?? []).map((m) => `twin moved to ${m.to}`), r.revision && 'first revision', ...r.added].filter(Boolean).map(printable).join(', ')}` : `${id} is complete, nothing to repair.`), { lock: newLock(project) });
   return 0;
 }
 
@@ -235,7 +243,7 @@ async function listCmd(project, opts) {
   if (json(opts, decisions)) return 0;
   if (!decisions.length) console.log(`No decisions on the board of instance ${project.instance.name} yet. Record one with ${cmd('kette ticket new')}.`);
   for (const d of [...decisions].sort((a, b) => a.decision.id.localeCompare(b.decision.id))) console.log(decisionLine(d));
-  for (const l of incompleteLines(await refused(lib, () => p.incomplete()))) console.log(l);
+  for (const l of incompleteLines(project, await refused(lib, () => p.incomplete()))) console.log(l);
   return 0;
 }
 
@@ -267,7 +275,7 @@ async function report(project, opts) {
   const half = await refused(lib, () => p.incomplete());
   if (json(opts, { ...r, incomplete: half })) return 0;
   console.log(p.format.report(r).split('\n').map(printable).join('\n'));
-  for (const l of incompleteLines(half)) console.log(l);
+  for (const l of incompleteLines(project, half)) console.log(l);
   return 0;
 }
 
