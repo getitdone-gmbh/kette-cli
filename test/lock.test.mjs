@@ -181,7 +181,7 @@ test('CR-NEW-11: claims of claimants that are gone and older than STALE_MS are s
   put('live.lck', JSON.stringify({ pid: process.pid, at: Date.now(), token: 'live' }), 0);
   const kept = [
     put('held.lck.fresh.claim', JSON.stringify({ pid: dead, start: 1, at: Date.now() }), 0),
-    put('live.lck.live.claim', JSON.stringify({ pid: process.pid, at: 0 }), 121000),
+    put('live.lck.live.claim', JSON.stringify({ pid: process.ppid, at: 0 }), 121000),
   ];
   assert.equal(withLock('c', () => 'ran'), 'ran');
   const left = fs.readdirSync(locks);
@@ -454,4 +454,18 @@ test('Windows: a holder whose Node started many seconds after its process (cold 
   c.kill();
   await new Promise((r) => c.on('close', r));
   assert.equal(entered, '', 'the waiter still waits');
+});
+
+// KETTE-43: two waiters remove the stale lock at once; one moves aside the claim the other just placed, the other gives up meanwhile,
+// then the first puts the claim back: a claim of a live process that no longer uses it. That process must take it as its own leftover
+test('KETTE-43: a claim of this process put back by another clearer after it gave up does not block it', async () => {
+  const { removeIfToken, lockFile, withLock } = await import('../src/lock.mjs');
+  process.env.KETTE_HOME = tmp();
+  const f = lockFile('c');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ pid: await deadPid(), at: Date.now(), token: 'gone' }));
+  fs.writeFileSync(`${f}.gone.claim`, JSON.stringify({ pid: process.pid, start: 'any', at: Date.now() }));
+  assert.equal(removeIfToken(f, 'gone'), true, 'the stale lock is removed despite the leftover claim');
+  assert.deepEqual(fs.readdirSync(path.dirname(f)), []);
+  assert.equal(withLock('c', () => 'ran'), 'ran');
 });

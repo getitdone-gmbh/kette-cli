@@ -173,7 +173,10 @@ function clearClaim(claim, minAge = 0) {
   const by = readOwner(claim);
   // The time a claimant wrote counts; the file time only for a claim cut short
   const age = Date.now() - (Number.isFinite(by?.at) ? by.at : before.mtimeMs);
-  if (age < minAge || !(by?.pid ? gone(by, age) : age > STALE_MS)) return;
+  // A claim of this process is a leftover of its own earlier attempt: every lock step runs synchronously, so none of its claims is in
+  // use while it looks. A clearer that put back a claim this process had already given up leaves exactly that (KETTE-43)
+  const own = by?.pid === process.pid;
+  if (!own && (age < minAge || !(by?.pid ? gone(by, age) : age > STALE_MS))) return;
   const aside = `${claim}.${process.pid}.${hex()}.tmp`;
   try { retry(() => fs.renameSync(claim, aside)); } catch (err) { if (err.code === 'ENOENT') return; throw err; }
   try {
