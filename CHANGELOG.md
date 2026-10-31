@@ -4,7 +4,10 @@
 - Ticketing (Enterprise, KD-0034, ADR-0003): `kette ticket connect | new | list | show | edit | extend | route | pick | link | check | close | inbox | report | why`. Board, stations, members and definitions of done come from the repo's instance, the credential `KETTE_TICKETING_WORKBASE_TOKEN` from the project wallet (or the shared Workbase session file), never printed. Writes are planned on a copy of the board, shown, and sent only after a yes or `--yes`; `--dry-run` everywhere. `kette ticket check <KD>` shows the follow-through per station (KETTE-24). The library ships in the Enterprise bundle, never in this package; Community and a bundle without it get a clear message.
 - `kette init` and `kette add` offer to connect a board in a terminal, after the wallet step.
 - `kette ticket hook install | status | remove`: the intake hook in the project's `.claude/settings.json`, never the user settings; remove takes only kette's entry.
-- Instance stations may be objects with `definitionOfDone`.
+- Instance stations may be objects with `definitionOfDone`, `owner`, `builder`, `approve`, `merge` and `targets`; the routing in the bundle is neutral (KETTE-27).
+- `kette ticket repair <KD>` completes a decision an interrupted run left half; `list` and `report` name it (KETTE-31). Parallel `kette ticket new` of one instance never share an id (KETTE-29).
+- Approvals and acting as a person of the instance only from that person at a terminal; project ids are one path segment; the shared session file only with `ticketing.session: true`; ticketing code only from inside `~/.kette/bundles` (KETTE-28).
+- The intake hook asks no model unless `ticketing.intakeModel` names one (KETTE-26). The Enterprise plugin `kette-ticketing` brings the agent `kette-intake` and `/intake` (KETTE-30).
 
 ## 0.10.0
 - Kette instances (Workbase ZERO-538, ADR-0002): `kette instance create <name> [--edition enterprise|community] [--from <git-url|folder>] | list | show | use | add-repo | members | remove`. Each instance has its own scope in `~/.kette/instances/<name>/instance.json`: edition, bundle pin, repos, members, ticketing, wallet defaults, overlays, chain stations; it can live in its own git repo. One licence covers all instances, seats stay per device.

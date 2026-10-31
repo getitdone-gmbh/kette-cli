@@ -23,10 +23,10 @@ Nothing project related is written globally. The sandbox test (`test/sandbox.tes
   "bundle": "0.20261025.92",
   "repos": [{ "name": "web", "url": "git@github.com:acme/web.git" }],
   "members": [{ "id": "lead@acme.example", "role": "owner" }],
-  "ticketing": { "adapter": "workload-zero", "project": "6ae510fc15371242272a4278" },
+  "ticketing": { "adapter": "workload-zero", "project": "6ae510fc15371242272a4278", "session": false },
   "wallet": { "provider": "infisical", "project": "acme", "env": "dev" },
   "overlays": [{ "source": "github:acme/rules" }],
-  "stations": ["prototype", "tokens", "library", { "id": "app", "definitionOfDone": "Live on shop.acme.example, deploy run checked" }]
+  "stations": ["prototype", "tokens", "library", { "id": "app", "owner": "lead@acme.example", "approve": "lead@acme.example", "targets": ["web"], "definitionOfDone": "Live on shop.acme.example, deploy run checked" }]
 }
 ```
 
@@ -38,10 +38,10 @@ Nothing project related is written globally. The sandbox test (`test/sandbox.tes
 | `bundle` | no | bundle version the instance expects; `kette doctor` warns when the machine has another one (a check, not a switch) |
 | `repos` | no | `name` (folder name) and `url` (git origin). Local checkout paths are never stored here, they differ per machine and live in `state.json` |
 | `members` | no | `id` (email or handle) and `role` (`owner` or `member`); information for agents and ticketing, seats stay per device |
-| `ticketing` | no | `adapter` (`workload-zero`) and `project` (the board project id); written by `kette ticket connect`, used by every `kette ticket` command in a repo of the instance ([ticketing.md](ticketing.md)) |
+| `ticketing` | no | `adapter` (`workload-zero`) and `project` (the board project id: letters, digits, dash, underscore, one URL path segment); optional `session` (true lets kette use the shared Workbase session file of agents, default off) and `intakeModel` (https URL of a model the intake hook may ask, plain http only on this machine; none by default). Written by `kette ticket connect`, used by every `kette ticket` command in a repo of the instance ([ticketing.md](ticketing.md)) |
 | `wallet` | no | defaults for `kette wallet init` in a repo of the instance: `provider`, `project`, `env` |
 | `overlays` | no | same shape as in the profile, inherited when the repo has none |
-| `stations` | no | chain stations the instance covers: ids (`prototype`, `tokens`, `figma`, `library`, `zero`, `zero-pages`, `app`, `backend`, `atlas`, `engineering`) or objects `{ "id", "definitionOfDone" }` |
+| `stations` | no | chain stations the instance covers: ids (`prototype`, `tokens`, `figma`, `library`, `zero`, `zero-pages`, `app`, `backend`, `atlas`, `engineering`) or objects with `id` and any of `owner`, `builder`, `approve`, `merge`, `targets` (they replace the instance repos as targets of that station) and `definitionOfDone`; the bundle routing is neutral, so owners, approvals and targets of a project live here |
 
 Unknown fields are refused, so a typo never passes silently.
 
@@ -161,6 +161,7 @@ Every read-modify-write of a machine file runs under a lock: `state.json`, each 
 | `~/.claude/.claude.json`, `~/.claude/backups/**` | Claude Code keeps its own state and backups there on every run (QA-19); with `kette cloud setup` it also holds the itdone MCP server in the user scope (open decision D4) | every command that runs `claude`, `cloud setup` |
 | `~/.npmrc` (marked Kette block, the token only) | npm access per device (D3, decided in fix round 2); `kette npm move-scope` takes the scope line of a block from before 0.10 out of it | `login`, `update`, `logout`, `npm move-scope` |
 | `~/.claude/settings.json` | only `kette logout`, and only to remove Enterprise plugins an older kette put in the user scope | `logout` on a machine set up before 0.10 |
+| `~/Library/Caches/claude-cli-nodejs/<project>/mcp-logs-*` (macOS; Linux `~/.cache/claude-cli-nodejs/...`) | Claude Code writes a log per MCP server and project folder whenever it starts one, for example the itdone server after `kette cloud setup`; kette never writes there (KETTE-25) | every run of the real `claude` in a project with an MCP server |
 
 After every command the test also checks that the user settings of Claude Code contain no Kette plugin. The real Claude Code also adds `.claude/settings.local.json` to the global git ignore (`~/.config/git/ignore`) on the first local-scope declaration, and `claude plugin list` lists every installed plugin of every project with its status (an Enterprise plugin of another repo shows as disabled in a Community repo, QA-18); that happens in Claude Code, not in kette. `kette logout` removes the marketplace `kette-enterprise` from Claude Code, which uninstalls its plugins in every project (checked with the real Claude Code 2.1.310: `installed_plugins.json` is empty afterwards and `claude plugin list` shows nothing). Claude Code keeps the unused copies in `~/.claude/plugins/cache/kette-enterprise`; kette does not delete inside the Claude Code folder, `kette logout` names the folder instead.
 
