@@ -16,14 +16,14 @@ Read the rules without installing: the Community bundle (MIT) is a plain tarball
 |---|---|---|
 | Core rules and architecture patterns with ADR template | yes | yes |
 | Project profile `.kette/profile.json` and `kette doctor` | yes | yes |
-| Plugin `kette-engineering-core@kette` (skills `engineering-rules`, `architecture-patterns`, `live-deploy`, agent `kette-check`) | yes | yes |
-| Plugin `ui-laws@kette`: UI laws, interaction, WCAG 2.2 AA (skills `ui-laws`, `interaction-principles`, `a11y-standards`) | yes | included in the design review pack |
+| Plugin `kette-engineering-core` (`@kette-community` or `@kette-enterprise`, skills `engineering-rules`, `architecture-patterns`, `live-deploy`, agent `kette-check`) | yes | yes |
+| Plugin `ui-laws@kette-community`: UI laws, interaction, WCAG 2.2 AA (skills `ui-laws`, `interaction-principles`, `a11y-standards`) | yes | included in the design review pack |
 | Flow in `.kette/README.md` | patterns and ADR, rules while building, review with the agent `kette-check` (per change, or once per release branch), definition of done | roles as subagents, mandatory gates, `/feature-loop` for one feature or as a batch review with one review at the end |
 | Stack and platform profiles | | yes |
 | Templates for CI, Docker and deploy, checks (tsconfig, ESLint, dependency-cruiser, gitleaks) | | yes |
-| Plugin `kette-engineering@kette` with the code reviewer | | yes |
-| Plugin `design-system-agents@kette`: agents, skills and commands for the whole feature flow | | yes |
-| Plugin `design-review-pack@kette`: design reviewer with rulebook | | yes |
+| Plugin `kette-engineering@kette-enterprise` with the code reviewer | | yes |
+| Plugin `design-system-agents@kette-enterprise`: agents, skills and commands for the whole feature flow | | yes |
+| Plugin `design-review-pack@kette-enterprise`: design reviewer with rulebook | | yes |
 | Private npm packages of the design system | | yes |
 | Secret wallet `kette wallet`: credentials and access per environment, Infisical by default or your own provider | | yes |
 | Live deploy to itdone.cloud (`kette cloud setup`) | yes | yes |
@@ -201,17 +201,17 @@ If you use the prebuilt `@getitdone-gmbh/kette-design-community/styles.css` inst
 **After a Community or tokens update.** All data sits in one file, `src/theme/manifest.json`, built from a copy of the Community `theme.css` and of `scripts/color-pairs.js` from kette-tokens in `test/fixtures` (now Community 0.4.3 at `639d509` and kette-tokens `v5.23.2`). Replace both fixtures (keep the first line that names the source), update the source labels in `scripts/theme-manifest.mjs`, run `node scripts/theme-manifest.mjs` and `npm test`. The tests fail when the manifest is not the build of the fixtures, when a block of the generated CSS differs from the Community block, or when a pair rule or contrast check fails. With the base blue and cool neutrals the generator reproduces the Community values exactly, with no adjustment.
 
 ## Where the rules live
-The project holds only a few files: `.kette/profile.json`, `.kette/README.md`, the reference line in `CLAUDE.md`, the ADR template and `.claude/settings.json` with its plugins. The rulebook itself lives on the machine under `~/.kette/bundles/` and is active in Claude Code as plugins of the project: in Community `kette-engineering-core@kette` and `ui-laws@kette`, in Enterprise `kette-engineering-core@kette`, `kette-engineering@kette` (`platform-profile`, `code-reviewer`), `design-system-agents@kette` and `design-review-pack@kette`. Browse with `kette rules`; `kette doctor` shows what each plugin brings.
+The project holds only a few files: `.kette/profile.json`, `.kette/README.md`, the reference line in `CLAUDE.md`, the ADR template and `.claude/settings.json` with its plugins. The rulebook itself lives on the machine under `~/.kette/bundles/<edition>/` and is active in Claude Code as plugins of the project: in Community `kette-engineering-core@kette-community` and `ui-laws@kette-community`, in Enterprise `kette-engineering-core@kette-enterprise`, `kette-engineering@kette-enterprise` (`platform-profile`, `code-reviewer`), `design-system-agents@kette-enterprise` and `design-review-pack@kette-enterprise`. Browse with `kette rules`; `kette doctor` shows what each plugin brings.
 
 `.kette/README.md` describes the flow for Claude Code between `<!-- kette:begin` and `<!-- kette:end -->`. `kette init`, `kette add` and `kette update` renew only this block; your own notes below it stay, and so do line endings (LF or CRLF). If a marker is missing or appears twice, the file stays unchanged. An unchanged version from 0.1.0 to 0.3.1 without a block is replaced completely, an edited one stays, and the CLI says how to recreate it.
 
 The flow follows `tier` in the project profile, not the machine ([ADR-0001](docs/adr/0001-flow-follows-profile.md)). `kette add` raises `tier` to the edition of the machine but never lowers it. If the machine has a lower edition than the project, `kette doctor` warns.
 
-Plugins are enabled per project, never for all projects (since 0.10): `.claude/settings.json` switches on the plugins of the project edition and switches off every other Kette plugin, the marketplace path goes into `.claude/settings.local.json` (git ignored), and the plugins are installed with project scope. Claude Code keeps one path per marketplace name for every project, so kette builds one marketplace `kette` in `~/.kette/bundles/marketplace` from the installed bundles and the project settings decide what loads. `kette login` and `kette update` enable the plugins of the project in the current folder; outside a project they change no plugin. `kette logout` removes the Enterprise plugins from the marketplace, Enterprise projects keep their settings. Plugins an older kette installed in the user scope stay until you remove them; `kette doctor` names them with the commands. If an older bundle does not contain a plugin yet, the CLI enables the others and names `kette update`. If the agent pack is also installed separately (marketplace `claude-design-agent-pack`), it stays untouched and the CLI names the duplicate plugins.
+Plugins are enabled per project, never for all projects (since 0.10): `.claude/settings.json` switches on the plugins of the project edition and switches off every other Kette plugin, the marketplace path goes into `.claude/settings.local.json` (git ignored), and the plugins are installed with project scope. Claude Code keeps one path per marketplace name and one copy per plugin ID for every project, so each edition has its own marketplace, built only from its own bundle: `kette-community` in `~/.kette/bundles/marketplace-community`, `kette-enterprise` in `~/.kette/bundles/marketplace-enterprise`. A Community repo never loads an Enterprise copy, also not of a plugin both editions ship. `kette login` and `kette update` enable the plugins of the project in the current folder; outside a project they change no plugin. `kette logout` removes the marketplace `kette-enterprise`, Enterprise projects keep their settings. A project whose instance cannot be used counts as Community for every check. Plugins an older kette installed in the user scope stay until you remove them; `kette doctor` names them with the commands. If an older bundle does not contain a plugin yet, the CLI enables the others and names `kette update`. If the agent pack is also installed separately (marketplace `claude-design-agent-pack`), it stays untouched and the CLI names the duplicate plugins.
 
 Rule topics are English. The German topic names of older rulebooks (`kette rules lesbarkeit`) still work through `rules/aliases.json` with CLI 0.6.2 or newer.
 
-The marketplace of the delivered bundles is called `kette` in Claude Code. Up to version 0.3.0 it was called `kette-engineering`. If an old `kette-engineering` points into `~/.kette`, the CLI replaces it on the next `kette init`, `add`, `update` or `login`. If it points to a working copy of the rulebook, it stays, and the CLI names the command to disable it in case skills are active twice.
+Projects use the marketplaces `kette-community` and `kette-enterprise` since 0.10. Up to 0.9 the CLI registered one marketplace `kette` for all projects (on `~/.kette/bundles/active`); it stays as it is for projects that have not run `kette add` yet, and project settings switch its plugins off. Up to version 0.3.0 it was called `kette-engineering`. If an old `kette-engineering` points into `~/.kette`, the CLI replaces it on the next `kette init`, `add`, `update` or `login`. If it points to a working copy of the rulebook, it stays, and the CLI names the command to disable it in case skills are active twice.
 
 ## What the installer does
 - Checks for Node.js 20 or newer, git and tar.
@@ -227,7 +227,7 @@ The marketplace of the delivered bundles is called `kette` in Claude Code. Up to
 
 ## Uninstall
 1. If logged in: `kette logout` (also removes the npm block from `~/.npmrc`). Only support frees the device seat of the licence.
-2. Remove plugins and marketplace from Claude Code. In each project delete the `@kette` entries in `.claude/settings.json` (or run `claude plugin uninstall <id> --scope project` there); for the user scope of older versions:
+2. Remove plugins and marketplaces from Claude Code. In each project delete the Kette entries in `.claude/settings.json` and `.claude/settings.local.json`, then `claude plugin marketplace remove kette-community` and `claude plugin marketplace remove kette-enterprise`; for the user scope of versions before 0.10:
    ```sh
    claude plugin uninstall design-review-pack@kette
    claude plugin uninstall design-system-agents@kette
