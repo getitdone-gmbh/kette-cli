@@ -27,6 +27,7 @@ import { theme } from './theme/command.mjs';
 import { WALLET_HELP, hasWallet, offerWallet, wallet, walletDoctor } from './wallet/command.mjs';
 import { INSTANCE_HELP, askInstance, createPending, doctorInstance, instance as instanceCommand, joinInstance, prepareJoin, requireEdition } from './instance/command.mjs';
 import { inherit, instanceSource, printable, readInstance } from './instance/config.mjs';
+import { TICKET_HELP, offerTicketing, ticket } from './ticket/command.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -83,6 +84,7 @@ Commands:
                         Questions in a terminal, otherwise --primary <hex> [--accent <hex>] [--neutral warm|cool|neutral|<hex>]
                         [--radius none|sm|md|lg|full|<px>] [--font "<family>"] [--name <id>] [--out <path>] [--preview] [--json]
   ${WALLET_HELP}
+  ${TICKET_HELP}
   kette version
 
 Options:
@@ -118,12 +120,20 @@ Options:
   --stdin               With kette wallet set and add, read the value from stdin instead of a hidden prompt
   --github-env name     With kette wallet sync github, the GitHub environment (default: the wallet environment)
   --repo owner/name     With kette wallet sync github, another repo than the current one
+  --project id          With kette ticket connect, the project on the board (workload.zero project id)
+  --by member           With kette ticket new, who decided (a member of the instance)
+  --as member           With kette ticket, who acts (member, session or agent); pick needs it
+  --stations a,b        With kette ticket new and extend, the stations as station[:target][@artifact]
+  --source ref          With kette ticket new, where it was decided (chat:<session>, meeting:<date>, note:<file>)
+  --member id, --station s, --status a,b
+                        With kette ticket list and inbox, filter the items
   --color, --no-color   Force colors on or off (default: on in a terminal, off in pipes, CI and with NO_COLOR)
 
 kette theme writes a drop-in replacement for the Community theme.css. Enterprise extends the token source in kette-tokens instead.
 The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.
 Plugins are enabled per project in .claude/settings.json, never for all projects; a Community project never enables Enterprise plugins.
 kette wallet keeps names in .kette/wallet.json and values in your provider; it never prints a value and never takes one as an argument.
+kette ticket reads its board, stations and members from the instance of the repo and its credential from the secret wallet; it writes to a board only after a yes or --yes.
 kette cloud setup only registers the itdone MCP server; Claude Code deploys after you confirm, and kette never handles a password or token.`;
 
 // Brand line with version and edition, only on init and help
@@ -134,9 +144,13 @@ const help = () => [brand(), '', HELP.replace(/^ {2}((?:kette|--)\S*(?: \S+)*?)(
 const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
   '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--dcr': 'dcr', '--help': 'help', '-h': 'help', '--version': 'version',
-  '--preview': 'preview', '--json': 'json', '--stdin': 'stdin', '--effective': 'effective',
+  '--preview': 'preview', '--json': 'json', '--stdin': 'stdin', '--effective': 'effective', '--paraphrase': 'paraphrase',
 };
-const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out', '--primary', '--accent', '--neutral', '--radius', '--font', '--provider', '--env', '--app', '--note', '--github-env', '--repo', '--edition', '--from', '--role'];
+const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out', '--primary', '--accent', '--neutral', '--radius', '--font', '--provider', '--env', '--app', '--note', '--github-env', '--repo', '--edition', '--from', '--role',
+  '--project', '--by', '--as', '--source', '--stations', '--statement', '--words', '--rationale', '--label', '--comment', '--member', '--station', '--status',
+  '--pr', '--commit', '--figma', '--review', '--approved-by', '--proposed-by', '--acceptance'];
+// Free text may start with a dash
+const TEXT_VALUES = ['--note', '--statement', '--words', '--rationale', '--comment', '--acceptance'];
 
 // Unknown options and options without their value stop with exit code 2, so a typo never runs with defaults
 export function parse(argv) {
@@ -151,7 +165,7 @@ export function parse(argv) {
     else if (a === '--color' || a === '--no-color') opts.color = a === '--color';
     else if (VALUES.includes(a)) {
       const value = argv[++i];
-      if (value === undefined || (value.startsWith('-') && a !== '--note')) throw new ExitError(`${a} needs a value`);
+      if (value === undefined || (value.startsWith('-') && !TEXT_VALUES.includes(a))) throw new ExitError(`${a} needs a value`);
       opts[a.slice(2)] = value;
     } else if (a.startsWith('-') && a !== '-') throw new ExitError(`Unknown option ${a}`);
     else opts._.push(a);
@@ -461,6 +475,7 @@ async function setup(root, opts, isNew) {
     for (const l of enableHints(plugins, noteTier)) console.log(l);
   }
   await offerWallet(root, opts, tier);
+  await offerTicketing(root, opts, { resolveProject });
   console.log(summary(described, tier, plugins.ok, bundleDir, root));
   return 0;
 }
@@ -868,6 +883,8 @@ export async function main(argv) {
     // The wallet is Enterprise: in a Community instance, or one that cannot be used, it stays locked even on a machine with a licence
     if (command === 'wallet') return await wallet(arg, opts, { tier: walletTier('.') });
     if (command === 'theme') return await theme(opts, { version: VERSION });
+    // Ticketing is Enterprise and project scoped: board, stations and members from the instance of the repo in this folder
+    if (command === 'ticket') return await ticket(arg, opts, { resolveProject, spawnSync });
     if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...redactedState() }, null, 2)); return 0; }
     console.error(`Unknown command: ${command}\n`);
     console.log(help());

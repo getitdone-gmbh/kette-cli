@@ -28,7 +28,14 @@ const TEMPLATES = {
   'checks/render/index.json': JSON.stringify({ files: [{ from: 'gitleaks.toml', to: '.gitleaks.toml' }] }),
   'checks/render/gitleaks.toml': '# gitleaks\n',
 };
-const enterpriseBundle = fakeBundle(V, ENTERPRISE_PLUGINS, { ...marked('enterprise', ENTERPRISE_PLUGINS), ...TEMPLATES });
+// The ticketing library is private (docs/adr/0003): tests take a built checkout from KETTE_TICKETING (default ../kette-ticketing)
+// and ship it in the fake Enterprise bundle as the real release does; without it the ticket scenarios that talk to a board skip
+export const TICKETING = path.resolve(process.env.KETTE_TICKETING || fileURLToPath(new URL('../../kette-ticketing', import.meta.url)));
+const TICKETING_FILES = ['package.json', 'routing.json', ...['plan-guard', 'workbase-session', 'intake-hook', 'intake-classify'].map((f) => `scripts/${f}.mjs`)];
+export const hasTicketing = fs.existsSync(path.join(TICKETING, 'dist', 'project.js'));
+const walkFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkFiles(path.join(dir, e.name)) : [path.join(dir, e.name)]));
+const ticketingPart = () => (hasTicketing ? Object.fromEntries([...TICKETING_FILES.map((f) => path.join(TICKETING, f)), ...walkFiles(path.join(TICKETING, 'dist'))].map((f) => [`ticketing/${path.relative(TICKETING, f).split(path.sep).join('/')}`, fs.readFileSync(f, 'utf8')])) : {});
+const enterpriseBundle = fakeBundle(V, ENTERPRISE_PLUGINS, { ...marked('enterprise', ENTERPRISE_PLUGINS), ...TEMPLATES, ...ticketingPart() });
 const communityBundle = fakeBundle(CV, COMMUNITY_PLUGINS, marked('community', COMMUNITY_PLUGINS));
 const figmaFiles = { 'zero.fig': 'zero-fig', 'IMPORT.md': '# Import\n' };
 export const results = [];
@@ -77,8 +84,9 @@ export async function start() {
     // Windows starts neither shebang nor extensionless files; kette then falls back to <name>.cmd
     write(tools, `${name}.cmd`, `@node "${path.join(tools, name)}" %*\r\n`);
   };
+  // One store per Infisical project and environment, so two projects on one machine keep their own values
   fake('infisical', `if (args[0] === '--version') { console.log('infisical version 0.43.50'); process.exit(0); }
-const env = opt('--env'); s[env] = s[env] || {};
+const env = opt('--projectId') + '/' + opt('--env'); s[env] = s[env] || {};
 if (args[0] === 'export') { console.log(JSON.stringify(Object.entries(s[env]).map(([key, value]) => ({ key, value })))); process.exit(0); }
 if (args[0] === 'secrets' && args[1] === 'set') { const m = fs.readFileSync(opt('--file'), 'utf8').trim().match(/^([A-Z0-9_]+): (.*)$/); s[env][m[1]] = JSON.parse(m[2]); save(); process.exit(0); }
 process.exit(9);`);
