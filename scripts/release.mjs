@@ -30,7 +30,9 @@ const { COMMUNITY, ENTERPRISE, RENAMED_PLUGINS, pluginsFor } = await import('../
 const engPlugins = JSON.parse(fs.readFileSync(path.join(eng, '.claude-plugin/marketplace.json'), 'utf8')).plugins.map((p) => p.name);
 const { packMismatch, packPluginsFor } = await import('./pack-plugins.mjs');
 const COMMUNITY_PACK_PLUGINS = packPluginsFor(pluginsFor(COMMUNITY), engPlugins);
-const ENTERPRISE_PACK_PLUGINS = packPluginsFor(pluginsFor(ENTERPRISE), engPlugins);
+const { PART_FILES, TICKETING_PLUGIN, forbiddenIn, marketEntry, writePlugin } = await import('./ticketing-part.mjs');
+// kette-ticketing builds its plugin itself (agent kette-intake, command /intake), it never comes from the agent pack
+const ENTERPRISE_PACK_PLUGINS = packPluginsFor(pluginsFor(ENTERPRISE), [...engPlugins, TICKETING_PLUGIN]);
 const agentPack = path.resolve(process.env.KETTE_AGENT_PACK || path.join(root, '..', 'claude-design-agent-pack'));
 const newestTag = (repo) => execFileSync('git', ['-C', repo, 'tag', '--list', 'v*', '--sort=-v:refname'], { encoding: 'utf8' }).split('\n').find((tag) => /^v\d+\.\d+\.\d+$/.test(tag)) || '';
 const agentPackRef = process.env.KETTE_AGENT_PACK_REF || newestTag(agentPack);
@@ -96,11 +98,16 @@ const ticketingSrc = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-ticketing-'));
 execFileSync('tar', ['-x', '-C', ticketingSrc], { input: execFileSync('git', ['-C', ticketingRepo, 'archive', '--format=tar', ticketingCommit], { maxBuffer: 1 << 30 }) });
 execFileSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: ticketingSrc, stdio: 'inherit', shell: process.platform === 'win32' });
 execFileSync('npm', ['run', 'build'], { cwd: ticketingSrc, stdio: 'inherit', shell: process.platform === 'win32' });
-const { CONTRACT } = await import('../src/ticket/module.mjs');
-const { CLI_CONTRACT } = await import(pathToFileURL(path.join(ticketingSrc, 'dist', 'index.js')).href);
+const { CONTRACT, ENTRY } = await import('../src/ticket/module.mjs');
+const { CLI_CONTRACT } = await import(pathToFileURL(path.join(ticketingSrc, ENTRY)).href);
 if (CLI_CONTRACT !== CONTRACT) throw new Error(`kette-ticketing ${ticketingRef} speaks contract ${CLI_CONTRACT}, this CLI ${CONTRACT}`);
-const TICKETING_PART = ['dist', 'routing.json', 'package.json', 'agent', 'commands', ...['plan-guard', 'workbase-session', 'intake-hook', 'intake-classify'].map((f) => `scripts/${f}.mjs`)];
-const fromTicketing = TICKETING_PART.map((p) => [path.join(ticketingSrc, p), `ticketing/${p}`]);
+// What ships is staged first and checked: a repo, session name, Figma key, private address or the Spark in it stops the release
+const ticketingStage = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-ticketing-stage-'));
+for (const p of PART_FILES) fs.cpSync(path.join(ticketingSrc, p), path.join(ticketingStage, 'ticketing', p), { recursive: true });
+writePlugin(ticketingSrc, path.join(ticketingStage, 'plugin'), version);
+const internal = forbiddenIn(ticketingStage);
+if (internal.length) throw new Error(`kette-ticketing ${ticketingRef} would ship internal content, nothing was packed:\n  ${internal.join('\n  ')}`);
+const fromTicketing = [[path.join(ticketingStage, 'ticketing'), 'ticketing'], [path.join(ticketingStage, 'plugin'), `plugins/${TICKETING_PLUGIN}`]];
 const fromEng = (p) => path.join(eng, p);
 const fromPack = (name) => [path.join(packSrc, 'plugins', name), `plugins/${name}`];
 // macOS-tar packt sonst Metadaten ein, die GNU tar beim Entpacken als Warnung meldet; Besitzer immer 0, damit das Paket nicht vom Rechner abhängt
@@ -145,7 +152,7 @@ const packEntries = (names) => names.map((name) => {
 });
 const withVersion = (plugins) => plugins.map((p) => ({ ...p, version }));
 const communityMarket = { ...market, version, plugins: withVersion([...market.plugins.filter((p) => p.name === 'kette-engineering-core'), ...packEntries(COMMUNITY_PACK_PLUGINS)]) };
-const enterpriseMarket = { ...market, version, plugins: withVersion([...market.plugins, ...packEntries(ENTERPRISE_PACK_PLUGINS)]) };
+const enterpriseMarket = { ...market, version, plugins: withVersion([...market.plugins, ...packEntries(ENTERPRISE_PACK_PLUGINS), marketEntry(version)]) };
 
 const community = pack(`kette-community-${version}.tgz`, [[fromEng('rules'), 'rules'], [fromEng('schema'), 'schema'], [fromEng('plugins/kette-engineering-core'), 'plugins/kette-engineering-core'], ...COMMUNITY_PACK_PLUGINS.map(fromPack)], {
   '.claude-plugin/marketplace.json': JSON.stringify(communityMarket, null, 2) + '\n',
@@ -160,6 +167,7 @@ const enterprise = pack(`private/kette-enterprise-${version}.tgz`, [...['rules',
 });
 fs.rmSync(packSrc, { recursive: true, force: true });
 fs.rmSync(ticketingSrc, { recursive: true, force: true });
+fs.rmSync(ticketingStage, { recursive: true, force: true });
 
 const cliTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-cli-'));
 for (const p of ['bin', 'src', 'package.json', 'LICENSE']) fs.cpSync(path.join(root, p), path.join(cliTmp, p), { recursive: true });

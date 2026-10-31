@@ -192,7 +192,7 @@ test('Enterprise: .kette/README.md schreibt Rollen, Pflicht-Gates und /feature-l
   assert.match(note, /\/feature-loop start <feature>/);
   assert.match(note, /A human runs apply, deploys and destructive migrations/);
   assert.match(note, /The agents, gates and `\/feature-loop` need Die Kette on the machine \(`kette login <key>`\)/);
-  assert.match(note, /`design-system-agents@kette-enterprise`, `design-review-pack@kette-enterprise`, enabled for this project/);
+  assert.match(note, /`design-system-agents@kette-enterprise`, `design-review-pack@kette-enterprise`, `kette-ticketing@kette-enterprise`, enabled for this project/);
   assert.doesNotMatch(note, /\d+ (Agents|Skills|Commands)/);
   assert.doesNotMatch(note, /[\u2013\u2014]/);
 });

@@ -7,7 +7,7 @@ export const ENTERPRISE = 'enterprise';
 
 const EDITIONS = {
   [COMMUNITY]: { label: 'Community', plugins: ['kette-engineering-core', 'ui-laws'] },
-  [ENTERPRISE]: { label: 'Enterprise (Die Kette)', plugins: ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack'] },
+  [ENTERPRISE]: { label: 'Enterprise (Die Kette)', plugins: ['kette-engineering-core', 'kette-engineering', 'design-system-agents', 'design-review-pack', 'kette-ticketing'] },
 };
 // Plugins renamed in a newer bundle, old name to new name; an install removes the old one once the bundle has the new one or the new one is retired too
 export const RENAMED_PLUGINS = { 'ui-gesetze': 'ui-laws' };
