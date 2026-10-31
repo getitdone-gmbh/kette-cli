@@ -23,10 +23,10 @@ Nothing project related is written globally. The sandbox test (`test/sandbox.tes
   "bundle": "0.20261025.92",
   "repos": [{ "name": "web", "url": "git@github.com:acme/web.git" }],
   "members": [{ "id": "lead@acme.example", "role": "owner" }],
-  "ticketing": { "adapter": "workbase", "project": "ZERO" },
+  "ticketing": { "adapter": "workload-zero", "project": "6ae510fc15371242272a4278" },
   "wallet": { "provider": "infisical", "project": "acme", "env": "dev" },
   "overlays": [{ "source": "github:acme/rules" }],
-  "stations": ["tokens", "library", "apps"]
+  "stations": ["prototype", "tokens", "library", { "id": "app", "definitionOfDone": "Live on shop.acme.example, deploy run checked" }]
 }
 ```
 
@@ -38,10 +38,10 @@ Nothing project related is written globally. The sandbox test (`test/sandbox.tes
 | `bundle` | no | bundle version the instance expects; `kette doctor` warns when the machine has another one (a check, not a switch) |
 | `repos` | no | `name` (folder name) and `url` (git origin). Local checkout paths are never stored here, they differ per machine and live in `state.json` |
 | `members` | no | `id` (email or handle) and `role` (`owner` or `member`); information for agents and ticketing, seats stay per device |
-| `ticketing` | no | `adapter` and `project`, read by kette-ticketing; the CLI only checks the shape |
+| `ticketing` | no | `adapter` (`workload-zero`) and `project` (the board project id); written by `kette ticket connect`, used by every `kette ticket` command in a repo of the instance ([ticketing.md](ticketing.md)) |
 | `wallet` | no | defaults for `kette wallet init` in a repo of the instance: `provider`, `project`, `env` |
 | `overlays` | no | same shape as in the profile, inherited when the repo has none |
-| `stations` | no | chain stations the instance covers (ids, e.g. `tokens`, `figma`, `library`, `zero`, `pages`, `apps`) |
+| `stations` | no | chain stations the instance covers: ids (`prototype`, `tokens`, `figma`, `library`, `zero`, `zero-pages`, `app`, `backend`, `atlas`, `engineering`) or objects `{ "id", "definitionOfDone" }` |
 
 Unknown fields are refused, so a typo never passes silently.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+- Ticketing (Enterprise, KD-0034, ADR-0003): `kette ticket connect | new | list | show | edit | extend | route | pick | link | check | close | inbox | report | why`. Board, stations, members and definitions of done come from the repo's instance, the credential `KETTE_TICKETING_WORKBASE_TOKEN` from the project wallet (or the shared Workbase session file), never printed. Writes are planned on a copy of the board, shown, and sent only after a yes or `--yes`; `--dry-run` everywhere. `kette ticket check <KD>` shows the follow-through per station (KETTE-24). The library ships in the Enterprise bundle, never in this package; Community and a bundle without it get a clear message.
+- `kette init` and `kette add` offer to connect a board in a terminal, after the wallet step.
+- `kette ticket hook install | status | remove`: the intake hook in the project's `.claude/settings.json`, never the user settings; remove takes only kette's entry.
+- Instance stations may be objects with `definitionOfDone`.
+
 ## 0.10.0
 - Kette instances (Workbase ZERO-538, ADR-0002): `kette instance create <name> [--edition enterprise|community] [--from <git-url|folder>] | list | show | use | add-repo | members | remove`. Each instance has its own scope in `~/.kette/instances/<name>/instance.json`: edition, bundle pin, repos, members, ticketing, wallet defaults, overlays, chain stations; it can live in its own git repo. One licence covers all instances, seats stay per device.
 - `.kette/profile.json` names the instance (`instance`); the repo inherits edition, ticketing, wallet defaults, overlays and stations, its own values win. `kette init` and `kette add` take `--instance <name>` and ask in a terminal; `kette profile --effective` shows the inherited values and `.kette/README.md` tells agents to read them; `kette doctor --instance [name]` checks every checkout of an instance.
