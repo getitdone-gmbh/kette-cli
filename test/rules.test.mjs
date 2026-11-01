@@ -442,7 +442,9 @@ test('add names the stack and platform it writes: detected, from a flag, or the 
 });
 
 test('KETTE-53: add never guesses Next.js and NestJS for a CLI or docs repo; it stops, names --stack and writes nothing', async () => {
-  rulebook('community');
+  const d = rulebook('community');
+  // A rulebook from before the repo stacks (KETTE-57): a detected node-cli is left out, so nothing is left to write
+  write(d, 'schema/profile.schema.json', JSON.stringify({ type: 'object', required: ['version', 'project', 'stack'], properties: { stack: { type: 'array', minItems: 1, items: { enum: ['nextjs-ts-tailwind', 'nestjs-prisma', 'nestjs-mongoose', 'python-fastapi', 'react-native-expo', 'react-spa'] } }, patterns: { type: 'array' }, tier: { enum: ['community', 'enterprise'] } } }));
   const cwd = process.cwd();
   try {
     const cli = tmp();
@@ -453,7 +455,7 @@ test('KETTE-53: add never guesses Next.js and NestJS for a CLI or docs repo; it 
     write(docs, 'docs/guide.md', 'Text\n');
     for (const dir of [cli, docs]) {
       process.chdir(dir);
-      await assert.rejects(run('add', '--yes', '--no-plugins'), (err) => err.exitCode === 2 && /No app stack detected in this repo .* and kette does not guess one\. Name it with --stack <id>/.test(err.message));
+      await assert.rejects(run('add', '--yes', '--no-plugins'), (err) => err.exitCode === 2 && /No stack detected in this repo .* and kette does not guess one\. Name it with --stack <id>/.test(err.message));
       assert.equal(fs.existsSync(path.join(dir, '.kette', 'profile.json')), false, 'nothing written');
     }
     process.chdir(docs);
@@ -462,6 +464,35 @@ test('KETTE-53: add never guesses Next.js and NestJS for a CLI or docs repo; it 
     const { result, out } = await run('add', '--yes', '--no-plugins');
     assert.equal(result, 0, 'a repo with a profile keeps its stacks');
     assert.match(out, /^Detected: no stack, using react-spa · no platform, using github-docker/m);
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
+test('KETTE-57: add --yes in a CLI, library, docs or static site repo writes the detected repo stack and asks nothing', async () => {
+  const d = rulebook('community');
+  const stacks = ['nextjs-ts-tailwind', 'nestjs-prisma', 'nestjs-mongoose', 'python-fastapi', 'react-native-expo', 'react-spa', 'node-cli', 'ts-library', 'docs', 'static-site'];
+  write(d, 'schema/profile.schema.json', JSON.stringify({ type: 'object', required: ['version', 'project', 'stack'], properties: { stack: { type: 'array', minItems: 1, items: { enum: stacks } }, patterns: { type: 'array' }, tier: { enum: ['community', 'enterprise'] } } }));
+  const repos = {
+    'node-cli': { 'package.json': JSON.stringify({ name: 'tool', bin: { tool: 'bin/tool.mjs' } }), '.github/workflows/ci.yml': 'on: push\n' },
+    'ts-library': { 'package.json': JSON.stringify({ name: 'lib', types: 'dist/index.d.ts', devDependencies: { typescript: '5' } }) },
+    docs: { 'README.md': '# Rules\n', 'rules/a.md': '# A\n', 'rules/b.md': '# B\n', 'rules/c.md': '# C\n' },
+    'static-site': { 'package.json': JSON.stringify({ name: 'site', scripts: { build: 'node build.mjs' } }), 'build.mjs': '', 'src/index.html': '<h1>Hi</h1>' },
+  };
+  const cwd = process.cwd();
+  try {
+    for (const [stack, files] of Object.entries(repos)) {
+      const root = tmp();
+      for (const [f, c] of Object.entries(files)) write(root, f, c);
+      process.chdir(root);
+      const { result, out } = await run('add', '--yes', '--no-plugins');
+      assert.equal(result, 0, stack);
+      assert.match(out, new RegExp(`^Detected: stack ${stack} · `, 'm'), stack);
+      assert.doesNotMatch(out, /change with --stack/, stack);
+      const profile = JSON.parse(fs.readFileSync(path.join(root, '.kette', 'profile.json'), 'utf8'));
+      assert.deepEqual(profile.stack, [stack]);
+      assert.equal('apps' in profile, false, `${stack}: no app folder`);
+    }
   } finally {
     process.chdir(cwd);
   }

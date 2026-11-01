@@ -55,6 +55,34 @@ test('react-spa needs Vite, React and an index.html, and no framework, native ap
   }
 });
 
+test('KETTE-57: repo stacks for a repo without an app: node-cli, ts-library, static-site, docs', () => {
+  const repo = (files) => { const d = tmp(); for (const [f, c] of Object.entries(files)) write(d, f, typeof c === 'string' ? c : JSON.stringify(c)); return d; };
+  const pages = { 'docs/a.md': '# A\n', 'docs/b.md': '# B\n', 'rules/c.md': '# C\n' };
+  const cases = [
+    ['Node bin package', { 'package.json': { bin: { tool: 'bin/tool.mjs' } }, 'bin/tool.mjs': '' }, ['node-cli']],
+    ['TypeScript CLI with main but no types', { 'package.json': { bin: 'dist/cli.js', main: 'dist/cli.js', devDependencies: { typescript: '5' } } }, ['node-cli']],
+    ['TypeScript library with exports', { 'package.json': { exports: { '.': './dist/index.js' }, devDependencies: { typescript: '5' } } }, ['ts-library']],
+    ['TypeScript library with types, tsconfig and a bin facade', { 'package.json': { main: 'dist/index.js', types: 'dist/index.d.ts', bin: { x: 'scripts/x.mjs' } }, 'tsconfig.json': '{}' }, ['ts-library']],
+    ['JavaScript package with exports and no TypeScript', { 'package.json': { exports: './index.js' } }, []],
+    ['build script producing HTML pages', { 'package.json': { scripts: { build: 'node build.mjs' } }, 'src/index.html': '<h1>Hi</h1>' }, ['static-site']],
+    ['Astro site', { 'package.json': { dependencies: { astro: '5' } } }, ['static-site']],
+    ['build script without HTML', { 'package.json': { scripts: { build: 'node build.mjs' } } }, []],
+    ['mostly Markdown with a check script', { 'package.json': { scripts: { build: 'node scripts/build.mjs' } }, 'scripts/build.mjs': '', ...pages }, ['docs']],
+    ['Markdown without a manifest', pages, ['docs']],
+    ['README, CHANGELOG and two pages are no docs repo', { 'README.md': '# R\n', 'CHANGELOG.md': '# C\n', 'docs/a.md': '', 'docs/b.md': '' }, []],
+    ['more code than Markdown', { ...pages, 'src/a.py': '', 'src/b.py': '', 'src/c.py': '' }, []],
+    ['an app stack wins over every repo stack', { 'package.json': { bin: { tool: 'x' }, dependencies: { next: '16' } }, ...pages }, ['nextjs-ts-tailwind']],
+  ];
+  for (const [name, files, want] of cases) assert.deepEqual(detectStack(repo(files)), want, name);
+});
+
+test('KETTE-57: repo stacks never become app folders', async () => {
+  const { detectAppFolders } = await import('../src/detect.mjs');
+  const d = tmp();
+  write(d, 'package.json', JSON.stringify({ bin: { tool: 'bin/tool.mjs' } }));
+  assert.deepEqual(detectAppFolders(d), { apps: {}, unusable: {} });
+});
+
 test('erkennt Plattformen an CI- und IaC-Dateien', () => {
   const cases = [
     ['azure-pipelines.yml', 'trigger: [main]', 'azure-devops'],

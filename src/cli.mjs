@@ -38,6 +38,10 @@ const STACKS = [
   { value: 'python-fastapi', label: 'Python + FastAPI' },
   { value: 'react-native-expo', label: 'React Native + Expo (mobile)' },
   { value: 'react-spa', label: 'React + Vite (single page app)' },
+  { value: 'node-cli', label: 'Node CLI (no app, npm package with bin)' },
+  { value: 'ts-library', label: 'TypeScript library (no app, package other code imports)' },
+  { value: 'docs', label: 'Docs and rules (no app, mostly Markdown)' },
+  { value: 'static-site', label: 'Static site (no app, HTML built by a script or generator)' },
 ];
 const PLATFORMS = [
   { value: 'github-docker', label: 'GitHub + Docker on your own server' },
@@ -199,7 +203,7 @@ function loadSchema(bundleDir) {
 // Stacks without --stack and detection: the default for a new or empty repo, the profile's own, otherwise none, never a guess (KETTE-53)
 const fallbackStack = (root, isNew) => (isNew || emptyRepo(root) ? DEFAULT_STACK : existingProfile(root)?.stack || []);
 
-const NO_STACK = `No app stack detected in this repo (no Next.js, NestJS, FastAPI, Expo or Vite app) and kette does not guess one. Name it with --stack <id> (${STACKS.map((s) => s.value).join(', ')}).`;
+const NO_STACK = `No stack detected in this repo (no Next.js, NestJS, FastAPI, Expo or Vite app, no CLI, TypeScript library, static site or Markdown docs) and kette does not guess one. Name it with --stack <id> (${STACKS.map((s) => s.value).join(', ')}).`;
 
 // The stack question; without anything to preselect the person has to choose, an empty answer asks again
 async function askStack(preselected) {
@@ -289,7 +293,9 @@ function withApps(profile, schema, detected, unusable = {}) {
   const accepted = (s, dir) => dir && (!known[s].pattern || new RegExp(known[s].pattern).test(dir));
   const apps = Object.fromEntries((profile.stack || []).filter((s) => known[s] && !(s in unusable)).map((s) => [s, detected[s] || known[s].default]).filter(([s, dir]) => accepted(s, dir)));
   const merged = { ...apps, ...profile.apps };
-  return 'apps' in profile ? { ...profile, apps: merged } : insertAfter(profile, 'stack', 'apps', merged);
+  if ('apps' in profile) return { ...profile, apps: merged };
+  // Repo stacks (node-cli, docs, ...) have no app folder, so their profile gets no empty apps field
+  return Object.keys(merged).length ? insertAfter(profile, 'stack', 'apps', merged) : profile;
 }
 
 // New projects get the English ADR template; a project with the German one from CLI 0.5 gets no second one; older bundles only ship the German file

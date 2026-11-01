@@ -42,9 +42,44 @@ const manifests = (dir) => [
   ...listFiles(dir, 2).filter((f) => /(pyproject\.toml|requirements\.txt)$/.test(f)),
 ];
 
-// Detects stacks from the package files in the repo and in apps/*, packages/*
+// Static site generators; without one a build script next to HTML pages counts as a static site
+const SITE_GENERATORS = ['astro', '@11ty/eleventy'];
+const hasHtml = (dir) => listFiles(dir, 2).some((f) => f.endsWith('.html'));
+const isTypeScript = (file, deps) => Boolean(deps.typescript) || exists(path.dirname(file), 'tsconfig.json');
+
+// Repo stack of one package.json (a repository that is not an app): a TypeScript package with a public API, a CLI with bin, a static site
+function repoStackOf(file) {
+  if (path.basename(file) !== 'package.json') return null;
+  const p = readJson(file) || {};
+  const deps = { ...p.dependencies, ...p.devDependencies };
+  // A library may carry a small bin facade over its API, so the public API decides first
+  if ((p.exports || p.types || p.typings) && isTypeScript(file, deps)) return 'ts-library';
+  if (p.bin) return 'node-cli';
+  if (SITE_GENERATORS.some((d) => deps[d]) || (p.scripts?.build && hasHtml(path.dirname(file)))) return 'static-site';
+  return null;
+}
+
+// README, CHANGELOG and the like at the root come with every repo and make no docs repo
+const ROOT_TEXT = /^(README|CHANGELOG|LICENSE|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY)(\.|$)/i;
+const CODE = /\.(m?[jt]sx?|c[jt]s|py|go|rs|java|kt|swift|rb|php|cs|vue|svelte|sh|html|css)$/i;
+// A few pages of their own, so a starter repo with a README stays empty
+const MIN_DOCS_PAGES = 3;
+
+// Mostly Markdown: more Markdown pages than code files
+function isDocs(dir) {
+  const files = listFiles(dir, 3);
+  const pages = files.filter((f) => /\.mdx?$/i.test(f) && !(path.dirname(f) === dir && ROOT_TEXT.test(path.basename(f))));
+  return pages.length >= MIN_DOCS_PAGES && pages.length > files.filter((f) => CODE.test(f)).length;
+}
+
+// Detects stacks from the package files in the repo and in apps/*, packages/*; repo stacks (node-cli, ts-library, static-site, docs) only when no app stack is found
 export function detectStack(dir) {
-  return [...new Set(manifests(dir).flatMap(stacksOf))];
+  const found = manifests(dir);
+  const apps = [...new Set(found.flatMap(stacksOf))];
+  if (apps.length) return apps;
+  const repo = [...new Set(found.map(repoStackOf).filter(Boolean))];
+  if (repo.length) return repo;
+  return isDocs(dir) ? ['docs'] : [];
 }
 
 // Same rule as apps in the profile schema: plain folder names joined by /, so a detected folder always makes a valid profile
