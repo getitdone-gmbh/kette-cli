@@ -432,3 +432,12 @@ test('CR-URL-2: the stored url keeps an encoded path, the key compares the decod
   assert.deepEqual(normalizeUrl('git@ssh.dev.azure.com:v3/acme/My Project/web'), https, 'an scp path with a space is encoded the same way');
   assert.doesNotMatch(https.url, /\s/);
 });
+
+test('CR-URL-3: an scp path that is already encoded is not encoded twice; ssh and https with a space in the project share url and key', () => {
+  const https = normalizeUrl('https://dev.azure.com/Org/My%20Proj/_git/repo');
+  for (const ssh of ['git@ssh.dev.azure.com:v3/Org/My%20Proj/repo', 'git@ssh.dev.azure.com:v3/Org/My Proj/repo', 'ssh://git@ssh.dev.azure.com/v3/Org/My%20Proj/repo']) {
+    assert.deepEqual(normalizeUrl(ssh), https, ssh);
+  }
+  assert.equal(https.url, 'https://dev.azure.com/Org/My%20Proj/_git/repo');
+  assert.doesNotMatch(normalizeUrl('git@ssh.dev.azure.com:v3/Org/My%20Proj/repo').url, /%25/);
+});

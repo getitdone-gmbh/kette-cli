@@ -60,8 +60,8 @@ function remote(host, encoded) {
 export function normalizeUrl(raw) {
   const text = String(raw).trim();
   const scp = !/^[a-z][a-z0-9+.-]*:\/\//i.test(text) && !/^[a-z]:[\\/]/i.test(text) && text.match(SCP);
-  // git takes the scp path as it is, so it is encoded here per segment
-  if (scp) return remote(scp[2], trimPath(scp[3]).split('/').map(encodeURIComponent).join('/'));
+  // git takes the scp path as it is, a segment may already be encoded (My%20Proj): decoded first, so it is never encoded twice (CR-URL-3)
+  if (scp) return remote(scp[2], trimPath(scp[3]).split('/').map((s) => encodeURIComponent(decodeSegment(s))).join('/'));
   let u;
   // A Windows drive path (C:/repos/app.git) would parse as a URL with the scheme c:
   try { u = /^[a-z]:[\\/]/i.test(text) ? null : new URL(text); } catch { u = null; }
