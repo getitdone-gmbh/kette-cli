@@ -203,7 +203,11 @@ function loadSchema(bundleDir) {
 // Stacks without --stack and detection: the default for a new or empty repo, the profile's own, otherwise none, never a guess (KETTE-53)
 const fallbackStack = (root, isNew) => (isNew || emptyRepo(root) ? DEFAULT_STACK : existingProfile(root)?.stack || []);
 
-const NO_STACK = `No stack detected in this repo (no Next.js, NestJS, FastAPI, Expo or Vite app, no CLI, TypeScript library, static site or Markdown docs) and kette does not guess one. Name it with --stack <id> (${STACKS.map((s) => s.value).join(', ')}).`;
+const STACK_IDS = () => STACKS.map((s) => s.value).join(', ');
+// unknown: stacks detected but missing from the installed rulebook, so the message does not claim nothing was found (CR-CLI-2)
+const noStack = (unknown = []) => (unknown.length
+  ? `Detected ${unknown.join(', ')}, but the installed rulebook does not know ${unknown.length > 1 ? 'them' : 'it'} yet. Load the current one with: ${cmd('kette update')}, or name a stack with --stack <id> (${STACK_IDS()}).`
+  : `No stack detected in this repo (no Next.js, NestJS, FastAPI, Expo or Vite app, no CLI, TypeScript library, static site or Markdown docs; an app kette has no stack for, such as Express, Vue or Spring, stops here too) and kette does not guess one. Name it with --stack <id> (${STACK_IDS()}).`);
 
 // The stack question; without anything to preselect the person has to choose, an empty answer asks again
 async function askStack(preselected) {
@@ -241,7 +245,7 @@ async function buildProfile(root, opts, detected, tier, instance, isNew, repoSta
   const chosen = stack.length ? stack : fallback;
   const onlyRepoStacks = chosen.length > 0 && chosen.every((s) => repoStacks.has(s));
   if (!opts.yes && !patterns && !onlyRepoStacks) patterns = await choose('Which architecture patterns? (if unsure, 1)', PATTERNS, '1');
-  if (!stack.length && !fallback.length) throw new ExitError(NO_STACK);
+  if (!stack.length && !fallback.length) throw new ExitError(noStack(detected.unknown));
   return {
     $schema: 'https://kette.itdone.de/schema/profile.schema.json',
     version: 1,
@@ -422,7 +426,9 @@ const pipelineNote = (root, files) => {
   return own.length ? ` and its own pipeline (${own.join(', ')})` : '';
 };
 
-const scaffoldHint = (root, files) => `Platform templates (Dockerfile, compose, CI, deploy workflow) left out: this repo already has files${pipelineNote(root, files)}. Add them with: ${cmd('kette add --scaffold')}`;
+// A repo stack only gets its CI, so the hint names what is left out instead of the whole app set
+const leftOut = (files) => (files.some((f) => /(^|\/)Dockerfile$|^compose\.ya?ml$/.test(f.path)) ? 'Dockerfile, compose, CI, deploy workflow' : files.map((f) => f.path).join(', '));
+const scaffoldHint = (root, files) => `Platform templates (${leftOut(files)}) left out: this repo already has files${pipelineNote(root, files)}. Add them with: ${cmd('kette add --scaffold')}`;
 
 const unusableFolder = (dir, stack) => `Folder "${dir}" (${stack}) can't be used as an app folder. Rename it (letters, digits, . _ - only) or point apps to another folder in .kette/profile.json.`;
 
@@ -451,7 +457,8 @@ function detectFor(root, isNew, schema) {
   const found = detectAppFolders(root);
   const stacks = detectStack(root);
   const folders = { apps: pick(found.apps), unusable: pick(found.unusable) };
-  return { folders, detected: { stack: stacks.filter(keep), platform: detectPlatform(root), apps: folders.apps }, unknown: stacks.filter((s) => !keep(s)) };
+  const unknown = stacks.filter((s) => !keep(s));
+  return { folders, detected: { stack: stacks.filter(keep), platform: detectPlatform(root), apps: folders.apps, unknown }, unknown };
 }
 
 const notFound = (name) => `Kette project ${printable(name)} not found on this machine. Create it with ${cmd(`kette project create ${printable(name)}`)} or clone it with ${cmd(`kette project create ${printable(name)} --from <git-url>`)}`;

@@ -35,5 +35,6 @@ export function validate(schema, value, path = '$') {
       }
     }
   }
-  return errors;
+  // if, then and else can report the same type error as the schema itself
+  return [...new Set(errors)];
 }
