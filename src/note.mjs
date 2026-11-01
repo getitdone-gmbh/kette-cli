@@ -128,7 +128,7 @@ ${enterprise ? enterpriseFlow(enterpriseParts(flowOf(flow))) : communityFlow(com
 - On this machine in \`~/.kette/bundles/${enterprise ? ENTERPRISE : COMMUNITY}/\`: ${where}.
 - In Claude Code the plugins ${pluginsFor(tier).map((p) => `\`${pluginId(p, marketName(enterprise ? ENTERPRISE : COMMUNITY))}\``).join(', ')}, enabled for this project in \`.claude/settings.json\`.
 - Browse with \`kette rules\`, plugin contents and checks with \`kette doctor\`.
-- Settings this project inherits from its Kette instance (ticketing, wallet, overlays, stations): read them with \`kette profile --effective\` before ticket, wallet or review work, the values of the repo win.
+- Settings this repo inherits from its Kette project (ticketing, wallet, overlays, stations): read them with \`kette profile --effective\` before ticket, wallet or review work, the values of the repo win.
 ${END}
 `;
 }

@@ -44,7 +44,7 @@ test('KETTE-28: an approval or acting as a person needs that person at a termina
   const writes = board.writesTo(token);
   assert.match((await t(['check', item, '--as', 'ux-designer', '--approved-by', 'lead@acme.test', '--yes'], 1)).out, /lead@acme\.test approves KD-0001\/prototype\/acme-app needs a person at a terminal/);
   assert.match((await t(['check', item, '--as', 'ux-designer', '--approved-by', 'lead@acme.test', '--yes'], 1, { env: { CLAUDECODE: '1' } })).out, /needs a person at a terminal/);
-  assert.match((await t(['pick', item, '--as', 'lead@acme.test', '--yes'], 1)).out, /as lead@acme\.test, a person of instance acme needs a person at a terminal/);
+  assert.match((await t(['pick', item, '--as', 'lead@acme.test', '--yes'], 1)).out, /as lead@acme\.test, a person of Kette project acme needs a person at a terminal/);
   assert.match((await t(['check', item, '--as', 'ux-designer', '--yes'], 1)).out, /\[approval\] .* needs approval by lead@acme\.test/);
   assert.equal(board.writesTo(token), writes, 'no refused approval sent anything');
   box.env = { ...box.env, ...kit.env() };
@@ -109,7 +109,7 @@ test('K16-02: a list right after a new killed at its first write warns, also whi
     kill = () => c.kill('SIGKILL');
     await new Promise((r) => c.on('close', r));
     const early = ok(await k.step(box, ['ticket', 'list'], { cwd: app }));
-    assert.match(early.out, /WARN The last kette ticket new of instance acme on this machine was interrupted.*kette ticket list.*kette ticket repair <KD>/s);
+    assert.match(early.out, /WARN The last kette ticket new of Kette project acme on this machine was interrupted.*kette ticket list.*kette ticket repair <KD>/s);
     let later = '';
     for (let i = 0; i < 40 && !/KD-0001 is incomplete/.test(later); i++) {
       await new Promise((r) => setTimeout(r, 250));
@@ -167,7 +167,7 @@ test('KETTE-32 (KT-N2): the intake model of the instance is asked only after thi
     setModel(`${model.url}/v1/chat/completions`);
     const prompt = JSON.stringify({ prompt: 'das sollte anders funktionieren als bisher, finde ich, schon seit einer ganzen Weile eigentlich' });
     const hook = (env = {}) => kit.step(box, ['ticket', 'hook', 'run'], { cwd: app, input: prompt, env }).then((r) => ok(r));
-    assert.match(ok(await kit.step(box, ['ticket', 'hook', 'status'], { cwd: app })).out, new RegExp(`Intake model ${model.url.replace(/[.]/g, '\\.')} of instance acme is not confirmed on this machine.*kette ticket hook trust`));
+    assert.match(ok(await kit.step(box, ['ticket', 'hook', 'status'], { cwd: app })).out, new RegExp(`Intake model ${model.url.replace(/[.]/g, '\\.')} of Kette project acme is not confirmed on this machine.*kette ticket hook trust`));
     assert.match(ok(await kit.step(box, ['ticket', 'hook', 'install'], { cwd: app })).out, /is not confirmed on this machine/);
     assert.match(JSON.parse((await hook()).out).hookSpecificOutput.additionalContext, /^Kette intake: if this prompt asks to change/);
     assert.equal(asked.length, 0, 'no prompt reached the model before the confirmation');

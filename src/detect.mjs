@@ -76,6 +76,14 @@ export const detectApps = (dir) => detectAppFolders(dir).apps;
 // npm workspaces at the repository root: the Node apps then share one install and one lockfile
 export const detectWorkspace = (dir) => Boolean(readJson(path.join(dir, 'package.json'))?.workspaces);
 
+// CI files of a pipeline the repo already runs, relative paths
+const PIPELINES = ['.github/workflows', '.gitlab-ci.yml', 'azure-pipelines.yml', '.woodpecker.yml', '.woodpecker', 'Jenkinsfile', 'bitbucket-pipelines.yml', '.circleci'];
+// ignore: relative paths kette wrote itself, so its own ci.yml and deploy.yml never count as a pipeline of the repo
+export function detectPipeline(dir, ignore = new Set()) {
+  const own = (f) => !ignore.has(f.split(path.sep).join('/'));
+  return PIPELINES.filter((f) => exists(dir, f) && (fs.statSync(path.join(dir, f)).isDirectory() ? listFiles(path.join(dir, f), 3).map((x) => path.relative(dir, x)).some(own) : own(f)));
+}
+
 // Detects the platform from CI and infrastructure files
 export function detectPlatform(dir) {
   const files = listFiles(dir, 3).map((f) => path.relative(dir, f));

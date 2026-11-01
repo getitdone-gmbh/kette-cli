@@ -38,6 +38,9 @@ export function recordTemplates(root, described) {
   writeRecord(root, record);
 }
 
+// Paths of the template files kette recorded as written by itself
+export const recordedTemplates = (root) => Object.keys(readRecord(root).files);
+
 // The real path of a project file, only when it stays inside the real project folder (a symlinked folder pointing outside never counts)
 function ownFile(root, p) {
   const base = fs.realpathSync(root);

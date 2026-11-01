@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fetchManifest, installBundle, installedBundle, readState, setActiveBundle } from './manifest.mjs';
-import { detectAppFolders, detectPlatform, detectStack, detectWorkspace } from './detect.mjs';
+import { detectAppFolders, detectPipeline, detectPlatform, detectStack, detectWorkspace } from './detect.mjs';
 import { validate } from './validate.mjs';
 import { describe, print, apply } from './plan.mjs';
 import { renderTemplates, TemplateError } from './templates.mjs';
@@ -10,7 +10,7 @@ import { ask, choose, confirm, close } from './prompt.mjs';
 import { MARKETPLACE, hasClaude, installedPlugins, pluginId, pluginInstalled, registeredAt, removeMarketplace, repointMarketplace } from './claude.mjs';
 import { LOCAL_SETTINGS_PATH, SETTINGS_PATH, enableHints, enableProjectPlugins, settingsItems, settingsStatus, userScopePlugins, writeProjectSettings } from './project-plugins.mjs';
 import { marketName } from './marketplace.mjs';
-import { RECORD_PATH, enterpriseLeftovers, recordTemplates, removeLeftovers } from './leftovers.mjs';
+import { RECORD_PATH, enterpriseLeftovers, recordTemplates, recordedTemplates, removeLeftovers } from './leftovers.mjs';
 import { activeBundleLink, bundlesDir, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginContents, pluginDetails, pluginsFor, pluginSummary } from './editions.mjs';
 import { NOTE_PATH, COMMUNITY_REVIEWERS, agentNote, renewNote } from './note.mjs';
@@ -25,8 +25,8 @@ import { ExitError } from './errors.mjs';
 import { cloud, doctorLine } from './cloud.mjs';
 import { theme } from './theme/command.mjs';
 import { WALLET_HELP, hasWallet, offerWallet, wallet, walletDoctor } from './wallet/command.mjs';
-import { INSTANCE_HELP, askInstance, createPending, doctorInstance, instance as instanceCommand, joinInstance, prepareJoin, requireEdition } from './instance/command.mjs';
-import { inherit, instanceSource, printable, readInstance } from './instance/config.mjs';
+import { PROJECT_HELP, askInstance, createPending, doctorInstance, project as projectCommand, joinInstance, prepareJoin, requireEdition } from './instance/command.mjs';
+import { inherit, instanceSource, originName, printable, readInstance } from './instance/config.mjs';
 import { TICKET_HELP, offerTicketing, ticket } from './ticket/command.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -65,11 +65,11 @@ const HELP = `Set up the rules and agents of Die Kette.
 Commands:
   kette init [folder]   Create a new project with profile, rules and agents
   kette add             Connect an existing repo (detects stack and platform)
-  kette doctor          Check the project and setup (--ci for pipelines, --instance [name] for every repo of an instance)
+  kette doctor          Check the project and setup (--ci for pipelines, --project [name] for every repo of a Kette project)
   kette update          Load the latest rulebook
   kette rules [topic]   Show installed rules, with a topic read that rule (--path for file paths)
-  kette profile         Show the project profile (--effective: with the values inherited from its instance)
-  ${INSTANCE_HELP}
+  kette profile         Show the project profile (--effective: with the values inherited from its Kette project)
+  ${PROJECT_HELP}
   kette login [key]     Unlock Enterprise (Die Kette): agents, gates, platform profiles, checks
                         Without key: from KETTE_LICENSE_KEY, otherwise a hidden prompt
   kette logout          Remove license key, Enterprise bundle and npm access from this machine
@@ -94,11 +94,12 @@ Options:
   --platform id         Set platform
   --patterns a,b        Set patterns
   --no-plugins          Do not enable Claude Code plugins for the project
-  --instance [name]     With kette init and add, connect the project to this instance; with kette instance the instance meant
-  --edition id          With kette instance create: enterprise or community (default: the edition of this machine)
-  --from source         With kette instance create, clone an instance repo (git URL) or link a folder that has instance.json
-  --role id             With kette instance members add: owner or member (default member)
-  --effective           With kette profile, add the values the project inherits from its instance
+  --scaffold            With kette add in a repo that has files, also add Dockerfile, compose, CI and the deploy workflow (Enterprise)
+  --project [name]      With kette init and add, connect the repo to this Kette project; with kette project the Kette project meant
+  --edition id          With kette project create: enterprise or community (default: the edition of this machine)
+  --from source         With kette project create, clone a Kette project repo (git URL) or link a folder that has instance.json
+  --role id             With kette project members add: owner or member (default member)
+  --effective           With kette profile, add the values the repo inherits from its Kette project
   --path                With kette rules, show file paths instead of content
   --no-npm              With kette login and update, do not set up npm access
   --npm-replace         Comment out an existing @getitdone-gmbh line in ~/.npmrc and use Die Kette
@@ -120,8 +121,8 @@ Options:
   --stdin               With kette wallet set and add, read the value from stdin instead of a hidden prompt
   --github-env name     With kette wallet sync github, the GitHub environment (default: the wallet environment)
   --repo owner/name     With kette wallet sync github, another repo than the current one
-  --project id          With kette ticket connect, the project on the board (workload.zero project id)
-  --by member           With kette ticket new, who decided (a member of the instance)
+  --board id            With kette ticket connect, the project on the board (workload.zero project id)
+  --by member           With kette ticket new, who decided (a member of the Kette project)
   --as member           With kette ticket, who acts (member, session or agent); pick needs it
   --stations a,b        With kette ticket new and extend, the stations as station[:target][@artifact]
   --source ref          With kette ticket new, where it was decided (chat:<session>, meeting:<date>, note:<file>)
@@ -133,7 +134,7 @@ kette theme writes a drop-in replacement for the Community theme.css. Enterprise
 The installer never creates cloud resources and never deploys. Infrastructure is written as code in the repo.
 Plugins are enabled per project in .claude/settings.json, never for all projects; a Community project never enables Enterprise plugins.
 kette wallet keeps names in .kette/wallet.json and values in your provider; it never prints a value and never takes one as an argument.
-kette ticket reads its board, stations and members from the instance of the repo and its credential from the secret wallet; it writes to a board only after a yes or --yes.
+kette ticket reads its board, stations and members from the Kette project of the repo and its credential from the secret wallet; it writes to a board only after a yes or --yes.
 kette cloud setup only registers the itdone MCP server; Claude Code deploys after you confirm, and kette never handles a password or token.`;
 
 // Brand line with version and edition, only on init and help
@@ -144,10 +145,10 @@ const help = () => [brand(), '', HELP.replace(/^ {2}((?:kette|--)\S*(?: \S+)*?)(
 const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
   '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--dcr': 'dcr', '--help': 'help', '-h': 'help', '--version': 'version',
-  '--preview': 'preview', '--json': 'json', '--stdin': 'stdin', '--effective': 'effective', '--paraphrase': 'paraphrase',
+  '--preview': 'preview', '--json': 'json', '--stdin': 'stdin', '--effective': 'effective', '--paraphrase': 'paraphrase', '--scaffold': 'scaffold',
 };
 const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out', '--primary', '--accent', '--neutral', '--radius', '--font', '--provider', '--env', '--app', '--note', '--github-env', '--repo', '--edition', '--from', '--role',
-  '--project', '--by', '--as', '--source', '--stations', '--statement', '--words', '--rationale', '--label', '--comment', '--member', '--station', '--status',
+  '--board', '--by', '--as', '--source', '--stations', '--statement', '--words', '--rationale', '--label', '--comment', '--member', '--station', '--status',
   '--pr', '--commit', '--figma', '--review', '--approved-by', '--proposed-by', '--acceptance'];
 // Free text may start with a dash
 const TEXT_VALUES = ['--note', '--statement', '--words', '--rationale', '--comment', '--acceptance'];
@@ -160,8 +161,8 @@ export function parse(argv) {
     // Everything after -- belongs to the command kette wallet run starts
     if (a === '--') { opts.rest = argv.slice(i + 1); break; }
     if (Object.hasOwn(FLAGS, a)) opts[FLAGS[a]] = true;
-    // --instance takes a name, alone (kette doctor --instance) it means the instance of the repo in this folder
-    else if (a === '--instance') opts.instance = argv[i + 1] === undefined || argv[i + 1].startsWith('-') ? true : argv[++i];
+    // --project takes a Kette project name, alone (kette doctor --project) it means the one of the repo in this folder; --instance is its hidden 0.11 alias
+    else if (a === '--project' || a === '--instance') opts.project = argv[i + 1] === undefined || argv[i + 1].startsWith('-') ? true : argv[++i];
     else if (a === '--color' || a === '--no-color') opts.color = a === '--color';
     else if (VALUES.includes(a)) {
       const value = argv[++i];
@@ -186,28 +187,43 @@ function loadSchema(bundleDir) {
   return JSON.parse(fs.readFileSync(path.join(bundleDir, 'schema', 'profile.schema.json'), 'utf8'));
 }
 
-async function buildProfile(root, opts, detected, tier, instance) {
-  const name = opts.name || path.basename(path.resolve(root));
+// Stacks without --stack and detection: the default for a new or empty repo, the profile's own, otherwise none, never a guess (KETTE-53)
+const fallbackStack = (root, isNew) => (isNew || emptyRepo(root) ? DEFAULT_STACK : existingProfile(root)?.stack || []);
+
+const NO_STACK = `No app stack detected in this repo (no Next.js, NestJS, FastAPI, Expo or Vite app) and kette does not guess one. Name it with --stack <id> (${STACKS.map((s) => s.value).join(', ')}).`;
+
+// The stack question; without anything to preselect the person has to choose, an empty answer asks again
+async function askStack(preselected) {
+  const def = preselected.map((s) => STACKS.findIndex((x) => x.value === s) + 1).filter(Boolean).join(',');
+  for (;;) {
+    const picked = await choose('Which stacks does the project use?', STACKS, def);
+    if (picked.length) return picked;
+    console.log(`Choose at least one number from 1 to ${STACKS.length}.`);
+  }
+}
+
+async function buildProfile(root, opts, detected, tier, instance, isNew) {
+  // The repo name from its origin, so a worktree or a clone into another folder keeps it (KETTE-53)
+  const name = opts.name || originName(root) || path.basename(path.resolve(root));
+  const fallback = fallbackStack(root, isNew);
   let stack = listArg(opts.stack) || detected.stack;
   let platform = opts.platform || detected.platform;
   let patterns = listArg(opts.patterns);
   if (!opts.yes) {
-    if (!listArg(opts.stack)) {
-      const def = (stack.length ? stack : DEFAULT_STACK).map((s) => STACKS.findIndex((x) => x.value === s) + 1).join(',');
-      stack = await choose('Which stacks does the project use?', STACKS, def);
-    }
+    if (!listArg(opts.stack)) stack = await askStack(stack.length ? stack : fallback);
     if (!opts.platform) {
       const def = String((PLATFORMS.findIndex((x) => x.value === platform) + 1) || 1);
       [platform] = await choose('Where is it built and run?', PLATFORMS, def);
     }
     if (!patterns) patterns = await choose('Which architecture patterns? (if unsure, 1)', PATTERNS, '1');
   }
+  if (!stack.length && !fallback.length) throw new ExitError(NO_STACK);
   return {
     $schema: 'https://kette.itdone.de/schema/profile.schema.json',
     version: 1,
     project: { name },
     ...(instance ? { instance: instance.name } : {}),
-    stack: stack.length ? stack : DEFAULT_STACK,
+    stack: stack.length ? stack : fallback,
     platform: { id: platform || DEFAULT_PLATFORM },
     patterns: patterns?.length ? patterns : ['modular-monolith'],
     tier,
@@ -334,6 +350,54 @@ function templateHint(rendered, templates, target, bundleDir) {
   return null;
 }
 
+// The rendered files of a profile and the platform templates among them (Dockerfile, compose, CI, deploy workflow): what the checks lack
+function splitTemplates(bundleDir, profile, workspace) {
+  const rendered = templatesFor(bundleDir, profile, workspace);
+  const checks = new Set((templatesFor(bundleDir, { ...profile, platform: undefined }, workspace).templates?.files || []).map((f) => f.path));
+  return { rendered, platform: (rendered.templates?.files || []).filter((f) => !checks.has(f.path)) };
+}
+
+const withoutFiles = (rendered, files) => {
+  if (!files.length) return rendered;
+  const drop = new Set(files.map((f) => f.path));
+  return { ...rendered, templates: { ...rendered.templates, files: rendered.templates.files.filter((f) => !drop.has(f.path)) } };
+};
+
+// Platform templates kette wrote into the repo: recorded in .kette/templates.json, or on disk exactly as kette renders them (from before the record)
+function ketteWrote(root, files) {
+  const recorded = new Set(recordedTemplates(root));
+  const same = (f) => { const abs = path.join(root, f.path); return fs.existsSync(abs) && fs.lstatSync(abs).isFile() && fs.readFileSync(abs, 'utf8') === f.content; };
+  return new Set(files.filter((f) => recorded.has(f.path) || same(f)).map((f) => f.path));
+}
+
+const ketteScaffolded = (root, files) => ketteWrote(root, files).size > 0;
+
+// Platform templates kette recorded that are gone from disk: the team removed them, only --scaffold brings them back (CR-GATE-1)
+function removedByTeam(root, files) {
+  const recorded = new Set(recordedTemplates(root));
+  return files.filter((f) => recorded.has(f.path) && !fs.existsSync(path.join(root, f.path)));
+}
+
+// Platform templates only in an empty repo, in one kette scaffolded before, with --scaffold or after a yes: a repo may run its own pipeline (KETTE-53)
+async function scaffoldPlatform(root, isNew, opts, platformId, files) {
+  if (opts.scaffold || isNew || emptyRepo(root) || ketteScaffolded(root, files)) return true;
+  if (opts.yes || opts.dryRun) return false;
+  return confirm(`\nThis repo already has files${pipelineNote(root, files)}. Also add Dockerfile, compose, CI and a deploy-on-push workflow for ${platformId || DEFAULT_PLATFORM}?`);
+}
+
+// A repo with nothing in it but its git folder, what kette writes there and what a new GitHub repo starts with (CR-SCAF-2)
+const OWN = ['.git', '.kette', '.claude', 'CLAUDE.md', '.gitignore'];
+const STARTER = /^(README|LICENSE)(\.[A-Za-z0-9]+)?$/i;
+const emptyRepo = (root) => !fs.existsSync(root) || fs.readdirSync(root).every((e) => OWN.includes(e) || STARTER.test(e));
+
+// A pipeline of the repo itself; a CI or deploy workflow kette wrote does not count
+const pipelineNote = (root, files) => {
+  const own = detectPipeline(root, ketteWrote(root, files));
+  return own.length ? ` and its own pipeline (${own.join(', ')})` : '';
+};
+
+const scaffoldHint = (root, files) => `Platform templates (Dockerfile, compose, CI, deploy workflow) left out: this repo already has files${pipelineNote(root, files)}. Add them with: ${cmd('kette add --scaffold')}`;
+
 const unusableFolder = (dir, stack) => `Folder "${dir}" (${stack}) can't be used as an app folder. Rename it (letters, digits, . _ - only) or point apps to another folder in .kette/profile.json.`;
 
 // One part of the Detected line: a flag wins over detection, without either the profile gets the default
@@ -344,11 +408,11 @@ function detectedNote(kind, detected, given, fallback) {
 }
 
 // Interactive runs still ask, so they only get the default named when nothing else decides
-function detectedLine(detected, opts) {
-  const fallback = (value) => (opts.yes ? value : null);
-  const stack = detectedNote('stack', detected.stack.join(', '), listArg(opts.stack)?.join(', '), fallback(DEFAULT_STACK.join(', ')));
+function detectedLine(detected, opts, stackFallback) {
+  const fallback = (value) => (opts.yes && value ? value : null);
+  const stack = detectedNote('stack', detected.stack.join(', '), listArg(opts.stack)?.join(', '), fallback(stackFallback.join(', ')));
   const platform = detectedNote('platform', detected.platform, opts.platform, fallback(DEFAULT_PLATFORM));
-  const defaulted = opts.yes ? [!detected.stack.length && !opts.stack && '--stack', !detected.platform && !opts.platform && '--platform'].filter(Boolean) : [];
+  const defaulted = opts.yes ? [!detected.stack.length && !opts.stack && stackFallback.length && '--stack', !detected.platform && !opts.platform && '--platform'].filter(Boolean) : [];
   return `Detected: ${stack} · ${platform}${defaulted.length ? ` (change with ${defaulted.join(' / ')})` : ''}`;
 }
 
@@ -364,12 +428,12 @@ function detectFor(root, isNew, schema) {
   return { folders, detected: { stack: stacks.filter(keep), platform: detectPlatform(root), apps: folders.apps }, unknown: stacks.filter((s) => !keep(s)) };
 }
 
-const notFound = (name) => `Instance ${printable(name)} not found on this machine. Create it with ${cmd(`kette instance create ${printable(name)}`)} or clone it with ${cmd(`kette instance create ${printable(name)} --from <git-url>`)}`;
+const notFound = (name) => `Kette project ${printable(name)} not found on this machine. Create it with ${cmd(`kette project create ${printable(name)}`)} or clone it with ${cmd(`kette project create ${printable(name)} --from <git-url>`)}`;
 
-// The instance a project belongs to: --instance on init and add, otherwise the name in its profile; null without one
+// The Kette project a repo belongs to: --project on init and add, otherwise the name in its profile; null without one
 function projectInstance(root, opts = {}) {
-  if (opts.instance === true) throw new ExitError('--instance needs a name with kette init and kette add');
-  const name = opts.instance || existingProfile(root)?.instance;
+  if (opts.project === true) throw new ExitError('--project needs a name with kette init and kette add');
+  const name = opts.project || existingProfile(root)?.instance;
   if (!name) return null;
   let instance;
   try { instance = readInstance(name); } catch (err) { throw new ExitError(err.message, 1); }
@@ -421,14 +485,14 @@ async function setup(root, opts, isNew) {
   if (isNew) fs.mkdirSync(root, { recursive: true });
   const schema = loadSchema(bundleDir);
   const { folders, detected, unknown } = detectFor(root, isNew, schema);
-  if (!isNew) console.log(detectedLine(detected, opts));
+  if (!isNew) console.log(detectedLine(detected, opts, fallbackStack(root, isNew)));
   if (unknown.length) console.log(`${status('warn', 'WARN')} The installed rulebook does not know ${unknown.join(', ')} yet, left out of the profile. Load the current one with: ${cmd('kette update')}`);
   if (Object.keys(detected.apps).length) console.log(`App folders: ${Object.entries(detected.apps).map(([stack, dir]) => `${stack} ${dir}`).join(', ')}`);
   // apps only matters where templates are rendered, so Community stays quiet
   if (tier === ENTERPRISE) for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} ${unusableFolder(dir, stack)}`);
   // apps says where the templates go, so only Enterprise writes it; a Community project gets it from detection when it is upgraded
   const appsSchema = tier === ENTERPRISE ? schema : {};
-  const profile = withApps(await buildProfile(root, opts, detected, tier, instance), appsSchema, detected.apps, folders.unusable);
+  const profile = withApps(await buildProfile(root, opts, detected, tier, instance, isNew), appsSchema, detected.apps, folders.unusable);
   const errors = validate(schema, forSchema(schema, profile));
   if (errors.length) throw new Error(`Invalid profile: ${errors.join('; ')}`);
 
@@ -440,7 +504,11 @@ async function setup(root, opts, isNew) {
   // A stack found only in an unusable folder and without an apps entry renders nothing, the default folder would not be its folder
   const skippedStacks = (target.stack || []).filter((s) => s in folders.unusable && !target.apps?.[s]);
   const renderable = { ...target, stack: (target.stack || []).filter((s) => !skippedStacks.includes(s)) };
-  const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : templatesFor(bundleDir, renderable, isNew || detectWorkspace(root));
+  const split = tier === ENTERPRISE && !invalid.length ? splitTemplates(bundleDir, renderable, isNew || detectWorkspace(root)) : null;
+  const platformFiles = split?.platform || [];
+  const scaffold = !platformFiles.length || await scaffoldPlatform(root, isNew, opts, target.platform?.id, platformFiles);
+  const removed = scaffold && !opts.scaffold ? removedByTeam(root, platformFiles) : [];
+  const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : withoutFiles(split.rendered, scaffold ? removed : platformFiles);
   if (rendered.templates) rendered.templates.skipped.push(...skippedStacks.map((stack) => ({ stack, reason: `folder "${folders.unusable[stack]}" can't be used as an app folder, see the warning above` })));
   const workspace = isNew && rendered.templates ? workspaceManifest(bundleDir, target, rendered.templates) : null;
   const templates = workspace?.templates || rendered.templates || null;
@@ -449,12 +517,14 @@ async function setup(root, opts, isNew) {
   if (instance && !pending && !opts.dryRun) prepareJoin(instance.name, root);
   const plan = planFor(root, profile, bundleDir, tier, noteTier, templates, target.apps, { instance, plugins: !opts.noPlugins });
   const described = describe(workspace ? [...plan, workspace.item] : plan, root);
-  console.log(`\n${opts.dryRun ? 'Would create' : 'Plan'} in ${file(path.resolve(root))} (edition ${editionLabel(tier)}${instance ? `, instance ${instance.name}` : ''}):`);
+  console.log(`\n${opts.dryRun ? 'Would create' : 'Plan'} in ${file(path.resolve(root))} (edition ${editionLabel(tier)}${instance ? `, Kette project ${instance.name}` : ''}):`);
   print(described);
+  for (const f of removed) console.log(`  ${dim('- skip   ')} ${dim(f.path)}${dim('  (removed by you, kette add --scaffold restores it)')}`);
   const stale = staleNote(described);
   if (stale) console.log(stale);
   const missing = tier === ENTERPRISE ? templateHint(rendered, templates, target, bundleDir) : null;
   if (missing) console.log(`\n  ${missing}`);
+  if (!scaffold) console.log(`\n  ${scaffoldHint(root, platformFiles)}`);
   for (const s of templates?.skipped || []) console.log(`  No templates for ${s.stack}: ${s.reason}`);
   if (opts.dryRun) return 0;
   if (!(await confirm('\nCreate these files?', opts.yes))) { console.log('Cancelled, nothing written.'); return 1; }
@@ -513,7 +583,7 @@ function summary(described, tier, pluginsOk, rulesDir, root) {
   ].join('\n');
 }
 
-// kette instance use: profile names the instance and takes its edition, the note follows, the project enables only its plugins,
+// kette project use: profile names the Kette project and takes its edition, the note follows, the project enables only its plugins,
 // the repo joins the instance and leaves every other one; everything that can stop the join is checked before a file is written
 async function useInstance(root, instance, opts) {
   const edition = instance.edition;
@@ -527,7 +597,7 @@ async function useInstance(root, instance, opts) {
     ...(edition === ENTERPRISE && npmGranted() ? [npmrcItem()] : []),
   ];
   const described = describe(plan, root);
-  console.log(`${opts.dryRun ? 'Would change' : 'Plan'} in ${file(path.resolve(root))} (instance ${instance.name}, ${editionLabel(edition)}):`);
+  console.log(`${opts.dryRun ? 'Would change' : 'Plan'} in ${file(path.resolve(root))} (Kette project ${instance.name}, ${editionLabel(edition)}):`);
   print(described);
   if (edition === COMMUNITY) {
     const left = enterpriseLeftovers(root);
@@ -540,13 +610,13 @@ async function useInstance(root, instance, opts) {
   if (edition === COMMUNITY) leaveEnterprise(root);
   for (const l of joinInstance(instance.name, root)) console.log(l);
   // Templates follow the profile and are rendered by kette add; doctor names them until then (QA-22)
-  if (edition === ENTERPRISE) console.log(`Enterprise templates for CI, Docker and checks: ${cmd('kette add')}`);
+  if (edition === ENTERPRISE) console.log(`Enterprise checks: ${cmd('kette add')}, with Dockerfile, compose, CI and deploy workflow: ${cmd('kette add --scaffold')}`);
   if (!opts.noPlugins) {
     const r = enableProjectPlugins(root, edition, installedBundle(edition));
     if (r.ok && r.present.length) console.log(`Claude Code plugins enabled for this project: ${r.present.map((p) => pluginId(p, r.market)).join(', ')}`);
     for (const l of enableHints(r, edition)) console.log(l);
   }
-  console.log(`${bold(accent('Done.'))} This repo now uses instance ${instance.name} (${editionLabel(edition)}). Check with: ${cmd('kette doctor')}`);
+  console.log(`${bold(accent('Done.'))} This repo now uses Kette project ${instance.name} (${editionLabel(edition)}). Check with: ${cmd('kette doctor')}`);
   return 0;
 }
 
@@ -622,7 +692,7 @@ async function doctor(root, opts, { machine = true, project = true } = {}) {
       if (!inst && profile.tier === ENTERPRISE && tier !== ENTERPRISE) warn(`Profile requires the Enterprise edition (Die Kette), only Community is installed here. Agents, gates, /feature-loop, platform profiles and checks from .kette/README.md are missing. Unlock with: ${cmd('kette login <key>')}`);
       if (!profile.instance && profile.tier !== ENTERPRISE && tier === ENTERPRISE) warn(`Enterprise (Die Kette) is installed here, the project is on Community. Switch to the flow with agents and gates: ${cmd('kette add')}`);
       // Overlays the project inherits from its instance count the same as its own
-      for (const o of inherit(profile, inst).overlays || []) warn(`Overlay ${printable(o.source)}${profile.overlays?.some((x) => x.source === o.source) ? '' : ` (from instance ${inst.name})`} is loaded by the agents, not checked here`);
+      for (const o of inherit(profile, inst).overlays || []) warn(`Overlay ${printable(o.source)}${profile.overlays?.some((x) => x.source === o.source) ? '' : ` (from Kette project ${inst.name})`} is loaded by the agents, not checked here`);
       // Community has kette-check only; other reviewers in flow.review are Enterprise agents
       const reviewers = [...(profile.flow?.review?.ui || []), ...(profile.flow?.review?.code || [])];
       const enterpriseOnly = reviewers.filter((r) => !COMMUNITY_REVIEWERS.includes(r));
@@ -631,11 +701,20 @@ async function doctor(root, opts, { machine = true, project = true } = {}) {
     if (profile?.instance && editionHere === COMMUNITY) leftoverChecks(root, profile.instance, { line });
     if (profile && !opts.ci) projectPluginChecks(root, editionHere, profile.instance, { line, warn });
     if (!opts.ci && own && profile) printPluginDetails(editionHere, info);
-    if (tier === ENTERPRISE && editionHere === ENTERPRISE) await npmChecks(root, { line, warn }, opts);
-    // A repo that came to Enterprise through kette instance use has no templates yet; kette add renders them (QA-22)
+    if (tier === ENTERPRISE && editionHere === ENTERPRISE) await npmChecks(root, { line, warn, info }, opts, { inProject: Boolean(profile) });
+    // A repo that came to Enterprise through kette project use has no templates yet; kette add renders them (QA-22)
     if (profile && own && editionHere === ENTERPRISE && !opts.ci) {
-      const missing = (templatesFor(own.dir, profile, detectWorkspace(root)).templates?.files || []).map((f) => f.path).filter((p) => !fs.existsSync(path.join(root, p)));
-      if (missing.length) warn(`Enterprise templates not in this project yet: ${missing.join(', ')}. Add them with: ${cmd('kette add')}`);
+      const absent = (p) => !fs.existsSync(path.join(root, p));
+      const { rendered, platform } = splitTemplates(own.dir, profile, detectWorkspace(root));
+      const platformPaths = new Set(platform.map((f) => f.path));
+      const missingChecks = (rendered.templates?.files || []).map((f) => f.path).filter((p) => !platformPaths.has(p) && absent(p));
+      const gone = new Set(removedByTeam(root, platform).map((f) => f.path));
+      const missingPlatform = [...platformPaths].filter((p) => absent(p) && !gone.has(p));
+      if (gone.size) info(`Platform templates removed by you: ${[...gone].join(', ')}. ${cmd('kette add')} leaves them out, ${cmd('kette add --scaffold')} restores them`);
+      if (missingChecks.length) warn(`Enterprise templates not in this project yet: ${missingChecks.join(', ')}. Add them with: ${cmd('kette add')}`);
+      // A repo kette scaffolded gets the missing ones with kette add; another may keep its own pipeline, so no warning there (KETTE-53)
+      if (missingPlatform.length && ketteScaffolded(root, platform)) warn(`Enterprise templates not in this project yet: ${missingPlatform.join(', ')}. Add them with: ${cmd('kette add')}`);
+      else if (missingPlatform.length) info(`Platform templates not in this project: ${missingPlatform.join(', ')}. If the repo should use them: ${cmd('kette add --scaffold')}`);
     }
     walletDoctor(root, editionHere === ENTERPRISE ? tier : COMMUNITY, { line, warn, info }, { project: Boolean(profile) });
     const md = path.join(root, 'CLAUDE.md');
@@ -652,18 +731,18 @@ function instanceChecks(profile, { line, warn }) {
   let inst;
   try { inst = readInstance(profile.instance); } catch (err) { line(false, '', `${err.message} The project counts as Community until it is fixed.`); return null; }
   if (!inst) { line(false, '', `${notFound(profile.instance)}. The project counts as Community until then.`); return null; }
-  line(true, `Instance ${inst.name} ${dim(`(${editionLabel(inst.edition)}, ${instanceSource(inst.name).kind})`)}`);
-  if (inst.edition === ENTERPRISE) line(tierOf() === ENTERPRISE, 'Licence for the Enterprise instance', `Instance ${inst.name} is Enterprise, this machine has no valid licence. Sign in with: ${cmd('kette login <key>')}`);
-  if (profile.tier !== inst.edition) warn(`Profile says tier ${profile.tier}, instance ${inst.name} is ${inst.edition}. Align with: ${cmd(`kette instance use ${inst.name}`)}`);
+  line(true, `Kette project ${inst.name} ${dim(`(${editionLabel(inst.edition)}, ${instanceSource(inst.name).kind})`)}`);
+  if (inst.edition === ENTERPRISE) line(tierOf() === ENTERPRISE, 'Licence for the Enterprise Kette project', `Kette project ${inst.name} is Enterprise, this machine has no valid licence. Sign in with: ${cmd('kette login <key>')}`);
+  if (profile.tier !== inst.edition) warn(`Profile says tier ${profile.tier}, Kette project ${inst.name} is ${inst.edition}. Align with: ${cmd(`kette project use ${inst.name}`)}`);
   const bundle = installedBundle(inst.edition);
-  if (inst.bundle && bundle && inst.bundle !== bundle.version) warn(`Instance ${inst.name} pins bundle ${inst.bundle}, this machine has ${bundle.version}. kette keeps one active bundle per edition; the pin is a check, not a switch (docs/instances.md).`);
+  if (inst.bundle && bundle && inst.bundle !== bundle.version) warn(`Kette project ${inst.name} pins bundle ${inst.bundle}, this machine has ${bundle.version}. kette keeps one active bundle per edition; the pin is a check, not a switch (docs/kette-projects.md).`);
   return inst;
 }
 
 // A Community project holds nothing kette wrote for Enterprise: no registry scope line, no Enterprise template it recorded
 function leftoverChecks(root, instanceName, { line }) {
   const { files, npmrc } = enterpriseLeftovers(root, scopeLine().trim());
-  const fix = cmd(`kette instance use ${instanceName}`);
+  const fix = cmd(`kette project use ${instanceName}`);
   // A user npmrc from before 0.10 still points the scope to Die Kette for every folder; only a project line can override it (CR-NEW-8)
   if (globalScope() && !projectScope(readFile(path.join(root, '.npmrc')))) line(false, '', `npm in this Community project resolves ${SCOPE} from the Enterprise registry (line in the user npmrc from before 0.10). Move it with: ${cmd(MOVE_SCOPE)}`);
   if (npmrc) line(false, '', `.npmrc of this Community project points ${SCOPE} to the Enterprise registry. Remove the line with: ${fix}`);
@@ -675,7 +754,7 @@ function leftoverChecks(root, instanceName, { line }) {
 
 // The project settings switch on exactly the plugins of its edition; Claude Code has them installed when it is there
 function projectPluginChecks(root, edition, instanceName, { line, warn }) {
-  const fix = cmd(instanceName ? `kette instance use ${instanceName}` : 'kette add');
+  const fix = cmd(instanceName ? `kette project use ${instanceName}` : 'kette add');
   const market = marketName(edition);
   const s = settingsStatus(root, edition);
   if (s.state === 'ok') line(true, `${SETTINGS_PATH} enables the ${editionLabel(edition)} plugins only`);
@@ -860,7 +939,7 @@ export async function main(argv) {
       return await setup(root, opts, !fs.existsSync(root) || fs.readdirSync(root).length === 0);
     }
     if (command === 'add') return await setup('.', opts, false);
-    if (command === 'doctor') return opts.instance ? await doctorInstance(opts, { doctor }) : await doctor('.', opts);
+    if (command === 'doctor') return opts.project ? await doctorInstance(opts, { doctor }) : await doctor('.', opts);
     if (command === 'update') return await update(opts);
     if (command === 'rules') {
       // In a project the rules of its edition, a Community project never sees the Enterprise bundle
@@ -868,7 +947,8 @@ export async function main(argv) {
       return rules(arg, opts, { bundle: installedBundle(tier), tier, stackIds: STACKS.map((x) => x.value) });
     }
     if (command === 'profile') return showProfile('.', opts);
-    if (command === 'instance') return await instanceCommand(arg, opts, { useInstance });
+    // kette instance is the hidden alias of kette project from 0.11, so scripts and agents of that version keep working
+    if (command === 'project' || command === 'instance') return await projectCommand(arg, opts, { useInstance });
     if (command === 'login') return await login(arg, opts, VERSION, () => refreshProjectPlugins('.', opts));
     if (command === 'logout') return await logout(opts);
     if (command === 'token') {

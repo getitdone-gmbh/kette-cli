@@ -11,7 +11,7 @@ import { providerVersion, spawnTool } from './providers.mjs';
 export const REGIONS = [
   { value: 'https://eu.infisical.com', label: 'Infisical Cloud EU (eu.infisical.com)' },
   { value: '', label: 'Infisical Cloud US (app.infisical.com)' },
-  { value: 'own', label: 'Your own Infisical instance' },
+  { value: 'own', label: 'Your own Infisical server' },
 ];
 export const INSTALL_LINES = [
   'macOS: brew install infisical/get-cli/infisical',
@@ -44,11 +44,11 @@ async function chooseDomain() {
   const [value = REGIONS[0].value] = await choose('Which Infisical?', REGIONS, '1');
   if (value !== 'own') return value;
   for (let i = 0; i < 3; i++) {
-    const url = (await ask('Address of your instance, e.g. https://secrets.example.com')).replace(/\/$/, '');
+    const url = (await ask('Address of your Infisical server, e.g. https://secrets.example.com')).replace(/\/$/, '');
     if (isSecureUrl(url)) return url;
     console.log('  An https address is needed.');
   }
-  throw new ExitError('No valid address for the Infisical instance.', 1);
+  throw new ExitError('No valid address for the Infisical server.', 1);
 }
 
 export async function setupInfisical(root) {

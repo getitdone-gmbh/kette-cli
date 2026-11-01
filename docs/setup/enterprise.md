@@ -24,14 +24,14 @@ Then open a new terminal.
 kette login CDP-XXXXX-XXXXX-XXXXX-XXXXX
 ```
 
-Downloads the Enterprise bundle. Each device takes one seat of the licence (Solo 3, Team 20); one licence covers every Kette instance on the device.
+Downloads the Enterprise bundle. Each device takes one seat of the licence (Solo 3, Team 20); one licence covers every Kette project on the device.
 
 ## 3. Connect a project
 
 - New project: `kette init my-project`
 - Existing repo: `kette add` (repos already connected get the Enterprise templates this way)
 
-Each project enables its own Claude Code plugins in `.claude/settings.json`: `kette-engineering-core`, `kette-engineering`, `design-system-agents` and `design-review-pack`. Several projects with their own scope (edition, repos, members, ticketing, wallet): `kette instance create <name>`, then `kette init my-project --instance <name>`, see [instances](../instances.md). A Community instance stays Community on this device.
+Each project enables its own Claude Code plugins in `.claude/settings.json`: `kette-engineering-core`, `kette-engineering`, `design-system-agents` and `design-review-pack`. Several projects with their own scope (edition, repos, members, ticketing, wallet): `kette project create <name>`, then `kette init my-project --project <name>`, see [Kette projects](../kette-projects.md). A Community Kette project stays Community on this device.
 
 ## 4. Install the design system packages
 
@@ -51,7 +51,7 @@ The registry also serves `@getitdone-gmbh/kette-tokens`, `@getitdone-gmbh/zero` 
 kette wallet init
 ```
 
-Infisical by default: kette checks the Infisical CLI, asks for the region (EU, US or your own instance), starts `infisical login` if needed and lets you pick the project with `infisical init`. The repo gets `.kette/wallet.json` with the names only.
+Infisical by default: kette checks the Infisical CLI, asks for the region (EU, US or your own Infisical server), starts `infisical login` if needed and lets you pick the project with `infisical init`. The repo gets `.kette/wallet.json` with the names only.
 
 Existing `.env` file? Move it over and start without it:
 

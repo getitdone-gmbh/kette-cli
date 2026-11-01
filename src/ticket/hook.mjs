@@ -73,20 +73,20 @@ function modelLine(project) {
   const host = modelHost(project);
   if (process.env.KETTE_INTAKE_MODEL_URL) return `${status('info', 'INFO')} Unclear prompts go to the model of this machine (KETTE_INTAKE_MODEL_URL)`;
   if (!host) return `${status('info', 'INFO')} No intake model: unclear prompts get a hint, no prompt leaves this machine`;
-  if (modelTrusted(project)) return `${status('ok', 'OK  ')} Intake model ${host} of instance ${project.instance.name}, confirmed on this machine`;
-  return `${status('warn', 'WARN')} Intake model ${host} of instance ${project.instance.name} is not confirmed on this machine, unclear prompts only get a hint. Confirm with: ${cmd('kette ticket hook trust')}`;
+  if (modelTrusted(project)) return `${status('ok', 'OK  ')} Intake model ${host} of Kette project ${project.instance.name}, confirmed on this machine`;
+  return `${status('warn', 'WARN')} Intake model ${host} of Kette project ${project.instance.name} is not confirmed on this machine, unclear prompts only get a hint. Confirm with: ${cmd('kette ticket hook trust')}`;
 }
 
 async function trustCmd(project) {
   const host = modelHost(project);
-  if (!host) { console.log(`Instance ${project.instance.name} names no intake model (ticketing.intakeModel), nothing to confirm.`); return 0; }
+  if (!host) { console.log(`Kette project ${project.instance.name} names no intake model (ticketing.intakeModel), nothing to confirm.`); return 0; }
   if (modelTrusted(project)) { console.log(`${status('ok', 'OK  ')} ${host} is confirmed on this machine already.`); return 0; }
   // The same rule as for approvals: never an agent, never without a terminal (KT-N2a)
   if (process.env.CLAUDECODE === '1' || !process.stdin.isTTY) throw new ExitError(`Confirming the intake model ${host} needs a person at a terminal: run ${cmd('kette ticket hook trust')} yourself, not through an agent or CI. Nothing changed.`, 1);
-  console.log(`Instance ${project.instance.name} sends unclear prompts of this project to ${host} to decide whether they change the chain.`);
+  console.log(`Kette project ${project.instance.name} sends unclear prompts of this project to ${host} to decide whether they change the chain.`);
   if (!(await confirm(`Allow prompts of this project to go to ${host} from this machine?`))) throw new ExitError('Not confirmed, nothing changed.', 1);
   updateState((state) => ({ ...state, intake_trust: { ...(state.intake_trust || {}), [project.instance.name]: host } }));
-  console.log(`${status('ok', 'OK  ')} ${host} confirmed for instance ${project.instance.name} on this machine.`);
+  console.log(`${status('ok', 'OK  ')} ${host} confirmed for Kette project ${project.instance.name} on this machine.`);
   return 0;
 }
 

@@ -421,25 +421,47 @@ test('add names the stack and platform it writes: detected, from a flag, or the 
     const plain = tmp();
     process.chdir(plain);
     let { out } = await run('add', '--yes', '--no-plugins');
-    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · no platform, using github-docker \(change with --stack \/ --platform\)$/m);
+    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · no platform, using github-docker \(change with --stack \/ --platform\)$/m, 'an empty repo gets the default of a new project');
     assert.deepEqual(profileOf(plain).stack, ['nextjs-ts-tailwind', 'nestjs-prisma']);
     assert.equal(profileOf(plain).platform.id, 'github-docker');
     const chosen = tmp();
+    write(chosen, 'README.md', '# Notes\n');
     process.chdir(chosen);
     ({ out } = await run('add', '--yes', '--no-plugins', '--platform', 'gitlab', '--stack', 'python-fastapi'));
     assert.match(out, /^Detected: no stack, using python-fastapi · no platform, using gitlab$/m);
     assert.equal(profileOf(chosen).platform.id, 'gitlab');
-    const docker = tmp();
-    write(docker, 'Dockerfile', 'FROM node:22\n');
-    process.chdir(docker);
-    ({ out } = await run('add', '--yes', '--no-plugins'));
-    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · platform github-docker \(change with --stack\)$/m);
     const overridden = tmp();
     write(overridden, 'Dockerfile', 'FROM node:22\n');
     process.chdir(overridden);
-    ({ out } = await run('add', '--yes', '--no-plugins', '--platform', 'gitlab'));
-    assert.match(out, /^Detected: no stack, using nextjs-ts-tailwind, nestjs-prisma · using platform gitlab \(detected github-docker\) \(change with --stack\)$/m);
+    ({ out } = await run('add', '--yes', '--no-plugins', '--platform', 'gitlab', '--stack', 'nestjs-prisma'));
+    assert.match(out, /^Detected: no stack, using nestjs-prisma · using platform gitlab \(detected github-docker\)$/m);
     assert.equal(profileOf(overridden).platform.id, 'gitlab');
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
+test('KETTE-53: add never guesses Next.js and NestJS for a CLI or docs repo; it stops, names --stack and writes nothing', async () => {
+  rulebook('community');
+  const cwd = process.cwd();
+  try {
+    const cli = tmp();
+    write(cli, 'package.json', JSON.stringify({ name: 'tool', bin: { tool: 'bin/tool.mjs' } }));
+    write(cli, '.github/workflows/ci.yml', 'on: push\n');
+    const docs = tmp();
+    write(docs, 'README.md', '# Handbook\n');
+    write(docs, 'docs/guide.md', 'Text\n');
+    for (const dir of [cli, docs]) {
+      process.chdir(dir);
+      await assert.rejects(run('add', '--yes', '--no-plugins'), (err) => err.exitCode === 2 && /No app stack detected in this repo .* and kette does not guess one\. Name it with --stack <id>/.test(err.message));
+      assert.equal(fs.existsSync(path.join(dir, '.kette', 'profile.json')), false, 'nothing written');
+    }
+    process.chdir(docs);
+    const profiled = { version: 1, project: { name: 'handbook' }, stack: ['react-spa'], platform: { id: 'github-docker' }, patterns: ['layered'], tier: 'community' };
+    write(docs, '.kette/profile.json', JSON.stringify(profiled));
+    const { result, out } = await run('add', '--yes', '--no-plugins');
+    assert.equal(result, 0, 'a repo with a profile keeps its stacks');
+    assert.match(out, /^Detected: no stack, using react-spa · no platform, using github-docker/m);
   } finally {
     process.chdir(cwd);
   }

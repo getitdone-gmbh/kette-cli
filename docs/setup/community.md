@@ -34,7 +34,7 @@ kette doctor
 - Code rules: readability, structure (KISS, DRY, YAGNI, SOLID), errors, tests, security, dependencies, logging, changes, comments
 - 7 architecture patterns with an ADR template
 - Claude Code plugins `kette-engineering-core` (with the review agent `kette-check`) and `ui-laws` (UI laws, interaction, WCAG 2.2 AA), enabled per project in `.claude/settings.json`
-- Any number of Kette instances with their own scope: `kette instance create <name>`, see [instances](../instances.md)
+- Any number of Kette projects with their own scope: `kette project create <name>`, see [Kette projects](../kette-projects.md)
 - Live deploy to itdone.cloud: `kette cloud setup`
 
 ## Stay current

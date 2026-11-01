@@ -142,7 +142,7 @@ async function init(root, opts) {
   const inherited = instanceWallet(profile);
   let id = opts.provider || inherited?.provider || DEFAULT_PROVIDER;
   if (!PROVIDER_IDS.includes(id)) throw new ExitError(`--provider must be one of ${PROVIDER_IDS.join(', ')}`);
-  if (inherited && !opts.provider) console.log(dim(`Provider ${id} from instance ${profile.instance}.`));
+  if (inherited && !opts.provider) console.log(dim(`Provider ${id} from Kette project ${profile.instance}.`));
   else if (!opts.yes && !opts.provider) [id] = await choose('Where do the secrets live?', PROVIDERS, '1');
   const provider = opts.yes ? providerFromEnv(id, project, root, inherited) : await providerSettings(id, root, project);
   const defaults = inherited?.env && !DEFAULT_ENVIRONMENTS.includes(inherited.env) ? [inherited.env, ...DEFAULT_ENVIRONMENTS] : DEFAULT_ENVIRONMENTS;

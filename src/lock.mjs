@@ -277,6 +277,9 @@ export async function withLockAsync(name, fn) {
   }
 }
 
+// What a lock guards in words; the lock of instance.json keeps its 0.11 name instance-<name> (ADR-0002, decision 25)
+export const lockLabel = (name) => (name.startsWith('instance-') ? `Kette project ${name.slice('instance-'.length)}` : name);
+
 function acquire(name) {
   const file = lockFile(name);
   const dir = path.dirname(file);
@@ -287,7 +290,7 @@ function acquire(name) {
   const until = Date.now() + WAIT_MS;
   // A taken lock is judged without writing a temp file in every round
   while (fs.existsSync(file) || !place(file, JSON.stringify(owner))) {
-    if (Date.now() > until) throw new Error(`Another kette process is changing ${name} (lock ${file}). Try again; if no kette runs, delete that file.`);
+    if (Date.now() > until) throw new Error(`Another kette process is changing ${lockLabel(name)} (lock ${file}). Try again; if no kette runs, delete that file.`);
     const current = readOwner(file);
     // Stale or abandoned: retry once it is removed
     if (isStale(file, current) ? removeIfToken(file, current.token) : !current && removeAbandoned(file)) continue;

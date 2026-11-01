@@ -20,9 +20,9 @@ export function ticketProject(root, { resolveProject }) {
   let project;
   try { project = resolveProject(root); } catch (err) { throw new ExitError(`.kette/profile.json is not readable (${err.message}).`, 1); }
   if (!project.profile) throw new ExitError(`No kette project in this folder. ${ENTERPRISE_ONLY}`, 1);
-  if (project.problem) throw new ExitError(`${project.problem}. Ticketing stays off until the instance can be used.`, 1);
-  if (project.edition !== ENTERPRISE) throw new ExitError(`${ENTERPRISE_ONLY}${project.instance ? ` Instance ${project.instance.name} is Community.` : ''}`, 1);
-  if (!project.instance) throw new ExitError(`Ticketing is set per Kette instance and this repo has none. Join one with ${cmd('kette instance use <name>')} (new: ${cmd('kette instance create <name>')}).`, 1);
+  if (project.problem) throw new ExitError(`${project.problem}. Ticketing stays off until the Kette project can be used.`, 1);
+  if (project.edition !== ENTERPRISE) throw new ExitError(`${ENTERPRISE_ONLY}${project.instance ? ` Kette project ${project.instance.name} is Community.` : ''}`, 1);
+  if (!project.instance) throw new ExitError(`Ticketing is set per Kette project and this repo has none. Join one with ${cmd('kette project use <name>')} (new: ${cmd('kette project create <name>')}).`, 1);
   requireEdition(project.instance);
   const bundle = installedBundle(ENTERPRISE);
   if (!bundle) throw new ExitError(`The Enterprise bundle is not on this machine. Load it with: ${cmd('kette update')}`, 1);
@@ -38,7 +38,7 @@ export function contextOf(project) {
 
 export function requireBoard(project) {
   if (project.effective.ticketing) return project.effective.ticketing;
-  throw new ExitError(`Instance ${project.instance.name} has no ticket board yet. Connect one with: ${cmd('kette ticket connect workload-zero --project <id>')}`, 1);
+  throw new ExitError(`Kette project ${project.instance.name} has no ticket board yet. Connect one with: ${cmd('kette ticket connect workload-zero --board <id>')}`, 1);
 }
 
 // Another board API only for tests and a self-hosted workload.zero, always https (http only locally); undefined means the default
@@ -47,7 +47,7 @@ export const apiUrl = () => (process.env.KETTE_TICKETING_API ? secureUrl(process
 // Wallet environment for the board credential: --env, the instance default, dev, or the first environment of the wallet
 const walletEnv = (wallet, instance, opts) => opts.env || (instance.wallet?.env && wallet.environments.includes(instance.wallet.env) ? instance.wallet.env : wallet.environments.includes('dev') ? 'dev' : wallet.environments[0]);
 
-const missing = (name, extra = '') => new ExitError(`No access to the ticket board of instance ${name}.${extra} Declare the credential with ${cmd(`kette wallet add ${TOKEN_NAME} --note "ticket board"`)} and store it with ${cmd(`kette wallet set ${TOKEN_NAME} --env dev`)}. kette never prints it.`, 1);
+const missing = (name, extra = '') => new ExitError(`No access to the ticket board of Kette project ${name}.${extra} Declare the credential with ${cmd(`kette wallet add ${TOKEN_NAME} --note "ticket board"`)} and store it with ${cmd(`kette wallet set ${TOKEN_NAME} --env dev`)}. kette never prints it.`, 1);
 
 // The board credential: the project wallet, or the shared Workbase session file when the instance enables it (ticketing.session);
 // never an argument or a global setting (KETTE-28)

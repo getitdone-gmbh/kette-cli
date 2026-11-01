@@ -9,7 +9,7 @@ import { writeAtomic } from '../files.mjs';
 import { withLock } from '../lock.mjs';
 import { ENV_PATTERN, PROVIDER_IDS } from '../wallet/config.mjs';
 
-// instance.json describes one Kette instance: edition, repos, members and the shared settings its repos inherit
+// instance.json describes one Kette project: edition, repos, members and the shared settings its repos inherit
 export const INSTANCE_FILE = 'instance.json';
 export const SCHEMA_URL = 'https://kette.itdone.de/schema/instance.schema.json';
 export const EDITIONS = [COMMUNITY, ENTERPRISE];
@@ -40,15 +40,28 @@ export const redact = (s) => printable(s).replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s
 const SCP = /^(?:([^@/\s]+)@)?([^:/\s]+):(?!\/\/)(.+)$/;
 const trimPath = (p) => p.replace(/\/+$/, '').replace(/\.git$/, '').replace(/^\/+/, '');
 
-// Origin of a repo in two forms: url to store and show (no user info), key to compare (ssh, https and scp forms of a repo are equal)
+// Azure DevOps ssh paths v3/<org>/<project>/<repo> become the https form of the same repo, so both give one key and a browser link
+function azure(host, segs) {
+  if (segs.length !== 4 || segs[0] !== 'v3') return [host, segs];
+  if (host === 'ssh.dev.azure.com') return ['dev.azure.com', [segs[1], segs[2], '_git', segs[3]]];
+  if (host === 'vs-ssh.visualstudio.com') return [`${segs[1].toLowerCase()}.visualstudio.com`, [segs[2], '_git', segs[3]]];
+  return [host, segs];
+}
+
+const decodeSegment = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+
+// The stored url keeps the encoded path (a space stays %20), the key compares the decoded one
+function remote(host, encoded) {
+  const [h, segs] = azure(host.toLowerCase(), trimPath(encoded).split('/'));
+  return { url: `https://${h}/${segs.join('/')}`, key: `${h}/${segs.map(decodeSegment).join('/')}` };
+}
+
+// Origin as url to store and key to compare; every remote form of a repo gives one key and one url https://host/path (KETTE-53)
 export function normalizeUrl(raw) {
   const text = String(raw).trim();
   const scp = !/^[a-z][a-z0-9+.-]*:\/\//i.test(text) && !/^[a-z]:[\\/]/i.test(text) && text.match(SCP);
-  if (scp) {
-    const [, user, host, rest] = scp;
-    const h = host.toLowerCase();
-    return { url: `${user === 'git' ? 'git@' : ''}${h}:${rest}`, key: `${h}/${trimPath(rest)}` };
-  }
+  // git takes the scp path as it is, a segment may already be encoded (My%20Proj): decoded first, so it is never encoded twice (CR-URL-3)
+  if (scp) return remote(scp[2], trimPath(scp[3]).split('/').map((s) => encodeURIComponent(decodeSegment(s))).join('/'));
   let u;
   // A Windows drive path (C:/repos/app.git) would parse as a URL with the scheme c:
   try { u = /^[a-z]:[\\/]/i.test(text) ? null : new URL(text); } catch { u = null; }
@@ -56,17 +69,11 @@ export function normalizeUrl(raw) {
     const local = path.resolve(u ? decodeURIComponent(u.pathname) : text);
     return { url: local, key: `path:${trimPath(local.split(path.sep).join('/'))}` };
   }
-  // The ssh user git is no secret and needed to clone; any other user info is dropped
-  const keepGit = u.protocol === 'ssh:' && u.username === 'git' && !u.password;
-  u.username = keepGit ? 'git' : '';
-  u.password = '';
-  u.hash = '';
-  u.search = '';
-  const host = u.host.toLowerCase();
-  const p = trimPath(decodeURIComponent(u.pathname));
-  return { url: `${u.protocol}//${keepGit ? 'git@' : ''}${host}/${p}`, key: `${host.replace(/:\d+$/, '')}/${p}` };
+  // User info (a token, a password, the ssh user) and the port never reach the key or the stored url
+  return remote(u.hostname, u.pathname);
 }
 
+const isRemote = (url) => !normalizeUrl(url).key.startsWith('path:');
 const repoKey = (r) => (r.url ? normalizeUrl(r.url).key : null);
 // A repo without origin is identified in instance.json by a hash of its local identity: no machine path reaches the shared file,
 // and the entry is found again without state.json, so a kette killed between the two writes cannot put it into two instances (QA-29)
@@ -197,7 +204,7 @@ function sectionErrors(i) {
 
 // Errors as "field: problem"; an empty list means valid
 export function validateInstance(i) {
-  if (!isObject(i)) return ['the instance must be a JSON object'];
+  if (!isObject(i)) return ['the Kette project file must be a JSON object'];
   const errs = unknown(i, FIELDS, '');
   if (i.version !== 1) errs.push('version must be 1');
   if (!validName(i.name)) errs.push('name must be lowercase letters, digits and dashes, and no name Windows reserves');
@@ -213,7 +220,7 @@ export function newInstance(name, edition) {
   return { $schema: SCHEMA_URL, version: 1, name, edition, repos: [], members: [] };
 }
 
-const nameError = (name) => new Error(`Invalid instance name ${JSON.stringify(printable(name))}. Use lowercase letters, digits and dashes.`);
+const nameError = (name) => new Error(`Invalid Kette project name ${JSON.stringify(printable(name))}. Use lowercase letters, digits and dashes.`);
 
 // null when the instance does not exist; a damaged file throws with the reason
 export function readInstance(name) {
@@ -224,14 +231,17 @@ export function readInstance(name) {
   try { instance = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (err) { throw new Error(`${f} is not valid JSON: ${err.message}`); }
   const errs = validateInstance(instance);
   if (errs.length) throw new Error(`${f} is not valid: ${errs.map(printable).join('; ')}`);
-  if (instance.name !== name) throw new Error(`${f} names the instance "${printable(instance.name)}", its folder is "${name}". Use the same name for both.`);
+  if (instance.name !== name) throw new Error(`${f} names the Kette project "${printable(instance.name)}", its folder is "${name}". Use the same name for both.`);
   return instance;
 }
 
+// Every write stores remote repo urls in the one form normalizeUrl gives, so files of 0.11 with mixed forms align on their next change
+const canonicalRepos = (instance) => ({ ...instance, repos: (instance.repos || []).map((r) => (r.url && isRemote(r.url) ? { ...r, url: normalizeUrl(r.url).url } : r)) });
+
 function saveInstance(instance) {
   const errs = validateInstance(instance);
-  if (errs.length) throw new Error(`Instance not valid: ${errs.join('; ')}`);
-  writeAtomic(instanceFile(instance.name), `${JSON.stringify(instance, null, 2)}\n`);
+  if (errs.length) throw new Error(`Kette project not valid: ${errs.join('; ')}`);
+  writeAtomic(instanceFile(instance.name), `${JSON.stringify(canonicalRepos(instance), null, 2)}\n`);
 }
 
 export function writeInstance(instance) {
@@ -242,7 +252,7 @@ export function writeInstance(instance) {
 export function updateInstance(name, change) {
   return withLock(`instance-${name}`, () => {
     const current = readInstance(name);
-    if (!current) throw new Error(`Instance ${name} not found on this machine.`);
+    if (!current) throw new Error(`Kette project ${name} not found on this machine.`);
     const next = change(current);
     if (next !== current) saveInstance(next);
     return next;
@@ -297,9 +307,9 @@ const git = (dir, ...args) => {
   return r.status === 0 ? r.stdout.trim() : '';
 };
 
-// A repo folder name for instance.json: unsafe characters become dashes, at most REPO_MAX, never a name Windows reserves
-export function repoName(dir) {
-  const base = path.basename(dir).replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, REPO_MAX) || 'repo';
+// A repo name from the last segment of a folder or origin: unsafe characters become dashes, at most REPO_MAX, no name Windows reserves
+export function repoName(source) {
+  const base = String(source).split(/[\\/]/).pop().replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, REPO_MAX) || 'repo';
   return RESERVED.test(base.split('.')[0]) ? `${base.slice(0, REPO_MAX - 5)}-repo` : base;
 }
 
@@ -313,7 +323,8 @@ export function repoIdentity(dir) {
   const origin = own ? git(abs, 'remote', 'get-url', 'origin') : '';
   if (origin) {
     const { url, key } = normalizeUrl(origin);
-    return { name: repoName(abs), url, key, path: abs };
+    // The name of the repo comes from its origin, so a worktree or a renamed folder keeps it (KETTE-53)
+    return { name: repoName(key.startsWith('path:') ? abs : key), url, key, path: abs };
   }
   const common = own ? git(abs, 'rev-parse', '--git-common-dir') : '';
   const gitDir = common ? path.resolve(abs, common) : path.join(abs, '.git');
@@ -367,3 +378,6 @@ export function inherit(profile, instance) {
   const shared = Object.fromEntries(['ticketing', 'wallet', 'overlays', 'stations', 'bundle'].filter((k) => k in instance).map((k) => [k, instance[k]]));
   return { ...shared, ...profile, tier: instance.edition, instance: instance.name };
 }
+
+// The repo name of a folder from its remote origin; null without one or for a folder kette init has not created yet (KETTE-53)
+export const originName = (dir) => { if (!fs.existsSync(dir)) return null; const id = repoIdentity(dir); return id.url && isRemote(id.url) ? id.name : null; };
