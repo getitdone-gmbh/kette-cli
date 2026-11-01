@@ -40,13 +40,28 @@ export const redact = (s) => printable(s).replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s
 const SCP = /^(?:([^@/\s]+)@)?([^:/\s]+):(?!\/\/)(.+)$/;
 const trimPath = (p) => p.replace(/\/+$/, '').replace(/\.git$/, '').replace(/^\/+/, '');
 
-const remote = (key) => ({ url: `https://${key}`, key });
+// Azure DevOps ssh paths v3/<org>/<project>/<repo> become the https form of the same repo, so both give one key and a browser link
+function azure(host, segs) {
+  if (segs.length !== 4 || segs[0] !== 'v3') return [host, segs];
+  if (host === 'ssh.dev.azure.com') return ['dev.azure.com', [segs[1], segs[2], '_git', segs[3]]];
+  if (host === 'vs-ssh.visualstudio.com') return [`${segs[1].toLowerCase()}.visualstudio.com`, [segs[2], '_git', segs[3]]];
+  return [host, segs];
+}
+
+const decodeSegment = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+
+// The stored url keeps the encoded path (a space stays %20), the key compares the decoded one
+function remote(host, encoded) {
+  const [h, segs] = azure(host.toLowerCase(), trimPath(encoded).split('/'));
+  return { url: `https://${h}/${segs.join('/')}`, key: `${h}/${segs.map(decodeSegment).join('/')}` };
+}
 
 // Origin as url to store and key to compare; every remote form of a repo gives one key and one url https://host/path (KETTE-53)
 export function normalizeUrl(raw) {
   const text = String(raw).trim();
   const scp = !/^[a-z][a-z0-9+.-]*:\/\//i.test(text) && !/^[a-z]:[\\/]/i.test(text) && text.match(SCP);
-  if (scp) return remote(`${scp[2].toLowerCase()}/${trimPath(scp[3])}`);
+  // git takes the scp path as it is, so it is encoded here per segment
+  if (scp) return remote(scp[2], trimPath(scp[3]).split('/').map(encodeURIComponent).join('/'));
   let u;
   // A Windows drive path (C:/repos/app.git) would parse as a URL with the scheme c:
   try { u = /^[a-z]:[\\/]/i.test(text) ? null : new URL(text); } catch { u = null; }
@@ -55,7 +70,7 @@ export function normalizeUrl(raw) {
     return { url: local, key: `path:${trimPath(local.split(path.sep).join('/'))}` };
   }
   // User info (a token, a password, the ssh user) and the port never reach the key or the stored url
-  return remote(`${u.hostname.toLowerCase()}/${trimPath(decodeURIComponent(u.pathname))}`);
+  return remote(u.hostname, u.pathname);
 }
 
 const isRemote = (url) => !normalizeUrl(url).key.startsWith('path:');

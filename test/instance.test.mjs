@@ -245,6 +245,12 @@ test('QA-01, CR-NEW-7: a lock of a process that is gone is taken over, one of a 
   assert.throws(() => withLock('live', () => 0), /Another kette process is changing live/);
 });
 
+test('CR-MSG-1: the message of a busy instance.json lock names the Kette project', async () => {
+  const { lockLabel } = await import('../src/lock.mjs');
+  assert.equal(lockLabel('instance-acme'), 'Kette project acme');
+  assert.equal(lockLabel('state'), 'state');
+});
+
 test('CR-NEW-2, CR-NEW-7: a lock is only removed by its own token, a lock without readable owner is never taken over', () => {
   const f = putLock('race', { pid: deadPid(), at: 0, token: 'fresh' });
   assert.equal(removeIfToken(f, 'stale'), false);
@@ -411,4 +417,18 @@ test('KETTE-39: shared, site-local, NAT64 with a private target and unspecified 
   for (const url of ['https://100.64.1.2/v1', 'https://0.0.0.0/v1', 'https://[fec0::1]/v1', 'https://[64:ff9b::c0a8:105]/v1', 'https://[::]/v1']) assert.equal(isModelUrl(url), false, url);
   assert.equal(isPrivateAddress('100.128.0.1'), false);
   assert.equal(isPrivateAddress('64:ff9b::808:808'), false);
+});
+
+test('CR-URL-1: Azure DevOps ssh origins are stored as their https link and match the https form', () => {
+  const forms = ['git@ssh.dev.azure.com:v3/acme/Shop/web', 'ssh://git@ssh.dev.azure.com/v3/acme/Shop/web', 'https://acme@dev.azure.com/acme/Shop/_git/web'];
+  assert.deepEqual([...new Set(forms.map((u) => JSON.stringify(normalizeUrl(u))))], [JSON.stringify({ url: 'https://dev.azure.com/acme/Shop/_git/web', key: 'dev.azure.com/acme/Shop/_git/web' })]);
+  assert.equal(normalizeUrl('acme@vs-ssh.visualstudio.com:v3/Acme/Shop/web').key, normalizeUrl('https://acme.visualstudio.com/Shop/_git/web').key, 'the old visualstudio.com host too');
+});
+
+test('CR-URL-2: the stored url keeps an encoded path, the key compares the decoded one', () => {
+  const https = normalizeUrl('https://dev.azure.com/acme/My%20Project/_git/web');
+  assert.equal(https.url, 'https://dev.azure.com/acme/My%20Project/_git/web');
+  assert.equal(https.key, 'dev.azure.com/acme/My Project/_git/web');
+  assert.deepEqual(normalizeUrl('git@ssh.dev.azure.com:v3/acme/My Project/web'), https, 'an scp path with a space is encoded the same way');
+  assert.doesNotMatch(https.url, /\s/);
 });
