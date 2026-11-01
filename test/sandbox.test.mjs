@@ -274,6 +274,19 @@ test('KETTE-46: kette instance and --instance of 0.11 keep working as hidden ali
   const doc = ok(await kette(box, ['doctor', '--instance', 'old'], { ...rec, cwd: app }));
   assert.match(doc.out, /Kette project old: 1 of 1 repo all good/);
   assert.match(ok(await kette(box, ['instance', 'show'], { ...rec, cwd: app })).out, /Kette project +old/);
+  // CR-TEST-1: the other subcommands under the alias, with --instance as the name
+  ok(await kette(box, ['instance', 'members', 'add', 'lead@old.test', '--role', 'owner', '--instance', 'old'], rec));
+  assert.match(ok(await kette(box, ['instance', 'members', '--instance', 'old'], rec)).out, /lead@old\.test owner/);
+  ok(await kette(box, ['instance', 'members', 'remove', 'lead@old.test', '--instance', 'old'], rec));
+  assert.deepEqual(readInstanceFile(box, 'old').members, []);
+  ok(await kette(box, ['instance', 'create', 'newer', '--edition', 'community'], rec));
+  const moved = ok(await kette(box, ['instance', 'add-repo', app, '--instance', 'newer'], { ...rec, cwd: app }));
+  assert.match(moved.out, /app removed from Kette project old/);
+  assert.deepEqual(readInstanceFile(box, 'newer').repos.map((r) => r.name), ['app']);
+  const used = ok(await kette(box, ['instance', 'use', 'newer'], { ...rec, cwd: app, allow: CLAUDE_REGISTRY }));
+  assert.match(used.out, /This repo now uses Kette project newer \(Community\)/);
+  assert.equal(profile(app).instance, 'newer');
+  ok(await kette(box, ['instance', 'use', 'old'], { ...rec, cwd: app, allow: CLAUDE_REGISTRY }));
   const unknown = ok(await kette(box, ['project', 'rename'], rec), 2);
   assert.match(unknown.out, /Unknown project command: rename\. Usage: kette project create/);
   ok(await kette(box, ['instance', 'remove', 'old', '--yes'], rec));
