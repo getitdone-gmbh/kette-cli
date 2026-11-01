@@ -2,6 +2,7 @@
 
 ## 0.14.0
 - Repo stacks (KETTE-57): `kette add` and `kette init` know `node-cli`, `ts-library`, `docs` and `static-site` for repos that are not apps, and detection proposes them when no app stack is found: a package with `bin` is `node-cli`, TypeScript with `exports` or `types` is `ts-library` (also with a small `bin` facade), a `build` script next to HTML pages or an Astro or Eleventy site is `static-site`, at least three Markdown pages besides README and CHANGELOG and more Markdown than code is `docs`. With `--yes` such a repo is connected without a question. A rulebook from before the repo stacks leaves them out with the `kette update` hint, as for any unknown stack.
+- A profile of only repo stacks gets no `patterns` (also with `--yes`, the terminal does not ask for them); `--patterns` still names them, and one app stack in the profile brings the question and the default `modular-monolith` back. The profile validator reads `if`, `then` and `else` of the schema, so the rulebook can require `patterns` only for app stacks.
 - A profile of only repo stacks gets no empty `apps` field; repo stacks get the checks of their flags and the reason why no platform templates apply.
 - The stack question lists the four repo stacks.
 

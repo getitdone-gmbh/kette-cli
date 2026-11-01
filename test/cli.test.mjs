@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tmp, write } from './helpers.mjs';
 import { detectPlatform, detectStack } from '../src/detect.mjs';
+import { validate } from '../src/validate.mjs';
 import { describe as describePlan, apply } from '../src/plan.mjs';
 
 
@@ -81,6 +82,20 @@ test('KETTE-57: repo stacks never become app folders', async () => {
   const d = tmp();
   write(d, 'package.json', JSON.stringify({ bin: { tool: 'bin/tool.mjs' } }));
   assert.deepEqual(detectAppFolders(d), { apps: {}, unusable: {} });
+});
+
+test('KETTE-57: the validator reads if, then and else, so patterns are optional only for profiles of repo stacks', () => {
+  const schema = {
+    type: 'object', required: ['stack'],
+    properties: { stack: { type: 'array', minItems: 1 }, patterns: { type: 'array', minItems: 1 } },
+    if: { type: 'object', properties: { stack: { type: 'array', items: { enum: ['node-cli', 'docs'] } } } },
+    else: { type: 'object', required: ['patterns'] },
+  };
+  assert.deepEqual(validate(schema, { stack: ['docs', 'node-cli'] }), []);
+  assert.deepEqual(validate(schema, { stack: ['nestjs-prisma'] }), ['$: required field patterns is missing']);
+  assert.deepEqual(validate(schema, { stack: ['docs', 'nestjs-prisma'] }), ['$: required field patterns is missing']);
+  assert.deepEqual(validate(schema, { stack: ['docs'], patterns: [] }), ['$.patterns: needs at least 1 entry']);
+  assert.deepEqual(validate({ if: { const: 1 }, then: { const: 1 } }, 2), [], 'without else a failed if adds nothing');
 });
 
 test('erkennt Plattformen an CI- und IaC-Dateien', () => {

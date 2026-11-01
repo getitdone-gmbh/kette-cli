@@ -215,7 +215,16 @@ async function askStack(preselected) {
   }
 }
 
-async function buildProfile(root, opts, detected, tier, instance, isNew) {
+// Repo stacks of the installed rulebook ("app": false in its stack index); a rulebook from before them has none
+function repoStacksOf(bundleDir) {
+  const f = path.join(bundleDir, 'profiles', 'stack', 'index.json');
+  if (!fs.existsSync(f)) return new Set();
+  const index = JSON.parse(fs.readFileSync(f, 'utf8'));
+  return new Set(Object.keys(index).filter((id) => index[id]?.app === false));
+}
+
+// repoStacks: a profile of only repo stacks gets no patterns unless --patterns names them (KETTE-57)
+async function buildProfile(root, opts, detected, tier, instance, isNew, repoStacks = new Set()) {
   // The repo name from its origin, so a worktree or a clone into another folder keeps it (KETTE-53)
   const name = opts.name || originName(root) || path.basename(path.resolve(root));
   const fallback = fallbackStack(root, isNew);
@@ -228,17 +237,19 @@ async function buildProfile(root, opts, detected, tier, instance, isNew) {
       const def = String((PLATFORMS.findIndex((x) => x.value === platform) + 1) || 1);
       [platform] = await choose('Where is it built and run?', PLATFORMS, def);
     }
-    if (!patterns) patterns = await choose('Which architecture patterns? (if unsure, 1)', PATTERNS, '1');
   }
+  const chosen = stack.length ? stack : fallback;
+  const onlyRepoStacks = chosen.length > 0 && chosen.every((s) => repoStacks.has(s));
+  if (!opts.yes && !patterns && !onlyRepoStacks) patterns = await choose('Which architecture patterns? (if unsure, 1)', PATTERNS, '1');
   if (!stack.length && !fallback.length) throw new ExitError(NO_STACK);
   return {
     $schema: 'https://kette.itdone.de/schema/profile.schema.json',
     version: 1,
     project: { name },
     ...(instance ? { instance: instance.name } : {}),
-    stack: stack.length ? stack : fallback,
+    stack: chosen,
     platform: { id: platform || DEFAULT_PLATFORM },
-    patterns: patterns?.length ? patterns : ['modular-monolith'],
+    ...(onlyRepoStacks && !patterns?.length ? {} : { patterns: patterns?.length ? patterns : ['modular-monolith'] }),
     tier,
   };
 }
@@ -507,7 +518,7 @@ async function setup(root, opts, isNew) {
   if (tier === ENTERPRISE) for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} ${unusableFolder(dir, stack)}`);
   // apps says where the templates go, so only Enterprise writes it; a Community project gets it from detection when it is upgraded
   const appsSchema = tier === ENTERPRISE ? schema : {};
-  const profile = withApps(await buildProfile(root, opts, detected, tier, instance, isNew), appsSchema, detected.apps, folders.unusable);
+  const profile = withApps(await buildProfile(root, opts, detected, tier, instance, isNew, repoStacksOf(bundleDir)), appsSchema, detected.apps, folders.unusable);
   const errors = validate(schema, forSchema(schema, profile));
   if (errors.length) throw new Error(`Invalid profile: ${errors.join('; ')}`);
 

@@ -469,10 +469,11 @@ test('KETTE-53: add never guesses Next.js and NestJS for a CLI or docs repo; it 
   }
 });
 
-test('KETTE-57: add --yes in a CLI, library, docs or static site repo writes the detected repo stack and asks nothing', async () => {
+test('KETTE-57: add --yes in a CLI, library, docs or static site repo writes the detected repo stack without patterns and asks nothing', async () => {
   const d = rulebook('community');
   const stacks = ['nextjs-ts-tailwind', 'nestjs-prisma', 'nestjs-mongoose', 'python-fastapi', 'react-native-expo', 'react-spa', 'node-cli', 'ts-library', 'docs', 'static-site'];
   write(d, 'schema/profile.schema.json', JSON.stringify({ type: 'object', required: ['version', 'project', 'stack'], properties: { stack: { type: 'array', minItems: 1, items: { enum: stacks } }, patterns: { type: 'array' }, tier: { enum: ['community', 'enterprise'] } } }));
+  write(d, 'profiles/stack/index.json', JSON.stringify(Object.fromEntries(stacks.map((s, i) => [s, i < 6 ? { role: `app${i}`, flags: [] } : { role: s, app: false, flags: [] }]))));
   const repos = {
     'node-cli': { 'package.json': JSON.stringify({ name: 'tool', bin: { tool: 'bin/tool.mjs' } }), '.github/workflows/ci.yml': 'on: push\n' },
     'ts-library': { 'package.json': JSON.stringify({ name: 'lib', types: 'dist/index.d.ts', devDependencies: { typescript: '5' } }) },
@@ -492,7 +493,19 @@ test('KETTE-57: add --yes in a CLI, library, docs or static site repo writes the
       const profile = JSON.parse(fs.readFileSync(path.join(root, '.kette', 'profile.json'), 'utf8'));
       assert.deepEqual(profile.stack, [stack]);
       assert.equal('apps' in profile, false, `${stack}: no app folder`);
+      assert.equal('patterns' in profile, false, `${stack}: no patterns for a profile of only repo stacks`);
     }
+    // --patterns still names them, and one app stack next to a repo stack brings the default back
+    const named = tmp();
+    write(named, 'package.json', JSON.stringify({ name: 'tool', bin: { tool: 'bin/tool.mjs' } }));
+    process.chdir(named);
+    await run('add', '--yes', '--no-plugins', '--patterns', 'layered');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(named, '.kette', 'profile.json'), 'utf8')).patterns, ['layered']);
+    const mixed = tmp();
+    write(mixed, 'package.json', JSON.stringify({ name: 'tool', bin: { tool: 'bin/tool.mjs' } }));
+    process.chdir(mixed);
+    await run('add', '--yes', '--no-plugins', '--stack', 'node-cli,nestjs-prisma');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(mixed, '.kette', 'profile.json'), 'utf8')).patterns, ['modular-monolith']);
   } finally {
     process.chdir(cwd);
   }
