@@ -7,8 +7,9 @@ import { bundlesDir } from '../paths.mjs';
 
 // The ticketing library is Enterprise and never part of this public package: it ships in the Enterprise bundle (docs/adr/0003)
 export const PART = 'ticketing';
-// Contract between this CLI and the library in the bundle; a bundle with another one is refused instead of driven blindly
-export const CONTRACT = 2;
+// Contracts this CLI speaks with the bundle; 3 requires the token name with every board (CR-TOK-1), always passed here, so both work
+export const CONTRACTS = [2, 3];
+export const CONTRACT = Math.max(...CONTRACTS);
 // The one entry the CLI loads; it re-exports what the CLI needs from the library
 export const ENTRY = 'scripts/cli-facade.mjs';
 
@@ -33,9 +34,9 @@ export async function loadTicketing(bundleDir, opts = {}) {
   const dir = ticketingDir(bundleDir, opts);
   if (!dir) throw new ExitError(`The Enterprise bundle on this machine has no ticketing yet. Load the current one with: ${cmd('kette update')}`, 1);
   const lib = await import(pathToFileURL(path.join(dir, ENTRY)).href);
-  if (lib.CLI_CONTRACT !== CONTRACT) {
+  if (!CONTRACTS.includes(lib.CLI_CONTRACT)) {
     const newer = Number(lib.CLI_CONTRACT) > CONTRACT;
-    throw new ExitError(`The ticketing in the Enterprise bundle speaks contract ${lib.CLI_CONTRACT}, this kette speaks ${CONTRACT}. ${newer ? 'Update the kette CLI (run the installer again).' : `Load the current bundle with: ${cmd('kette update')}`}`, 1);
+    throw new ExitError(`The ticketing in the Enterprise bundle speaks contract ${lib.CLI_CONTRACT}, this kette speaks ${CONTRACTS.join(' or ')}. ${newer ? 'Update the kette CLI (run the installer again).' : `Load the current bundle with: ${cmd('kette update')}`}`, 1);
   }
   return { dir, lib };
 }

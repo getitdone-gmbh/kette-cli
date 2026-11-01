@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0
+- `kette ticket connect <adapter>` for every ticket system the Enterprise bundle has: workload-zero, github, jira, linear, gitlab, azure-devops (KETTE-54, ADR-0003 decision 5). `--board`, `--host`, `--org`, `--deployment cloud|datacenter`, `--sub-issues`, `--decision-type`, `--item-type`, `--trusted-authors`; the library checks the block and names the field and option of a refusal. Each system declares its own token name in the wallet, plans name the repo or project and show other systems' ids as they are (Linear by its mutation), `kette ticket help` lists the usage of each. `instance.json` takes the new fields, keeps the workload.zero id rule and allows the shared Workbase session file for workload.zero only. A bundle from before the adapters keeps working as workload.zero only.
+- Tokens and hosts (CR-TOK-1, CR-HOST-1, ADR-0003 decision 5): every board opens with the credential name of its system, so no token reaches another system; a host the Kette project names (and every Jira site) gets no token until a person confirmed it on this machine with `kette ticket host trust`, again after any change of host or port. Options a system does not read are refused.
+- A ticketing block of another system than workload.zero needs kette 0.13.0 or newer on every machine of the team: `connect` writes `minCli` and warns before writing, `kette doctor` warns; kette 0.11 and 0.12 refuse such an `instance.json` (CR-COMPAT-1).
+- The CLI speaks ticketing contract 2 and 3.
+- Release: the fragment of Get IT Done is read as `migrations/get-it-done-project.json` (kette-ticketing from 937cd1f) or the old `get-it-done-instance.json`; without either the release stops instead of shipping with an empty deny list (CR-KP-1).
+
 ## 0.12.0
 - Kette project instead of instance (KETTE-46, ADR-0002 decision 25): `kette project create | list | show | use | add-repo | members | remove` and `--project [name]` with `kette init`, `kette add` and `kette doctor`. Help, prompts, messages, README and docs say Kette project; the onboarding asks "Which Kette project does this repo belong to?". `kette instance` and `--instance` of 0.11 keep working and are no longer listed in the help. The files keep their names (`~/.kette/instances/<name>/instance.json`, the field `instance` in `.kette/profile.json`), so setups and teammates on 0.11 keep working. docs/instances.md is now docs/kette-projects.md.
 - `kette ticket connect` names the board with `--board <id>`; `--project <id>` of 0.11 is still read as the board id there, with a hint (KETTE-46).

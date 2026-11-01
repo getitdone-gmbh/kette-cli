@@ -70,6 +70,7 @@ Until 0.11 a Kette project was called an instance: `kette instance` and `--insta
 
 ```sh
 kette ticket connect workload-zero --board <id>       # the board of this repo's Kette project
+kette ticket connect github --board acme/web          # or jira, linear, gitlab, azure-devops: kette ticket help
 kette ticket new "Save goes to the right" --by lead@acme.example --source chat:<session> --stations prototype:<repo>,app:<repo>
 kette ticket check KD-0001                            # follow-through per station
 ```

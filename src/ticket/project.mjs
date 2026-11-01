@@ -9,9 +9,7 @@ import { requireEdition } from '../instance/command.mjs';
 import { readWallet } from '../wallet/config.mjs';
 import { isTrusted } from '../wallet/command.mjs';
 import { providerFor, ProviderError } from '../wallet/providers.mjs';
-
-// Name of the board credential in the secret wallet; the value never reaches instance.json, the repo or the screen
-export const TOKEN_NAME = 'KETTE_TICKETING_WORKBASE_TOKEN';
+import { WORKLOAD_ZERO, tokenNameOf, usageLines } from './adapters.mjs';
 export const ENTERPRISE_ONLY = 'Ticketing is part of Kette Enterprise (Die Kette). Setup: https://kette.itdone.de/einrichten#ticketing';
 
 // The project in a folder, everything from its scope: profile, its instance, the effective settings and the Enterprise bundle;
@@ -31,43 +29,47 @@ export function ticketProject(root, { resolveProject }) {
 }
 
 // What the library gets: the instance's ticketing, stations, members and repos, nothing from a global file
+// minCli is this CLI's own field (CR-COMPAT-1) and never reaches the library, which refuses fields its system does not read
 export function contextOf(project) {
   const { instance, effective } = project;
-  return { instance: instance.name, ticketing: effective.ticketing, stations: effective.stations, members: instance.members, repos: instance.repos.map((r) => r.name) };
+  const ticketing = effective.ticketing ? Object.fromEntries(Object.entries(effective.ticketing).filter(([k]) => k !== 'minCli')) : effective.ticketing;
+  return { instance: instance.name, ticketing, stations: effective.stations, members: instance.members, repos: instance.repos.map((r) => r.name) };
 }
 
-export function requireBoard(project) {
+export function requireBoard(project, lib) {
   if (project.effective.ticketing) return project.effective.ticketing;
-  throw new ExitError(`Kette project ${project.instance.name} has no ticket board yet. Connect one with: ${cmd('kette ticket connect workload-zero --board <id>')}`, 1);
+  throw new ExitError(`Kette project ${project.instance.name} has no ticket board yet. Connect one with:\n${usageLines(lib).map((l) => `  ${cmd(l)}`).join('\n')}`, 1);
 }
 
-// Another board API only for tests and a self-hosted workload.zero, always https (http only locally); undefined means the default
+// Another board API for tests, for every adapter; always https (http only locally), the library applies its address rules too; undefined is the default
 export const apiUrl = () => (process.env.KETTE_TICKETING_API ? secureUrl(process.env.KETTE_TICKETING_API.replace(/\/+$/, ''), 'KETTE_TICKETING_API') : undefined);
 
 // Wallet environment for the board credential: --env, the instance default, dev, or the first environment of the wallet
 const walletEnv = (wallet, instance, opts) => opts.env || (instance.wallet?.env && wallet.environments.includes(instance.wallet.env) ? instance.wallet.env : wallet.environments.includes('dev') ? 'dev' : wallet.environments[0]);
 
-const missing = (name, extra = '') => new ExitError(`No access to the ticket board of Kette project ${name}.${extra} Declare the credential with ${cmd(`kette wallet add ${TOKEN_NAME} --note "ticket board"`)} and store it with ${cmd(`kette wallet set ${TOKEN_NAME} --env dev`)}. kette never prints it.`, 1);
+const missing = (name, token, extra = '') => new ExitError(`No access to the ticket board of Kette project ${name}.${extra} Declare the credential with ${cmd(`kette wallet add ${token} --note "ticket board"`)} and store it with ${cmd(`kette wallet set ${token} --env dev`)}. kette never prints it.`, 1);
 
-// The board credential: the project wallet, or the shared Workbase session file when the instance enables it (ticketing.session);
-// never an argument or a global setting (KETTE-28)
-export async function boardToken(project, opts, session) {
+// The board credential under its adapter's name: the wallet, or the Workbase session file for a workload.zero board that enables it (KETTE-28)
+export async function boardToken(project, opts, lib) {
   const { root, instance } = project;
+  const board = project.effective.ticketing;
+  const tokenName = tokenNameOf(lib, board?.adapter);
   let wallet = null;
   try { wallet = readWallet(root); } catch (err) { throw new ExitError(err.message, 1); }
-  if (wallet?.secrets.some((s) => s.name === TOKEN_NAME)) {
+  if (wallet?.secrets.some((s) => s.name === tokenName)) {
     if (!isTrusted(root, wallet)) throw new ExitError(`This machine has not confirmed the wallet provider yet. Run ${cmd('kette wallet trust')} first.`, 1);
     const env = walletEnv(wallet, instance, opts);
     let values;
-    try { values = await providerFor(wallet.provider).read(env, [TOKEN_NAME]); } catch (err) { throw new ExitError(err instanceof ProviderError ? err.message : String(err.message), 1); }
-    const value = values.get(TOKEN_NAME);
+    try { values = await providerFor(wallet.provider).read(env, [tokenName]); } catch (err) { throw new ExitError(err instanceof ProviderError ? err.message : String(err.message), 1); }
+    const value = values.get(tokenName);
     if (value) return { token: value, refresh: null };
-    throw missing(instance.name, ` ${TOKEN_NAME} has no value in ${env}.`);
+    throw missing(instance.name, tokenName, ` ${tokenName} has no value in ${env}.`);
   }
-  const config = session.sessionConfigFromEnv();
-  if (project.effective.ticketing?.session === true && fs.existsSync(config.file)) {
-    const token = await session.sessionAccessToken(config).catch((err) => { throw new ExitError(err.message, 1); });
-    return { token, refresh: () => session.sessionAccessToken({ ...config, force: true }) };
+  // The shared session file holds a Workbase session, so it never stands in for the token of another system
+  const config = lib.sessionConfigFromEnv();
+  if (board?.session === true && lib.adapterId(board.adapter) === WORKLOAD_ZERO && fs.existsSync(config.file)) {
+    const token = await lib.sessionAccessToken(config).catch((err) => { throw new ExitError(err.message, 1); });
+    return { token, refresh: () => lib.sessionAccessToken({ ...config, force: true }) };
   }
-  throw missing(instance.name, wallet ? '' : ` This project has no secret wallet yet, create it with ${cmd('kette wallet init')}.`);
+  throw missing(instance.name, tokenName, wallet ? '' : ` This project has no secret wallet yet, create it with ${cmd('kette wallet init')}.`);
 }

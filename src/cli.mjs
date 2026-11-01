@@ -29,7 +29,7 @@ import { PROJECT_HELP, askInstance, createPending, doctorInstance, project as pr
 import { inherit, instanceSource, originName, printable, readInstance } from './instance/config.mjs';
 import { TICKET_HELP, offerTicketing, ticket } from './ticket/command.mjs';
 
-const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+import { VERSION } from './version.mjs';
 
 const STACKS = [
   { value: 'nextjs-ts-tailwind', label: 'Next.js + TypeScript + Tailwind (Web)' },
@@ -121,7 +121,15 @@ Options:
   --stdin               With kette wallet set and add, read the value from stdin instead of a hidden prompt
   --github-env name     With kette wallet sync github, the GitHub environment (default: the wallet environment)
   --repo owner/name     With kette wallet sync github, another repo than the current one
-  --board id            With kette ticket connect, the project on the board (workload.zero project id)
+  --board id            With kette ticket connect, the board: workload.zero project id, GitHub or GitLab repo path, Jira project
+                        key, Linear team key, Azure DevOps project
+  --host h, --org o     With kette ticket connect, a self-hosted or site host (Jira site, GitHub Enterprise, GitLab, Azure DevOps
+                        Server) and the Azure DevOps organization
+  --deployment kind     With kette ticket connect jira, cloud or datacenter (required outside atlassian.net)
+  --trusted-authors a,b
+                        With kette ticket connect, accounts besides the token's own whose revision comments count
+  --sub-issues bool, --decision-type t, --item-type t
+                        With kette ticket connect, GitHub sub-issues (default true), Jira and Azure DevOps issue types
   --by member           With kette ticket new, who decided (a member of the Kette project)
   --as member           With kette ticket, who acts (member, session or agent); pick needs it
   --stations a,b        With kette ticket new and extend, the stations as station[:target][@artifact]
@@ -149,7 +157,8 @@ const FLAGS = {
 };
 const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out', '--primary', '--accent', '--neutral', '--radius', '--font', '--provider', '--env', '--app', '--note', '--github-env', '--repo', '--edition', '--from', '--role',
   '--board', '--by', '--as', '--source', '--stations', '--statement', '--words', '--rationale', '--label', '--comment', '--member', '--station', '--status',
-  '--pr', '--commit', '--figma', '--review', '--approved-by', '--proposed-by', '--acceptance'];
+  '--pr', '--commit', '--figma', '--review', '--approved-by', '--proposed-by', '--acceptance',
+  '--host', '--org', '--sub-issues', '--deployment', '--decision-type', '--item-type', '--trusted-authors'];
 // Free text may start with a dash
 const TEXT_VALUES = ['--note', '--statement', '--words', '--rationale', '--comment', '--acceptance'];
 
@@ -735,6 +744,8 @@ function instanceChecks(profile, { line, warn }) {
   if (inst.edition === ENTERPRISE) line(tierOf() === ENTERPRISE, 'Licence for the Enterprise Kette project', `Kette project ${inst.name} is Enterprise, this machine has no valid licence. Sign in with: ${cmd('kette login <key>')}`);
   if (profile.tier !== inst.edition) warn(`Profile says tier ${profile.tier}, Kette project ${inst.name} is ${inst.edition}. Align with: ${cmd(`kette project use ${inst.name}`)}`);
   const bundle = installedBundle(inst.edition);
+  // Teammates on 0.11 or 0.12 refuse a ticketing block of another system than workload.zero and count the repos as Community (CR-COMPAT-1)
+  if (inst.ticketing?.minCli) warn(`Kette project ${inst.name} tracks decisions in ${printable(inst.ticketing.adapter)}: everyone who uses it needs kette ${printable(inst.ticketing.minCli)} or newer, older versions refuse its instance.json and count its repos as Community`);
   if (inst.bundle && bundle && inst.bundle !== bundle.version) warn(`Kette project ${inst.name} pins bundle ${inst.bundle}, this machine has ${bundle.version}. kette keeps one active bundle per edition; the pin is a check, not a switch (docs/kette-projects.md).`);
   return inst;
 }

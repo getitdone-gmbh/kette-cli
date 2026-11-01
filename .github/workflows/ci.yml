@@ -27,3 +27,32 @@ jobs:
       - uses: actions/checkout@v7
       - run: sh -n install/install.sh
       - run: shellcheck install/install.sh
+
+  # Ticket scenarios against the real kette-ticketing (private repo): needs the secret KETTE_TICKETING_READ_TOKEN (read access to
+  # alexfriedl/kette-ticketing); without it the job says so and the public test double suites in the test job still run
+  ticketing:
+    runs-on: ubuntu-latest
+    env:
+      READ_TOKEN: ${{ secrets.KETTE_TICKETING_READ_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - if: env.READ_TOKEN == ''
+        run: echo "::notice::KETTE_TICKETING_READ_TOKEN is not set, the ticket suites against the real kette-ticketing are skipped"
+      - if: env.READ_TOKEN != ''
+        uses: actions/checkout@v7
+        with:
+          repository: alexfriedl/kette-ticketing
+          token: ${{ secrets.KETTE_TICKETING_READ_TOKEN }}
+          path: kette-ticketing
+      - if: env.READ_TOKEN != ''
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - if: env.READ_TOKEN != ''
+        run: npm ci && npm run build
+        working-directory: kette-ticketing
+      - if: env.READ_TOKEN != ''
+        run: node --test test/sandbox-ticket.test.mjs test/sandbox-ticket-fix.test.mjs test/sandbox-ticket-adapters.test.mjs
+        env:
+          KETTE_TICKETING: ${{ github.workspace }}/kette-ticketing
+          KETTE_TICKETING_REQUIRED: '1'
