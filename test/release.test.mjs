@@ -143,3 +143,20 @@ test('KETTE-39: fixed deny words match inside other names, Base64 in any case, t
   assert.deepEqual(words.sort(), ['Basic', 'Studio'], 'only the listed ordinary words stay allowed');
   assert.equal(hit('the design-tokens-maintainer records it', { denyWords: ['Design-Tokens'] }), false, 'dash rule for fragment words');
 });
+
+test('CR-KP-1: the release reads the fragment of Get IT Done under its new name, falls back to the old one and stops without either', async () => {
+  const { fragmentFile } = await import('../scripts/ticketing-part.mjs');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { tmp, write } = await import('./helpers.mjs');
+  const both = tmp();
+  write(path.join(both, 'migrations'), 'get-it-done-project.json', '{}');
+  write(path.join(both, 'migrations'), 'get-it-done-instance.json', '{}');
+  assert.equal(fragmentFile(both), path.join(both, 'migrations', 'get-it-done-project.json'), 'the name of kette-ticketing PR #11 wins');
+  const old = tmp();
+  write(path.join(old, 'migrations'), 'get-it-done-instance.json', '{}');
+  assert.equal(fragmentFile(old), path.join(old, 'migrations', 'get-it-done-instance.json'), 'a ref from before the rename');
+  const none = tmp();
+  fs.mkdirSync(path.join(none, 'migrations'));
+  assert.throws(() => fragmentFile(none), /kette-ticketing has no fragment of Get IT Done \(migrations\/get-it-done-project\.json or migrations\/get-it-done-instance\.json\).*nothing was packed/);
+});

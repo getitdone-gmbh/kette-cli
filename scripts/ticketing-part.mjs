@@ -21,6 +21,16 @@ const FORBIDDEN = [
   ['24-hex id', /(?<![0-9a-f])[0-9a-f]{24}(?![0-9a-f])/i],
 ];
 
+// The fragment of Get IT Done in kette-ticketing: get-it-done-project.json since kette-ticketing PR #11, get-it-done-instance.json before
+export const FRAGMENT_FILES = ['get-it-done-project.json', 'get-it-done-instance.json'];
+
+// Its path in a ticketing source tree; without it the deny words would be empty and internal strings could ship, so the release stops (CR-KP-1)
+export function fragmentFile(src) {
+  const found = FRAGMENT_FILES.map((f) => path.join(src, 'migrations', f)).find((f) => fs.existsSync(f));
+  if (!found) throw new Error(`kette-ticketing has no fragment of Get IT Done (migrations/${FRAGMENT_FILES.join(' or migrations/')}), so its words cannot be kept out of the bundle; nothing was packed`);
+  return found;
+}
+
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // A word of the fragment: a dash belongs to the word, so design-tokens-maintainer is no hit for Design-Tokens; the fixed deny words
 // match anywhere (alexfriedl-portfolio, spark-cockpit, x-kneier-web, KETTE-39)
