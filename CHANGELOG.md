@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0
+- Repo stacks (KETTE-57): `kette add` and `kette init` know `node-cli`, `ts-library`, `docs` and `static-site` for repos that are not apps, and detection proposes them when no app stack is found: a package with `bin` is `node-cli`, TypeScript with `exports` or `types` is `ts-library` (also with a small `bin` facade), a `build` script next to HTML pages or an Astro or Eleventy site is `static-site`, at least three Markdown pages besides README and CHANGELOG and more Markdown than code is `docs`. With `--yes` such a repo is connected without a question. A rulebook from before the repo stacks leaves them out with the `kette update` hint, as for any unknown stack.
+- A profile of only repo stacks gets no empty `apps` field; repo stacks get the checks of their flags and the reason why no platform templates apply.
+- The stack question lists the four repo stacks.
+
 ## 0.13.0
 - `kette ticket connect <adapter>` for every ticket system the Enterprise bundle has: workload-zero, github, jira, linear, gitlab, azure-devops (KETTE-54, ADR-0003 decision 5). `--board`, `--host`, `--org`, `--deployment cloud|datacenter`, `--sub-issues`, `--decision-type`, `--item-type`, `--trusted-authors`; the library checks the block and names the field and option of a refusal. Each system declares its own token name in the wallet, plans name the repo or project and show other systems' ids as they are (Linear by its mutation), `kette ticket help` lists the usage of each. `instance.json` takes the new fields, keeps the workload.zero id rule and allows the shared Workbase session file for workload.zero only. A bundle from before the adapters keeps working as workload.zero only.
 - Tokens and hosts (CR-TOK-1, CR-HOST-1, ADR-0003 decision 5): every board opens with the credential name of its system, so no token reaches another system; a host the Kette project names (and every Jira site) gets no token until a person confirmed it on this machine with `kette ticket host trust`, again after any change of host or port. Options a system does not read are refused.
