@@ -358,6 +358,7 @@ function splitTemplates(bundleDir, profile, workspace) {
 }
 
 const withoutFiles = (rendered, files) => {
+  if (!files.length) return rendered;
   const drop = new Set(files.map((f) => f.path));
   return { ...rendered, templates: { ...rendered.templates, files: rendered.templates.files.filter((f) => !drop.has(f.path)) } };
 };
@@ -370,6 +371,12 @@ function ketteWrote(root, files) {
 }
 
 const ketteScaffolded = (root, files) => ketteWrote(root, files).size > 0;
+
+// Platform templates kette recorded that are gone from disk: the team removed them, only --scaffold brings them back (CR-GATE-1)
+function removedByTeam(root, files) {
+  const recorded = new Set(recordedTemplates(root));
+  return files.filter((f) => recorded.has(f.path) && !fs.existsSync(path.join(root, f.path)));
+}
 
 // Platform templates only in an empty repo, in one kette scaffolded before, with --scaffold or after a yes: a repo may run its own pipeline (KETTE-53)
 async function scaffoldPlatform(root, isNew, opts, platformId, files) {
@@ -500,7 +507,8 @@ async function setup(root, opts, isNew) {
   const split = tier === ENTERPRISE && !invalid.length ? splitTemplates(bundleDir, renderable, isNew || detectWorkspace(root)) : null;
   const platformFiles = split?.platform || [];
   const scaffold = !platformFiles.length || await scaffoldPlatform(root, isNew, opts, target.platform?.id, platformFiles);
-  const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : scaffold ? split.rendered : withoutFiles(split.rendered, platformFiles);
+  const removed = scaffold && !opts.scaffold ? removedByTeam(root, platformFiles) : [];
+  const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : withoutFiles(split.rendered, scaffold ? removed : platformFiles);
   if (rendered.templates) rendered.templates.skipped.push(...skippedStacks.map((stack) => ({ stack, reason: `folder "${folders.unusable[stack]}" can't be used as an app folder, see the warning above` })));
   const workspace = isNew && rendered.templates ? workspaceManifest(bundleDir, target, rendered.templates) : null;
   const templates = workspace?.templates || rendered.templates || null;
@@ -511,6 +519,7 @@ async function setup(root, opts, isNew) {
   const described = describe(workspace ? [...plan, workspace.item] : plan, root);
   console.log(`\n${opts.dryRun ? 'Would create' : 'Plan'} in ${file(path.resolve(root))} (edition ${editionLabel(tier)}${instance ? `, Kette project ${instance.name}` : ''}):`);
   print(described);
+  for (const f of removed) console.log(`  ${dim('- skip   ')} ${dim(f.path)}${dim('  (removed by you, kette add --scaffold restores it)')}`);
   const stale = staleNote(described);
   if (stale) console.log(stale);
   const missing = tier === ENTERPRISE ? templateHint(rendered, templates, target, bundleDir) : null;
@@ -699,7 +708,9 @@ async function doctor(root, opts, { machine = true, project = true } = {}) {
       const { rendered, platform } = splitTemplates(own.dir, profile, detectWorkspace(root));
       const platformPaths = new Set(platform.map((f) => f.path));
       const missingChecks = (rendered.templates?.files || []).map((f) => f.path).filter((p) => !platformPaths.has(p) && absent(p));
-      const missingPlatform = [...platformPaths].filter(absent);
+      const gone = new Set(removedByTeam(root, platform).map((f) => f.path));
+      const missingPlatform = [...platformPaths].filter((p) => absent(p) && !gone.has(p));
+      if (gone.size) info(`Platform templates removed by you: ${[...gone].join(', ')}. ${cmd('kette add')} leaves them out, ${cmd('kette add --scaffold')} restores them`);
       if (missingChecks.length) warn(`Enterprise templates not in this project yet: ${missingChecks.join(', ')}. Add them with: ${cmd('kette add')}`);
       // A repo kette scaffolded gets the missing ones with kette add; another may keep its own pipeline, so no warning there (KETTE-53)
       if (missingPlatform.length && ketteScaffolded(root, platform)) warn(`Enterprise templates not in this project yet: ${missingPlatform.join(', ')}. Add them with: ${cmd('kette add')}`);

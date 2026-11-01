@@ -489,3 +489,31 @@ test('CR-SCAF-1, CR-SCAF-2: a hand-written ci.yml is an own pipeline; a repo wit
   assert.match(out, /its own pipeline \(\.github\/workflows\)/, 'a ci.yml kette did not write is the repo\'s own');
   assert.equal(fs.readFileSync(path.join(own, '.github', 'workflows', 'ci.yml'), 'utf8'), 'on: push\njobs: { test: { runs-on: ubuntu-latest } }\n');
 });
+
+test('CR-GATE-1: a platform template the team deleted stays deleted on kette add, a new app still gets its Dockerfile, --scaffold restores it', async () => {
+  install(bundle());
+  const root = tmp();
+  write(root, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  write(root, 'src/index.ts', 'export {};\n');
+  const cwd = process.cwd();
+  const add = (...extra) => capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker', '--patterns', 'layered', ...extra]));
+  let out;
+  process.chdir(root);
+  try {
+    await add('--scaffold');
+    fs.rmSync(path.join(root, '.github', 'workflows', 'ci.yml'));
+    write(root, 'frontend/package.json', JSON.stringify({ dependencies: { next: '16' } }));
+    write(root, '.kette/profile.json', JSON.stringify({ ...profileOf(root), stack: ['nestjs-prisma', 'nextjs-ts-tailwind'], apps: { ...profileOf(root).apps, 'nextjs-ts-tailwind': 'frontend' } }, null, 2));
+    ({ out } = await add());
+    assert.match(out, /- skip +\.github\/workflows\/ci\.yml +\(removed by you, kette add --scaffold restores it\)/);
+    assert.match(out, /\+ create +frontend\/Dockerfile/);
+    assert.equal(fs.existsSync(path.join(root, '.github', 'workflows', 'ci.yml')), false, 'not recreated');
+    const doc = await capture(() => main(['doctor']));
+    assert.match(doc.out, /INFO Platform templates removed by you: \.github\/workflows\/ci\.yml\. kette add leaves them out, kette add --scaffold restores them/);
+    assert.doesNotMatch(doc.out, /WARN Enterprise templates not in this project yet: .*ci\.yml/);
+    await add('--scaffold');
+  } finally {
+    process.chdir(cwd);
+  }
+  assert.ok(fs.existsSync(path.join(root, '.github', 'workflows', 'ci.yml')), '--scaffold restores it');
+});
