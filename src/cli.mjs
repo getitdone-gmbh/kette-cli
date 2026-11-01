@@ -10,7 +10,7 @@ import { ask, choose, confirm, close } from './prompt.mjs';
 import { MARKETPLACE, hasClaude, installedPlugins, pluginId, pluginInstalled, registeredAt, removeMarketplace, repointMarketplace } from './claude.mjs';
 import { LOCAL_SETTINGS_PATH, SETTINGS_PATH, enableHints, enableProjectPlugins, settingsItems, settingsStatus, userScopePlugins, writeProjectSettings } from './project-plugins.mjs';
 import { marketName } from './marketplace.mjs';
-import { RECORD_PATH, enterpriseLeftovers, recordTemplates, removeLeftovers } from './leftovers.mjs';
+import { RECORD_PATH, enterpriseLeftovers, recordTemplates, recordedTemplates, removeLeftovers } from './leftovers.mjs';
 import { activeBundleLink, bundlesDir, credentialsFile, delivery, home, mirror } from './paths.mjs';
 import { COMMUNITY, ENTERPRISE, editionLabel, isLegacyTier, normalizeProfile, normalizeTier, pluginContents, pluginDetails, pluginsFor, pluginSummary } from './editions.mjs';
 import { NOTE_PATH, COMMUNITY_REVIEWERS, agentNote, renewNote } from './note.mjs';
@@ -341,29 +341,55 @@ function platformStatus(bundleDir, id) {
   return JSON.parse(fs.readFileSync(f, 'utf8')).find((p) => p.id === id)?.status || null;
 }
 
-// Why platform templates are missing (Enterprise only, Community gets its hint as the last next step); scaffold false: scaffoldHint says it
-function templateHint(rendered, templates, target, bundleDir, scaffold) {
+// Why platform templates are missing (Enterprise only); Community gets its Enterprise hint once, as the last next step
+function templateHint(rendered, templates, target, bundleDir) {
   if (rendered.invalid) return `.kette/profile.json is not valid (${rendered.invalid}), platform templates and checks are skipped. Fix the profile, then run ${cmd('kette add')} again.`;
   if (rendered.newer) return `The installed rulebook is newer than this CLI understands (${rendered.newer}), platform templates and checks are skipped. ${cliUpgradeHint()}`;
   if (!templates) return `The installed rulebook has no profile-aware templates yet, load the current one with: ${cmd('kette update')}`;
-  if (!templates.platform && scaffold) return `No templates for ${target.platform.id} yet (status: ${platformStatus(bundleDir, target.platform.id) || 'unknown'}).`;
+  if (!templates.platform) return `No templates for ${target.platform.id} yet (status: ${platformStatus(bundleDir, target.platform.id) || 'unknown'}).`;
   return null;
 }
 
-// Platform templates only in an empty repo, with --scaffold or after a yes: a repo with files may run its own pipeline (KETTE-53)
-async function scaffoldPlatform(root, isNew, opts, platformId) {
-  if (opts.scaffold || isNew || emptyRepo(root)) return true;
-  if (opts.yes || opts.dryRun) return false;
-  return confirm(`\nThis repo already has files${pipelineNote(root)}. Also add Dockerfile, compose, CI and a deploy-on-push workflow for ${platformId || DEFAULT_PLATFORM}?`);
+// The rendered files of a profile and the platform templates among them (Dockerfile, compose, CI, deploy workflow): what the checks lack
+function splitTemplates(bundleDir, profile, workspace) {
+  const rendered = templatesFor(bundleDir, profile, workspace);
+  const checks = new Set((templatesFor(bundleDir, { ...profile, platform: undefined }, workspace).templates?.files || []).map((f) => f.path));
+  return { rendered, platform: (rendered.templates?.files || []).filter((f) => !checks.has(f.path)) };
 }
 
-// A repo with nothing in it but its git folder and what kette itself writes there
-const OWN = ['.git', '.kette', '.claude', 'CLAUDE.md'];
-const emptyRepo = (root) => !fs.existsSync(root) || fs.readdirSync(root).every((e) => OWN.includes(e));
+const withoutFiles = (rendered, files) => {
+  const drop = new Set(files.map((f) => f.path));
+  return { ...rendered, templates: { ...rendered.templates, files: rendered.templates.files.filter((f) => !drop.has(f.path)) } };
+};
 
-const pipelineNote = (root) => { const own = detectPipeline(root); return own.length ? ` and its own pipeline (${own.join(', ')})` : ''; };
+// Platform templates kette wrote into the repo: recorded in .kette/templates.json, or on disk exactly as kette renders them (from before the record)
+function ketteWrote(root, files) {
+  const recorded = new Set(recordedTemplates(root));
+  const same = (f) => { const abs = path.join(root, f.path); return fs.existsSync(abs) && fs.lstatSync(abs).isFile() && fs.readFileSync(abs, 'utf8') === f.content; };
+  return new Set(files.filter((f) => recorded.has(f.path) || same(f)).map((f) => f.path));
+}
 
-const scaffoldHint = (root) => `Platform templates (Dockerfile, compose, CI, deploy workflow) left out: this repo already has files${pipelineNote(root)}. Add them with: ${cmd('kette add --scaffold')}`;
+const ketteScaffolded = (root, files) => ketteWrote(root, files).size > 0;
+
+// Platform templates only in an empty repo, in one kette scaffolded before, with --scaffold or after a yes: a repo may run its own pipeline (KETTE-53)
+async function scaffoldPlatform(root, isNew, opts, platformId, files) {
+  if (opts.scaffold || isNew || emptyRepo(root) || ketteScaffolded(root, files)) return true;
+  if (opts.yes || opts.dryRun) return false;
+  return confirm(`\nThis repo already has files${pipelineNote(root, files)}. Also add Dockerfile, compose, CI and a deploy-on-push workflow for ${platformId || DEFAULT_PLATFORM}?`);
+}
+
+// A repo with nothing in it but its git folder, what kette writes there and what a new GitHub repo starts with (CR-SCAF-2)
+const OWN = ['.git', '.kette', '.claude', 'CLAUDE.md', '.gitignore'];
+const STARTER = /^(README|LICENSE)(\.[A-Za-z0-9]+)?$/i;
+const emptyRepo = (root) => !fs.existsSync(root) || fs.readdirSync(root).every((e) => OWN.includes(e) || STARTER.test(e));
+
+// A pipeline of the repo itself; a CI or deploy workflow kette wrote does not count
+const pipelineNote = (root, files) => {
+  const own = detectPipeline(root, ketteWrote(root, files));
+  return own.length ? ` and its own pipeline (${own.join(', ')})` : '';
+};
+
+const scaffoldHint = (root, files) => `Platform templates (Dockerfile, compose, CI, deploy workflow) left out: this repo already has files${pipelineNote(root, files)}. Add them with: ${cmd('kette add --scaffold')}`;
 
 const unusableFolder = (dir, stack) => `Folder "${dir}" (${stack}) can't be used as an app folder. Rename it (letters, digits, . _ - only) or point apps to another folder in .kette/profile.json.`;
 
@@ -470,10 +496,11 @@ async function setup(root, opts, isNew) {
   const invalid = current ? validate(schema, forSchema(schema, target)) : [];
   // A stack found only in an unusable folder and without an apps entry renders nothing, the default folder would not be its folder
   const skippedStacks = (target.stack || []).filter((s) => s in folders.unusable && !target.apps?.[s]);
-  const scaffold = tier === ENTERPRISE && !invalid.length ? await scaffoldPlatform(root, isNew, opts, target.platform?.id) : true;
-  // Without the platform id the renderer gives only the checks (eslint, tsconfig, gitleaks), no Dockerfile, compose, CI or deploy workflow
-  const renderable = { ...target, stack: (target.stack || []).filter((s) => !skippedStacks.includes(s)), ...(scaffold ? {} : { platform: undefined }) };
-  const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : templatesFor(bundleDir, renderable, isNew || detectWorkspace(root));
+  const renderable = { ...target, stack: (target.stack || []).filter((s) => !skippedStacks.includes(s)) };
+  const split = tier === ENTERPRISE && !invalid.length ? splitTemplates(bundleDir, renderable, isNew || detectWorkspace(root)) : null;
+  const platformFiles = split?.platform || [];
+  const scaffold = !platformFiles.length || await scaffoldPlatform(root, isNew, opts, target.platform?.id, platformFiles);
+  const rendered = tier !== ENTERPRISE ? {} : invalid.length ? { invalid: invalid.join('; ') } : scaffold ? split.rendered : withoutFiles(split.rendered, platformFiles);
   if (rendered.templates) rendered.templates.skipped.push(...skippedStacks.map((stack) => ({ stack, reason: `folder "${folders.unusable[stack]}" can't be used as an app folder, see the warning above` })));
   const workspace = isNew && rendered.templates ? workspaceManifest(bundleDir, target, rendered.templates) : null;
   const templates = workspace?.templates || rendered.templates || null;
@@ -486,9 +513,9 @@ async function setup(root, opts, isNew) {
   print(described);
   const stale = staleNote(described);
   if (stale) console.log(stale);
-  const missing = tier === ENTERPRISE ? templateHint(rendered, templates, target, bundleDir, scaffold) : null;
+  const missing = tier === ENTERPRISE ? templateHint(rendered, templates, target, bundleDir) : null;
   if (missing) console.log(`\n  ${missing}`);
-  if (!scaffold) console.log(`\n  ${scaffoldHint(root)}`);
+  if (!scaffold) console.log(`\n  ${scaffoldHint(root, platformFiles)}`);
   for (const s of templates?.skipped || []) console.log(`  No templates for ${s.stack}: ${s.reason}`);
   if (opts.dryRun) return 0;
   if (!(await confirm('\nCreate these files?', opts.yes))) { console.log('Cancelled, nothing written.'); return 1; }
@@ -669,13 +696,14 @@ async function doctor(root, opts, { machine = true, project = true } = {}) {
     // A repo that came to Enterprise through kette project use has no templates yet; kette add renders them (QA-22)
     if (profile && own && editionHere === ENTERPRISE && !opts.ci) {
       const absent = (p) => !fs.existsSync(path.join(root, p));
-      const all = (templatesFor(own.dir, profile, detectWorkspace(root)).templates?.files || []).map((f) => f.path);
-      const checks = new Set((templatesFor(own.dir, { ...profile, platform: undefined }, detectWorkspace(root)).templates?.files || []).map((f) => f.path));
-      const missingChecks = all.filter((p) => checks.has(p) && absent(p));
-      const missingPlatform = all.filter((p) => !checks.has(p) && absent(p));
+      const { rendered, platform } = splitTemplates(own.dir, profile, detectWorkspace(root));
+      const platformPaths = new Set(platform.map((f) => f.path));
+      const missingChecks = (rendered.templates?.files || []).map((f) => f.path).filter((p) => !platformPaths.has(p) && absent(p));
+      const missingPlatform = [...platformPaths].filter(absent);
       if (missingChecks.length) warn(`Enterprise templates not in this project yet: ${missingChecks.join(', ')}. Add them with: ${cmd('kette add')}`);
-      // A repo may keep its own pipeline, so missing platform templates are no warning (KETTE-53)
-      if (missingPlatform.length) info(`Platform templates not in this project: ${missingPlatform.join(', ')}. If the repo should use them: ${cmd('kette add --scaffold')}`);
+      // A repo kette scaffolded gets the missing ones with kette add; another may keep its own pipeline, so no warning there (KETTE-53)
+      if (missingPlatform.length && ketteScaffolded(root, platform)) warn(`Enterprise templates not in this project yet: ${missingPlatform.join(', ')}. Add them with: ${cmd('kette add')}`);
+      else if (missingPlatform.length) info(`Platform templates not in this project: ${missingPlatform.join(', ')}. If the repo should use them: ${cmd('kette add --scaffold')}`);
     }
     walletDoctor(root, editionHere === ENTERPRISE ? tier : COMMUNITY, { line, warn, info }, { project: Boolean(profile) });
     const md = path.join(root, 'CLAUDE.md');

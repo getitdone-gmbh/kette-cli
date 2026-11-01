@@ -440,3 +440,52 @@ test('KETTE-53: add in a repo with files and its own pipeline writes only the ch
   }
   assert.ok(files(empty).includes('compose.yaml') && files(empty).includes('.github/workflows/ci.yml'), 'an empty repo gets the platform templates');
 });
+
+test('CR-SCAF-1: a re-run in a repo kette scaffolded keeps its templates, sees no own pipeline and adds the Dockerfile of a new app', async () => {
+  install(bundle());
+  const root = tmp();
+  write(root, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  write(root, 'src/index.ts', 'export {};\n');
+  const cwd = process.cwd();
+  const add = (...extra) => capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker', '--patterns', 'layered', ...extra]));
+  process.chdir(root);
+  try {
+    await add('--scaffold');
+    assert.ok(files(root).includes('.github/workflows/ci.yml') && files(root).includes('backend/Dockerfile'));
+    const again = await add();
+    assert.match(again.out, /= keep +\.github\/workflows\/ci\.yml/);
+    assert.match(again.out, /= keep +backend\/Dockerfile/);
+    assert.doesNotMatch(again.out, /own pipeline|left out/, 'the CI kette wrote is no pipeline of the repo');
+    write(root, 'frontend/package.json', JSON.stringify({ dependencies: { next: '16' } }));
+    write(root, '.kette/profile.json', JSON.stringify({ ...profileOf(root), stack: ['nestjs-prisma', 'nextjs-ts-tailwind'], apps: { ...profileOf(root).apps, 'nextjs-ts-tailwind': 'frontend' } }, null, 2));
+    const later = await add();
+    assert.match(later.out, /\+ create +frontend\/Dockerfile/);
+  } finally {
+    process.chdir(cwd);
+  }
+  assert.ok(files(root).includes('frontend/Dockerfile'), 'a later app stack gets its Dockerfile');
+});
+
+test('CR-SCAF-1, CR-SCAF-2: a hand-written ci.yml is an own pipeline; a repo with only README, LICENSE and .gitignore counts as empty', async () => {
+  install(bundle());
+  const fresh = tmp();
+  write(fresh, 'README.md', '# app\n');
+  write(fresh, 'LICENSE', 'MIT\n');
+  write(fresh, '.gitignore', 'node_modules\n');
+  const own = tmp();
+  write(own, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  write(own, '.github/workflows/ci.yml', 'on: push\njobs: { test: { runs-on: ubuntu-latest } }\n');
+  const cwd = process.cwd();
+  let out;
+  try {
+    process.chdir(fresh);
+    await capture(() => main(['add', '--yes', '--no-plugins', '--stack', 'nestjs-prisma', '--platform', 'github-docker', '--patterns', 'layered']));
+    process.chdir(own);
+    ({ out } = await capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker', '--patterns', 'layered'])));
+  } finally {
+    process.chdir(cwd);
+  }
+  assert.ok(files(fresh).includes('compose.yaml'), 'a new GitHub repo with README, LICENSE and .gitignore gets the platform templates');
+  assert.match(out, /its own pipeline \(\.github\/workflows\)/, 'a ci.yml kette did not write is the repo\'s own');
+  assert.equal(fs.readFileSync(path.join(own, '.github', 'workflows', 'ci.yml'), 'utf8'), 'on: push\njobs: { test: { runs-on: ubuntu-latest } }\n');
+});
