@@ -174,18 +174,35 @@ function stationErrors(s, at) {
   return errs;
 }
 
+const WORKLOAD_ZERO_IDS = ['workload-zero', 'workbase'];
+const DEPLOYMENTS = ['cloud', 'datacenter'];
+// Same rule as the library: account names whose revision comments count, at most 50
+const AUTHOR = /^[\w.@:+-]{1,120}$/;
+
+// The ticketing block's shape; each system's own rules live in the library (KETTE-54), the workload.zero id stays one path segment (KETTE-28)
+function ticketingErrors(t) {
+  const errs = unknown(t, ['adapter', 'project', 'session', 'intakeModel', 'host', 'org', 'subIssues', 'deployment', 'decisionType', 'itemType', 'trustedAuthors'], 'ticketing.');
+  const workloadZero = WORKLOAD_ZERO_IDS.includes(t.adapter);
+  if (typeof t.adapter !== 'string' || !ID_PATTERN.test(t.adapter)) errs.push('ticketing.adapter must be an adapter id (lowercase letters, digits, dashes)');
+  if (workloadZero && (typeof t.project !== 'string' || !PROJECT_PATTERN.test(t.project))) errs.push('ticketing.project must be a board project id (letters, digits, dash, underscore, at most 64)');
+  if (!workloadZero && !isText(t.project)) errs.push('ticketing.project must be one line (repo, project key, team key, project path or name)');
+  for (const k of ['host', 'org', 'decisionType', 'itemType']) if (k in t && !isText(t[k])) errs.push(`ticketing.${k} must be one line`);
+  if ('subIssues' in t && typeof t.subIssues !== 'boolean') errs.push('ticketing.subIssues must be true or false');
+  if ('deployment' in t && !DEPLOYMENTS.includes(t.deployment)) errs.push(`ticketing.deployment must be ${DEPLOYMENTS.join(' or ')}`);
+  if ('trustedAuthors' in t && (!Array.isArray(t.trustedAuthors) || t.trustedAuthors.length > 50 || t.trustedAuthors.some((a) => typeof a !== 'string' || !AUTHOR.test(a)))) errs.push('ticketing.trustedAuthors must be a list of account names (letters, digits, . _ - @ : +), at most 50');
+  if ('session' in t && typeof t.session !== 'boolean') errs.push('ticketing.session must be true or false (true allows the shared Workbase session file)');
+  // The shared session file holds a Workbase session, so only a workload.zero board may use it
+  if (t.session === true && !workloadZero) errs.push('ticketing.session is for workload-zero boards only; other systems take their token from the secret wallet');
+  if ('intakeModel' in t && (!isText(t.intakeModel) || !isModelUrl(t.intakeModel))) errs.push('ticketing.intakeModel must be an https URL outside private, link-local and unique-local networks (http only on this machine)');
+  return errs;
+}
+
 function sectionErrors(i) {
   const errs = [];
   if ('ticketing' in i) {
     const t = i.ticketing;
     if (!isObject(t)) errs.push('ticketing must be an object');
-    else {
-      errs.push(...unknown(t, ['adapter', 'project', 'session', 'intakeModel'], 'ticketing.'));
-      if (typeof t.adapter !== 'string' || !ID_PATTERN.test(t.adapter)) errs.push('ticketing.adapter must be an adapter id (lowercase letters, digits, dashes)');
-      if (typeof t.project !== 'string' || !PROJECT_PATTERN.test(t.project)) errs.push('ticketing.project must be a board project id (letters, digits, dash, underscore, at most 64)');
-      if ('session' in t && typeof t.session !== 'boolean') errs.push('ticketing.session must be true or false (true allows the shared Workbase session file)');
-      if ('intakeModel' in t && (!isText(t.intakeModel) || !isModelUrl(t.intakeModel))) errs.push('ticketing.intakeModel must be an https URL outside private, link-local and unique-local networks (http only on this machine)');
-    }
+    else errs.push(...ticketingErrors(t));
   }
   if ('wallet' in i) {
     const w = i.wallet;

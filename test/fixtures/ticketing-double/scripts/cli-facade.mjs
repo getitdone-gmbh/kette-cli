@@ -9,9 +9,24 @@ const PROJECT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 class DoubleRefusal extends Error {}
 export const isRefusal = (err) => err instanceof DoubleRefusal;
+// Two systems, so the CLI's adapter wiring (token names, connect settings, usage lines) runs in public CI (KETTE-54)
+const KINDS = {
+  'workload-zero': { tokenName: 'KETTE_TICKETING_WORKBASE_TOKEN', usage: 'kette ticket connect workload-zero --project <project id>', project: PROJECT_ID, rule: 'a project id' },
+  github: { tokenName: 'KETTE_TICKETING_GITHUB_TOKEN', usage: 'kette ticket connect github --project <owner/repo> [--host <GitHub Enterprise Server host>] [--sub-issues false]', project: /^[\w.-]+\/[\w.-]+$/, rule: 'owner/repo' },
+};
+export const SUPPORTED_ADAPTERS = Object.keys(KINDS);
 export function adapterId(raw) {
-  if (raw !== 'workload-zero' && raw !== 'workbase') throw new DoubleRefusal(`Ticket adapter ${JSON.stringify(raw)} is not supported yet; supported: workload-zero`);
-  return 'workload-zero';
+  const id = raw === 'workbase' ? 'workload-zero' : raw;
+  if (!KINDS[id]) throw new DoubleRefusal(`Ticket adapter ${JSON.stringify(raw)} is not supported yet; supported: ${SUPPORTED_ADAPTERS.join(', ')}`);
+  return id;
+}
+export const tokenNameFor = (adapter) => KINDS[adapterId(adapter)].tokenName;
+export const adapterUsage = (adapter) => KINDS[adapterId(adapter)].usage;
+export function connectSettings(adapter, fields) {
+  const id = adapterId(adapter);
+  if (!KINDS[id].project.test(String(fields.project))) throw new DoubleRefusal(`ticketing.project ${JSON.stringify(String(fields.project))} is not valid: ${KINDS[id].rule}`);
+  if (fields.deployment !== undefined) throw new DoubleRefusal('ticketing.deployment is for jira only');
+  return { ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)), adapter: id };
 }
 export function assertProjectId(id) {
   if (!PROJECT_ID.test(id)) throw new DoubleRefusal(`Project id ${JSON.stringify(String(id))} is not valid`);
@@ -25,8 +40,8 @@ export const decide = async (prompt) => (/\b(bau|change|make)\b/i.test(prompt) ?
 export const routingFor = (context) => ({ ...DEFAULT_ROUTING, stations: Object.fromEntries((context.stations?.length ? context.stations.map((s) => (typeof s === 'string' ? s : s.id)) : Object.keys(DEFAULT_ROUTING.stations)).map((s) => [s, { ...DEFAULT_ROUTING.stations[s], repos: context.repos ?? [] }])) });
 
 export function openProject({ context, apiBaseUrl = 'https://board.invalid/api', token, author, fetch = globalThis.fetch }) {
-  adapterId(context.ticketing.adapter);
-  const projectId = assertProjectId(context.ticketing.project);
+  const adapter = adapterId(context.ticketing.adapter);
+  const projectId = adapter === 'github' ? context.ticketing.project : assertProjectId(context.ticketing.project);
   const base = apiBaseUrl.replace(/\/+$/, '');
   const call = async (method, path, body) => {
     const res = await fetch(`${base}${path}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -46,6 +61,9 @@ export function openProject({ context, apiBaseUrl = 'https://board.invalid/api',
   return {
     routing: routingFor(context),
     projectId,
+    adapter,
+    scope: adapter === 'github' ? `GitHub repo ${projectId}` : `project ${projectId}`,
+    tokenName: tokenNameFor(adapter),
     list,
     get: async (id) => (await list()).find((d) => d.decision.id === id) ?? null,
     items: async () => (await list()).flatMap((d) => d.items),

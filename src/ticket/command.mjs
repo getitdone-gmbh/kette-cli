@@ -3,14 +3,18 @@ import { ask, confirm } from '../prompt.mjs';
 import { bold, cmd, dim, file, status } from '../out.mjs';
 import { tilde } from '../rules.mjs';
 import { interrupted, withLockAsync } from '../lock.mjs';
-import { PROJECT_PATTERN, instanceFile, instanceSource, printable, updateInstance } from '../instance/config.mjs';
+import { instanceFile, instanceSource, printable, updateInstance } from '../instance/config.mjs';
+import { ENTERPRISE } from '../editions.mjs';
+import { installedBundle } from '../manifest.mjs';
 import { WALLET_PATH, readWallet, writeWallet } from '../wallet/config.mjs';
 import { loadTicketing, ticketingDir } from './module.mjs';
-import { TOKEN_NAME, apiUrl, boardToken, contextOf, requireBoard, ticketProject } from './project.mjs';
+import { apiUrl, boardToken, contextOf, requireBoard, ticketProject } from './project.mjs';
+import { WORKLOAD_ZERO, boardLine, sameBoard, settingsFor, supportedAdapters, tokenNameOf, usageLines, workloadZeroId } from './adapters.mjs';
 import { hook } from './hook.mjs';
 
-export const TICKET_HELP = `kette ticket connect [workload-zero] --board <id>
-                        Ticketing (Enterprise): connect the board of this repo's Kette project; decisions become tickets
+export const TICKET_HELP = `kette ticket connect <adapter> --board <id> [--host h] [--org o] [--deployment cloud|datacenter] [--trusted-authors a,b]
+                        Ticketing (Enterprise): connect the board of this repo's Kette project (workload-zero, github, jira,
+                        linear, gitlab, azure-devops; kette ticket help lists the usage of each); decisions become tickets
   kette ticket new "<words>" --by <member> --source <ref> --stations a,b
                         Record a decision in the words of who decided (--paraphrase, --statement, --rationale, --label,
                         an accepted session proposal: --proposed-by <session> --acceptance "<words>")
@@ -52,7 +56,7 @@ async function asPerson(what) {
 // Board session of a project: the facade of the library with the project context, its board and the credential from its wallet
 async function open(project, opts) {
   const { lib } = await loadTicketing(project.bundleDir);
-  requireBoard(project);
+  requireBoard(project, lib);
   const { token, refresh } = await boardToken(project, opts, lib);
   const p = await refused(lib, async () => lib.openProject({ context: contextOf(project), apiBaseUrl: apiUrl(), token, ...(refresh ? { refreshToken: refresh } : {}), author: authorOf(opts) }));
   return { lib, p };
@@ -66,10 +70,18 @@ async function refused(lib, run) {
   }
 }
 
-const describeWrite = (w) => {
+// One planned request: workload.zero ids (24 hex) as :id, other systems' paths as they are (issue numbers, keys), and for GraphQL
+// (Linear, every write is POST /graphql) the name of the mutation (KETTE-54)
+export const describeWrite = (w) => {
   const b = w.body || {};
-  return [`${w.method} ${w.path.replace(/[0-9a-f]{24}/g, ':id')}`, b.title && `"${printable(b.title)}"`, b.status && `status ${b.status}`, b.content && `comment "${printable(b.content.split('\n')[0])}"`].filter(Boolean).join(' · ');
+  const mutation = typeof b.query === 'string' ? b.query.match(/mutation\s+(\w+)/)?.[1] : null;
+  const title = b.title || b.summary || b.fields?.summary;
+  const comment = typeof b.content === 'string' ? b.content : typeof b.body === 'string' ? b.body : null;
+  return [`${w.method} ${printable(w.path).replace(/[0-9a-f]{24}/g, ':id')}`, mutation && `mutation ${mutation}`, typeof title === 'string' && `"${printable(title)}"`, typeof b.status === 'string' && `status ${b.status}`, comment && `comment "${printable(comment.split('\n')[0])}"`].filter(Boolean).join(' · ');
 };
+
+// Where the decisions live: what the library names (GitHub repo owner/x, Jira project KEY), a bundle from before the adapters a project id
+const scopeOf = (p) => printable(p.scope || `project ${p.projectId}`);
 
 // Every write runs twice: first on a copy of the board (the plan, also what --dry-run prints), then for real after the yes, planned
 // again with a fresh time; each request is compared with that plan before it leaves the process. A refusal by the chain rules stops
@@ -79,7 +91,7 @@ async function write({ lib, p }, opts, op, args, summary, { lock = null } = {}) 
   const { result: planned, writes } = await refused(lib, () => p.plan(op, args, new Date().toISOString()));
   console.log(summary(planned));
   if (!writes.length) { console.log(dim('Nothing to change on the board.')); return planned; }
-  console.log(`${opts.dryRun ? 'Would send' : 'Sends'} ${writes.length} request${writes.length === 1 ? '' : 's'} to project ${printable(p.projectId)}:`);
+  console.log(`${opts.dryRun ? 'Would send' : 'Sends'} ${writes.length} request${writes.length === 1 ? '' : 's'} to ${scopeOf(p)}:`);
   for (const w of writes) console.log(`  ${dim(describeWrite(w))}`);
   if (opts.dryRun) { console.log(dim('--dry-run: nothing written.')); return planned; }
   if (!(await approved(opts, 'Write this to the board?'))) throw new ExitError('Not confirmed, nothing written.', 1);
@@ -89,7 +101,7 @@ async function write({ lib, p }, opts, op, args, summary, { lock = null } = {}) 
   // Only a real move is reported (KT-N7)
   for (const r of renumbered ?? []) say('warn', `${r.from} was recorded at the same moment by a parallel run on another machine; this decision is ${r.to} now (revision written)`);
   if (op === 'new' && result.decision.id !== planned.decision.id && !renumbered?.length) say('info', `${planned.decision.id} was taken meanwhile, written as ${result.decision.id}`);
-  say('ok', `Written to project ${printable(p.projectId)}${op === 'new' ? ` as ${result.decision.id}` : ''}`);
+  say('ok', `Written to ${scopeOf(p)}${op === 'new' ? ` as ${result.decision.id}` : ''}`);
   return result;
 }
 
@@ -310,24 +322,49 @@ function boardId(opts) {
   return opts.project;
 }
 
-// kette ticket connect: the board goes into instance.json (under its lock) after the plan was shown; the credential only as a name
+const FLAG_OF = { project: '--board', host: '--host', org: '--org', subIssues: '--sub-issues', deployment: '--deployment', decisionType: '--decision-type', itemType: '--item-type', trustedAuthors: '--trusted-authors' };
+
+// --sub-issues takes true or false, every other value is a typo that must not pass as one of them
+function subIssues(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === 'true' || raw === 'false') return raw === 'true';
+  throw new ExitError(`--sub-issues must be true or false: ${JSON.stringify(printable(raw).slice(0, 40))}`);
+}
+
+// The adapter to connect: the argument; without one the adapter of the current board, or the only one the bundle has
+function adapterArg(lib, project, args) {
+  if (args[0]) return lib.adapterId(args[0]);
+  if (project.instance.ticketing) return lib.adapterId(project.instance.ticketing.adapter);
+  const all = supportedAdapters(lib);
+  if (all.length === 1) return lib.adapterId(all[0]);
+  throw new ExitError(`Name the ticket system. Usage:\n${usageLines(lib).map((l) => `  ${l}`).join('\n')}`);
+}
+
+// kette ticket connect: the block, checked per adapter by the library, goes into instance.json under its lock after the plan; the credential as a name only
 async function connect(project, opts, args) {
   const { lib } = await loadTicketing(project.bundleDir);
-  const adapter = await refused(lib, async () => lib.adapterId(args[0] || 'workload-zero'));
+  const adapter = await refused(lib, async () => adapterArg(lib, project, args));
   const id = boardId(opts);
-  if (!id) throw new ExitError('Usage: kette ticket connect workload-zero --board <id> (the workload.zero project id)');
-  if (!PROJECT_PATTERN.test(id)) throw new ExitError(`--board must be a board project id (letters, digits, dash, underscore, at most 64): ${JSON.stringify(printable(id).slice(0, 80))}. Nothing written.`);
-  const next = { adapter, project: id };
+  if (!id) throw new ExitError(`Usage: ${usageLines(lib).find((l) => l.includes(` ${adapter} `)) || `kette ticket connect ${adapter} --board <id>`}`);
+  // The workload.zero id stays one path segment, checked here whatever the bundle does (KETTE-28)
+  if (adapter === WORKLOAD_ZERO && !workloadZeroId(id)) throw new ExitError(`--board must be a board project id (letters, digits, dash, underscore, at most 64): ${JSON.stringify(printable(id).slice(0, 80))}. Nothing written.`);
+  const fields = { project: id, host: opts.host, org: opts.org, subIssues: subIssues(opts['sub-issues']), deployment: opts.deployment, decisionType: opts['decision-type'], itemType: opts['item-type'], trustedAuthors: opts['trusted-authors'] === undefined ? undefined : list(opts['trusted-authors']) };
+  let next;
+  try { next = settingsFor(lib, adapter, fields); } catch (err) {
+    if (!lib.isRefusal(err)) throw err;
+    throw new ExitError(`${printable(err.message).replace(/\bticketing\.(\w+)/g, (m, f) => (FLAG_OF[f] ? `${m} (${FLAG_OF[f]})` : m))}. Nothing written.`, 1);
+  }
   const name = project.instance.name;
   const current = project.instance.ticketing;
-  if (current && (lib.adapterId(current.adapter) !== adapter || current.project !== id)) {
-    throw new ExitError(`Kette project ${name} already uses ${printable(current.adapter)} ${printable(current.project)}. One ticket system per Kette project, no sync between two (Q3). Change ticketing in ${tilde(instanceFile(name))} by hand if the board moves.`, 1);
+  if (current && !sameBoard(lib, current, next)) {
+    throw new ExitError(`Kette project ${name} already uses ${boardLine(current)}. One ticket system per Kette project, no sync between two (Q3). Change ticketing in ${tilde(instanceFile(name))} by hand if the board moves.`, 1);
   }
+  const tokenName = tokenNameOf(lib, adapter);
   const wallet = readWallet(project.root);
-  const declare = wallet && !wallet.secrets.some((s) => s.name === TOKEN_NAME);
-  const changes = current ? [] : [`  ~ update ${file(tilde(instanceFile(name)))}  ${dim(`ticketing: ${adapter} ${printable(id)}`)}`];
-  if (declare) changes.push(`  ~ update ${file(WALLET_PATH)}  ${dim(`declares ${TOKEN_NAME} (the name only, the value stays in your provider)`)}`);
-  if (!changes.length) say('ok', `Kette project ${name} is connected to ${adapter} ${printable(id)} already.`);
+  const declare = wallet && !wallet.secrets.some((s) => s.name === tokenName);
+  const changes = current ? [] : [`  ~ update ${file(tilde(instanceFile(name)))}  ${dim(`ticketing: ${boardLine(next)}`)}`];
+  if (declare) changes.push(`  ~ update ${file(WALLET_PATH)}  ${dim(`declares ${tokenName} (the name only, the value stays in your provider)`)}`);
+  if (!changes.length) say('ok', `Kette project ${name} is connected to ${boardLine(next)} already.`);
   else {
     console.log(`${opts.dryRun ? 'Would change' : 'Plan'} (Kette project ${name}):`);
     for (const c of changes) console.log(c);
@@ -335,18 +372,19 @@ async function connect(project, opts, args) {
     if (!(await approved(opts, 'Connect the board?'))) throw new ExitError('Not confirmed, nothing written.', 1);
     if (!current) {
       updateInstance(name, (i) => {
-        if (i.ticketing && (i.ticketing.adapter !== adapter || i.ticketing.project !== id)) throw new ExitError(`Kette project ${name} got another board in the meantime (${printable(i.ticketing.adapter)} ${printable(i.ticketing.project)}). Nothing written.`, 1);
+        if (i.ticketing && !sameBoard(lib, i.ticketing, next)) throw new ExitError(`Kette project ${name} got another board in the meantime (${boardLine(i.ticketing)}). Nothing written.`, 1);
         return i.ticketing ? i : { ...i, ticketing: next };
       });
-      say('ok', `Kette project ${name} uses ${adapter} ${printable(id)} for decisions`);
+      say('ok', `Kette project ${name} uses ${boardLine(next)} for decisions`);
       if (instanceSource(name).kind !== 'local') console.log(dim(`instance.json lives in the repo of the Kette project ${tilde(instanceSource(name).path)}. Commit and push it so the team sees the board.`));
     }
     if (declare) {
-      writeWallet(project.root, { ...wallet, secrets: [...wallet.secrets, { name: TOKEN_NAME, note: 'ticket board access' }] });
-      say('ok', `${TOKEN_NAME} declared in ${file(WALLET_PATH)}`);
+      writeWallet(project.root, { ...wallet, secrets: [...wallet.secrets, { name: tokenName, note: 'ticket board access' }] });
+      say('ok', `${tokenName} declared in ${file(WALLET_PATH)}`);
     }
   }
-  return probe({ ...project, effective: { ...project.effective, ticketing: { ...current, ...next } }, instance: { ...project.instance, ticketing: { ...current, ...next } } }, opts);
+  const board = { ...current, ...next };
+  return probe({ ...project, effective: { ...project.effective, ticketing: board }, instance: { ...project.instance, ticketing: board } }, opts);
 }
 
 // One read of the board after connect; a missing credential is a next step, not a failure
@@ -383,10 +421,23 @@ export async function offerTicketing(root, opts, { resolveProject }) {
   }
 }
 
+// The usage line of every ticket system the installed Enterprise bundle has; nothing without a bundle with ticketing
+async function adapterHelp() {
+  const dir = installedBundle(ENTERPRISE)?.dir;
+  if (!dir || !ticketingDir(dir)) return '';
+  try {
+    const { lib } = await loadTicketing(dir);
+    return `\n\nTicket systems of the installed bundle:\n${usageLines(lib).map((l) => `  ${l}`).join('\n')}`;
+  } catch (err) {
+    if (!(err instanceof ExitError)) throw err;
+    return `\n\n${dim(err.message)}`;
+  }
+}
+
 const COMMANDS = { new: newDecision, edit: editDecision, extend: extendDecision, route, close, repair, list: listCmd, show, inbox, report };
 
 export async function ticket(sub, opts, deps) {
-  if (!sub || sub === 'help') { console.log(`Ticketing (Enterprise): decisions become tickets on the board of the Kette project and travel down the chain.\n\n  ${TICKET_HELP}`); return 0; }
+  if (!sub || sub === 'help') { console.log(`Ticketing (Enterprise): decisions become tickets on the board of the Kette project and travel down the chain.\n\n  ${TICKET_HELP}${await adapterHelp()}`); return 0; }
   const args = opts._.slice(2);
   // The hook runs on every prompt in Claude Code: it never fails and never asks
   if (sub === 'hook' && args[0] === 'run') return hook('run', opts, { ...deps, root: '.' });
