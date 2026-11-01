@@ -51,7 +51,9 @@ test('bundle part: missing or incomplete ticketing means an older bundle, with k
 const files = (contract) => ({ 'package.json': '{"type":"module"}', 'routing.default.json': '{}', 'scripts/cli-facade.mjs': `export const CLI_CONTRACT = ${contract};\n` });
 
 test('bundle part: a library with another contract is refused, never driven blindly', async () => {
-  await assert.rejects(loadTicketing(bundleWith(files(CONTRACT + 1)), { root: ROOT }), /speaks contract 3, this kette speaks 2\. Update the kette CLI/);
+  await assert.rejects(loadTicketing(bundleWith(files(CONTRACT + 1)), { root: ROOT }), /speaks contract 4, this kette speaks 2 or 3\. Update the kette CLI/);
+  await assert.rejects(loadTicketing(bundleWith(files(1)), { root: ROOT }), /speaks contract 1, this kette speaks 2 or 3\. Load the current bundle/);
+  assert.equal((await loadTicketing(bundleWith(files(2)), { root: ROOT })).lib.CLI_CONTRACT, 2, 'CR-TOK-1: a bundle of contract 2 still loads');
   await assert.rejects(loadTicketing(bundleWith(files(1)), { root: ROOT }), /Load the current bundle with: kette update/);
   const t = await loadTicketing(bundleWith(files(CONTRACT)), { root: ROOT });
   assert.equal(t.lib.CLI_CONTRACT, CONTRACT);

@@ -29,9 +29,11 @@ export function ticketProject(root, { resolveProject }) {
 }
 
 // What the library gets: the instance's ticketing, stations, members and repos, nothing from a global file
+// minCli is this CLI's own field (CR-COMPAT-1) and never reaches the library, which refuses fields its system does not read
 export function contextOf(project) {
   const { instance, effective } = project;
-  return { instance: instance.name, ticketing: effective.ticketing, stations: effective.stations, members: instance.members, repos: instance.repos.map((r) => r.name) };
+  const ticketing = effective.ticketing ? Object.fromEntries(Object.entries(effective.ticketing).filter(([k]) => k !== 'minCli')) : effective.ticketing;
+  return { instance: instance.name, ticketing, stations: effective.stations, members: instance.members, repos: instance.repos.map((r) => r.name) };
 }
 
 export function requireBoard(project, lib) {

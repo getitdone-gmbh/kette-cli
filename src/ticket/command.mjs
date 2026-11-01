@@ -9,12 +9,15 @@ import { installedBundle } from '../manifest.mjs';
 import { WALLET_PATH, readWallet, writeWallet } from '../wallet/config.mjs';
 import { loadTicketing, ticketingDir } from './module.mjs';
 import { apiUrl, boardToken, contextOf, requireBoard, ticketProject } from './project.mjs';
-import { WORKLOAD_ZERO, boardLine, sameBoard, settingsFor, supportedAdapters, tokenNameOf, usageLines, workloadZeroId } from './adapters.mjs';
+import { MIN_CLI, OPTION_OF, WORKLOAD_ZERO, boardLine, sameBoard, settingsFor, supportedAdapters, tokenNameOf, unusedOptions, usageLines, workloadZeroId } from './adapters.mjs';
+import { confirmedHost, offerHostTrust, requireTrustedHost, trustHost } from './host.mjs';
 import { hook } from './hook.mjs';
 
-export const TICKET_HELP = `kette ticket connect <adapter> --board <id> [--host h] [--org o] [--deployment cloud|datacenter] [--trusted-authors a,b]
-                        Ticketing (Enterprise): connect the board of this repo's Kette project (workload-zero, github, jira,
-                        linear, gitlab, azure-devops; kette ticket help lists the usage of each); decisions become tickets
+export const TICKET_HELP = `kette ticket connect <adapter> --board <id> [settings of that system]
+                        Ticketing (Enterprise): connect the board of this repo's Kette project; decisions become tickets.
+                        kette ticket help lists the systems of the installed bundle and their settings
+  kette ticket host trust
+                        Confirm on this machine the board host (ticketing.host) the Kette project names, before a token goes there
   kette ticket new "<words>" --by <member> --source <ref> --stations a,b
                         Record a decision in the words of who decided (--paraphrase, --statement, --rationale, --label,
                         an accepted session proposal: --proposed-by <session> --acceptance "<words>")
@@ -56,9 +59,13 @@ async function asPerson(what) {
 // Board session of a project: the facade of the library with the project context, its board and the credential from its wallet
 async function open(project, opts) {
   const { lib } = await loadTicketing(project.bundleDir);
-  requireBoard(project, lib);
+  const board = requireBoard(project, lib);
+  // The library checks that the token is the one of its system, so a workload.zero token never reaches another API (CR-TOK-1)
+  const tokenName = tokenNameOf(lib, board.adapter);
+  await refused(lib, async () => requireTrustedHost(lib, project, tokenName));
   const { token, refresh } = await boardToken(project, opts, lib);
-  const p = await refused(lib, async () => lib.openProject({ context: contextOf(project), apiBaseUrl: apiUrl(), token, ...(refresh ? { refreshToken: refresh } : {}), author: authorOf(opts) }));
+  const host = confirmedHost(lib, project, tokenName);
+  const p = await refused(lib, async () => lib.openProject({ context: contextOf(project), apiBaseUrl: apiUrl(), token, tokenName, ...(host ? { confirmedHost: host } : {}), ...(refresh ? { refreshToken: refresh } : {}), author: authorOf(opts) }));
   return { lib, p };
 }
 
@@ -76,7 +83,8 @@ export const describeWrite = (w) => {
   const b = w.body || {};
   const mutation = typeof b.query === 'string' ? b.query.match(/mutation\s+(\w+)/)?.[1] : null;
   const title = b.title || b.summary || b.fields?.summary;
-  const comment = typeof b.content === 'string' ? b.content : typeof b.body === 'string' ? b.body : null;
+  // Only a comments path carries a comment; the body of a new GitHub or GitLab issue is its description (CR-DW-1)
+  const comment = /\/(comments?|notes)(\/|$)/.test(w.path) ? [b.content, b.body].find((x) => typeof x === 'string') : null;
   return [`${w.method} ${printable(w.path).replace(/[0-9a-f]{24}/g, ':id')}`, mutation && `mutation ${mutation}`, typeof title === 'string' && `"${printable(title)}"`, typeof b.status === 'string' && `status ${b.status}`, comment && `comment "${printable(comment.split('\n')[0])}"`].filter(Boolean).join(' · ');
 };
 
@@ -322,7 +330,7 @@ function boardId(opts) {
   return opts.project;
 }
 
-const FLAG_OF = { project: '--board', host: '--host', org: '--org', subIssues: '--sub-issues', deployment: '--deployment', decisionType: '--decision-type', itemType: '--item-type', trustedAuthors: '--trusted-authors' };
+const FLAG_OF = { project: '--board', ...OPTION_OF };
 
 // --sub-issues takes true or false, every other value is a typo that must not pass as one of them
 function subIssues(raw) {
@@ -349,6 +357,8 @@ async function connect(project, opts, args) {
   // The workload.zero id stays one path segment, checked here whatever the bundle does (KETTE-28)
   if (adapter === WORKLOAD_ZERO && !workloadZeroId(id)) throw new ExitError(`--board must be a board project id (letters, digits, dash, underscore, at most 64): ${JSON.stringify(printable(id).slice(0, 80))}. Nothing written.`);
   const fields = { project: id, host: opts.host, org: opts.org, subIssues: subIssues(opts['sub-issues']), deployment: opts.deployment, decisionType: opts['decision-type'], itemType: opts['item-type'], trustedAuthors: opts['trusted-authors'] === undefined ? undefined : list(opts['trusted-authors']) };
+  const unused = unusedOptions(lib, adapter, fields);
+  if (unused.length) throw new ExitError(`${unused.join(', ')} ${unused.length === 1 ? 'is' : 'are'} not a setting of ${adapter}. Usage: ${usageLines(lib).find((l) => l.includes(` ${adapter} `)) || `kette ticket connect ${adapter} --board <id>`}. Nothing written.`);
   let next;
   try { next = settingsFor(lib, adapter, fields); } catch (err) {
     if (!lib.isRefusal(err)) throw err;
@@ -368,6 +378,8 @@ async function connect(project, opts, args) {
   else {
     console.log(`${opts.dryRun ? 'Would change' : 'Plan'} (Kette project ${name}):`);
     for (const c of changes) console.log(c);
+    // instance.json is shared: kette 0.11 and 0.12 refuse such a block and then count every repo of the Kette project as Community
+    if (!current && next.minCli) say('warn', `Everyone who uses Kette project ${name} needs kette ${MIN_CLI} or newer: older versions refuse its instance.json and count its repos as Community until they update.`);
     if (opts.dryRun) { console.log(dim('--dry-run: nothing written.')); return 0; }
     if (!(await approved(opts, 'Connect the board?'))) throw new ExitError('Not confirmed, nothing written.', 1);
     if (!current) {
@@ -384,7 +396,9 @@ async function connect(project, opts, args) {
     }
   }
   const board = { ...current, ...next };
-  return probe({ ...project, effective: { ...project.effective, ticketing: board }, instance: { ...project.instance, ticketing: board } }, opts);
+  const connected = { ...project, effective: { ...project.effective, ticketing: board }, instance: { ...project.instance, ticketing: board } };
+  await offerHostTrust(lib, connected, tokenName);
+  return probe(connected, opts);
 }
 
 // One read of the board after connect; a missing credential is a next step, not a failure
@@ -444,6 +458,11 @@ export async function ticket(sub, opts, deps) {
   const project = ticketProject('.', deps);
   if (sub === 'hook') return hook(args[0], opts, { ...deps, root: '.', project });
   if (sub === 'connect') return connect(project, opts, args);
+  if (sub === 'host') {
+    if (args[0] !== 'trust') throw new ExitError('Usage: kette ticket host trust');
+    const { lib } = await loadTicketing(project.bundleDir);
+    return trustHost(lib, project, tokenNameOf(lib, requireBoard(project, lib).adapter));
+  }
   if (sub === 'check' && args[0] && !args[0].includes('/')) return followThrough(project, opts, args[0]);
   if (['pick', 'link', 'check'].includes(sub)) return itemCommand(project, opts, args, sub);
   if (sub === 'why') return whyCmd(project, opts, args, deps);

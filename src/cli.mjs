@@ -29,7 +29,7 @@ import { PROJECT_HELP, askInstance, createPending, doctorInstance, project as pr
 import { inherit, instanceSource, originName, printable, readInstance } from './instance/config.mjs';
 import { TICKET_HELP, offerTicketing, ticket } from './ticket/command.mjs';
 
-const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+import { VERSION } from './version.mjs';
 
 const STACKS = [
   { value: 'nextjs-ts-tailwind', label: 'Next.js + TypeScript + Tailwind (Web)' },
@@ -744,6 +744,8 @@ function instanceChecks(profile, { line, warn }) {
   if (inst.edition === ENTERPRISE) line(tierOf() === ENTERPRISE, 'Licence for the Enterprise Kette project', `Kette project ${inst.name} is Enterprise, this machine has no valid licence. Sign in with: ${cmd('kette login <key>')}`);
   if (profile.tier !== inst.edition) warn(`Profile says tier ${profile.tier}, Kette project ${inst.name} is ${inst.edition}. Align with: ${cmd(`kette project use ${inst.name}`)}`);
   const bundle = installedBundle(inst.edition);
+  // Teammates on 0.11 or 0.12 refuse a ticketing block of another system than workload.zero and count the repos as Community (CR-COMPAT-1)
+  if (inst.ticketing?.minCli) warn(`Kette project ${inst.name} tracks decisions in ${printable(inst.ticketing.adapter)}: everyone who uses it needs kette ${printable(inst.ticketing.minCli)} or newer, older versions refuse its instance.json and count its repos as Community`);
   if (inst.bundle && bundle && inst.bundle !== bundle.version) warn(`Kette project ${inst.name} pins bundle ${inst.bundle}, this machine has ${bundle.version}. kette keeps one active bundle per edition; the pin is a check, not a switch (docs/kette-projects.md).`);
   return inst;
 }

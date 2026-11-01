@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { describeWrite } from '../src/ticket/command.mjs';
-import { sameBoard, settingsFor, supportedAdapters, tokenNameOf, usageLines } from '../src/ticket/adapters.mjs';
+import { sameBoard, settingsFor, supportedAdapters, tokenNameOf, unusedOptions, usageLines } from '../src/ticket/adapters.mjs';
 import { newInstance, validateInstance } from '../src/instance/config.mjs';
 
 // KETTE-54: the CLI side of the ticket adapters, without a bundle
@@ -13,6 +13,8 @@ test('KETTE-54 item 5: planned writes show ids of other systems as they are, wor
   assert.equal(describeWrite({ method: 'POST', path: '/rest/api/3/issue', body: { fields: { summary: 'KD-0001 · Save goes right' } } }), 'POST /rest/api/3/issue · "KD-0001 · Save goes right"');
   assert.equal(describeWrite({ method: 'POST', path: '/graphql', body: { query: 'mutation IssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success } }' } }), 'POST /graphql · mutation IssueCreate');
   assert.equal(describeWrite({ method: 'POST', path: '/x\u001b[31m', body: {} }), 'POST /x', 'no escape sequence from a path reaches the screen');
+  assert.equal(describeWrite({ method: 'POST', path: '/repos/acme/web/issues', body: { title: 'KD-0001 · x', body: '<!-- kette:decision -->' } }), 'POST /repos/acme/web/issues · "KD-0001 · x"', 'CR-DW-1: an issue body is no comment');
+  assert.equal(describeWrite({ method: 'POST', path: '/projects/7/issues/3/notes', body: { body: 'kette:revision' } }), 'POST /projects/7/issues/3/notes · comment "kette:revision"');
 });
 
 test('KETTE-54 items 3 and 7: instance.json takes the block of every adapter, keeps the workload.zero id rule, session only for workload.zero', () => {
@@ -26,6 +28,8 @@ test('KETTE-54 items 3 and 7: instance.json takes the block of every adapter, ke
   assert.match(withTicketing({ adapter: 'github', project: 'acme/web', trustedAuthors: ['bad name'] }).join(), /ticketing\.trustedAuthors must be a list of account names/);
   assert.match(withTicketing({ adapter: 'github', project: 'acme/web', subIssues: 'no' }).join(), /ticketing\.subIssues must be true or false/);
   assert.match(withTicketing({ adapter: 'github', project: 'acme/web', colour: 'red' }).join(), /unknown field ticketing\.colour/);
+  assert.deepEqual(withTicketing({ adapter: 'github', project: 'acme/web', minCli: '0.13.0' }), []);
+  assert.match(withTicketing({ adapter: 'github', project: 'acme/web', minCli: '99.0.0' }).join(), /ticketing needs kette 99\.0\.0 or newer, this is \d+\.\d+\.\d+; update it/, 'CR-COMPAT-1: a newer block names the version');
 });
 
 test('KETTE-54: a bundle from before the adapters still works as workload.zero only', () => {
@@ -34,6 +38,7 @@ test('KETTE-54: a bundle from before the adapters still works as workload.zero o
   assert.equal(tokenNameOf(old, 'workload-zero'), 'KETTE_TICKETING_WORKBASE_TOKEN');
   assert.deepEqual(usageLines(old), ['kette ticket connect workload-zero --board <project id>']);
   assert.deepEqual(settingsFor(old, 'workload-zero', { project: 'p-acme', host: undefined }), { adapter: 'workload-zero', project: 'p-acme' });
+  assert.deepEqual(unusedOptions(old, 'workload-zero', { project: 'p', host: 'h', trustedAuthors: ['a'] }), ['--host', '--trusted-authors'], 'CR-FLD-1: the fallback reads no option, so none is dropped silently');
 });
 
 test('KETTE-54 item 2: "already uses" compares the whole block, not only adapter and project; hand-set session and intakeModel do not count', () => {

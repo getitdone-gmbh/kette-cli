@@ -8,6 +8,7 @@ import { readState, updateState, validVersion } from '../manifest.mjs';
 import { writeAtomic } from '../files.mjs';
 import { withLock } from '../lock.mjs';
 import { ENV_PATTERN, PROVIDER_IDS } from '../wallet/config.mjs';
+import { VERSION, compareVersions } from '../version.mjs';
 
 // instance.json describes one Kette project: edition, repos, members and the shared settings its repos inherit
 export const INSTANCE_FILE = 'instance.json';
@@ -181,7 +182,10 @@ const AUTHOR = /^[\w.@:+-]{1,120}$/;
 
 // The ticketing block's shape; each system's own rules live in the library (KETTE-54), the workload.zero id stays one path segment (KETTE-28)
 function ticketingErrors(t) {
-  const errs = unknown(t, ['adapter', 'project', 'session', 'intakeModel', 'host', 'org', 'subIssues', 'deployment', 'decisionType', 'itemType', 'trustedAuthors'], 'ticketing.');
+  const errs = unknown(t, ['adapter', 'project', 'session', 'intakeModel', 'host', 'org', 'subIssues', 'deployment', 'decisionType', 'itemType', 'trustedAuthors', 'minCli'], 'ticketing.');
+  // The first kette that reads this block; an older one names the version instead of reading half of it (CR-COMPAT-1)
+  if ('minCli' in t && (typeof t.minCli !== 'string' || !/^\d+\.\d+\.\d+$/.test(t.minCli))) errs.push('ticketing.minCli must be a kette version, e.g. 0.13.0');
+  else if ('minCli' in t && compareVersions(VERSION, t.minCli) < 0) errs.push(`ticketing needs kette ${t.minCli} or newer, this is ${VERSION}; update it by running the installer again`);
   const workloadZero = WORKLOAD_ZERO_IDS.includes(t.adapter);
   if (typeof t.adapter !== 'string' || !ID_PATTERN.test(t.adapter)) errs.push('ticketing.adapter must be an adapter id (lowercase letters, digits, dashes)');
   if (workloadZero && (typeof t.project !== 'string' || !PROJECT_PATTERN.test(t.project))) errs.push('ticketing.project must be a board project id (letters, digits, dash, underscore, at most 64)');

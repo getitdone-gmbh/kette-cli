@@ -34,11 +34,12 @@ test('KETTE-54: connect writes the checked block and the token name of every sys
     const r = ok(await kit.step(box, ['ticket', 'connect', adapter, ...flags, '--yes'], { cwd: app }));
     const block = readInstanceFile(box, `k-${adapter}`).ticketing;
     assert.equal(block.adapter, adapter);
-    const fields = Object.fromEntries(Object.entries(block).filter(([k]) => k !== 'adapter'));
-    assert.deepEqual(block, lib.connectSettings(adapter, fields), `${adapter}: the block is what the library writes`);
+    const fields = Object.fromEntries(Object.entries(block).filter(([k]) => k !== 'adapter' && k !== 'minCli'));
+    assert.deepEqual(block, { ...lib.connectSettings(adapter, fields), minCli: '0.13.0' }, `${adapter}: the block is what the library writes, plus the CLI's minCli`);
     const token = lib.tokenNameFor(adapter);
     assert.ok(JSON.parse(fs.readFileSync(path.join(app, '.kette', 'wallet.json'), 'utf8')).secrets.some((s) => s.name === token), `${adapter} declares ${token}`);
-    assert.match(r.out, new RegExp(`Next: .*kette wallet add ${token}`));
+    // A host from the shared instance.json first needs the confirmation of a person on this machine (CR-HOST-1)
+    assert.match(r.out, flags.includes('--host') ? /is not confirmed on this machine yet, nothing is sent there until a person runs: kette ticket host trust/ : new RegExp(`Next: .*kette wallet add ${token}`));
     assert.equal(board.requests.length, before, `${adapter}: no request without a token`);
   }
 });
@@ -58,4 +59,18 @@ test('KETTE-54: Jira outside atlassian.net needs --deployment; datacenter and tr
   assert.deepEqual(block.trustedAuthors, ['svc-kette', 'lead']);
   const bad = ok(await kit.step(box, ['ticket', 'connect', 'github', '--board', 'not a repo', '--yes'], { cwd: await kit.enterpriseRepo(box, 'gh') }), 1);
   assert.match(bad.out, /ticketing\.project \(--board\)/);
+});
+
+test('CR-TOK-1: the library takes the token of a tracker only with its name, which this CLI always passes', { skip: skip || (lib && !lib.ticketingHost && 'the built kette-ticketing does not check the token name yet (kette-ticketing PR #12)') }, async () => {
+  const box = sandbox();
+  await kit.licensed(box);
+  const app = await kit.enterpriseRepo(box, 'tok');
+  ok(await kit.step(box, ['ticket', 'connect', 'linear', '--board', 'ENG', '--yes'], { cwd: app }));
+  const token = 'tok-linear-real-0003';
+  ok(await kit.step(box, ['wallet', 'set', 'KETTE_TICKETING_LINEAR_TOKEN', '--env', 'dev', '--stdin'], { cwd: app, input: `${token}\n` }));
+  const before = board.requests.length;
+  const r = await kit.step(box, ['ticket', 'list'], { cwd: app });
+  assert.doesNotMatch(r.out, /Update the kette CLI/, `the credential name reached the library: ${r.out}`);
+  assert.ok(board.requests.length > before, `the board API was asked, so the library opened the board with the Linear credential: ${r.out}`);
+  assert.equal(board.requests.slice(before).some((q) => q.token.includes('workbase')), false, 'no workload.zero token went out');
 });

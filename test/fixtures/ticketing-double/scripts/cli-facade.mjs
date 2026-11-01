@@ -39,8 +39,20 @@ export const modelEndpoint = () => null;
 export const decide = async (prompt) => (/\b(bau|change|make)\b/i.test(prompt) ? 'Kette intake (test double): chain change' : null);
 export const routingFor = (context) => ({ ...DEFAULT_ROUTING, stations: Object.fromEntries((context.stations?.length ? context.stations.map((s) => (typeof s === 'string' ? s : s.id)) : Object.keys(DEFAULT_ROUTING.stations)).map((s) => [s, { ...DEFAULT_ROUTING.stations[s], repos: context.repos ?? [] }])) });
 
-export function openProject({ context, apiBaseUrl = 'https://board.invalid/api', token, author, fetch = globalThis.fetch }) {
+// Like kette-ticketing PR #12: a configured host asks for confirmation, named as URL.host (CR-HOST-1)
+export function ticketingHost(context) {
+  const t = context.ticketing;
+  if (!t.host) return { host: adapterId(t.adapter) === 'github' ? 'api.github.com' : 'board.invalid', selfHosted: false, confirm: false };
+  return { host: new URL(/^https?:\/\//.test(t.host) ? t.host : `https://${t.host}`).host, selfHosted: true, confirm: true };
+}
+
+// Like kette-ticketing PR #12: another system than workload.zero opens only with its own token name (CR-TOK-1), a configured host only
+// with the host a person confirmed (CR-HOST-1)
+export function openProject({ context, apiBaseUrl = 'https://board.invalid/api', token, tokenName, confirmedHost, author, fetch = globalThis.fetch }) {
   const adapter = adapterId(context.ticketing.adapter);
+  if (adapter !== 'workload-zero' && tokenName !== tokenNameFor(adapter)) throw new DoubleRefusal(`a ${adapter} board needs its own token (${tokenNameFor(adapter)}), got ${tokenName ?? 'none'}; nothing was sent`);
+  const host = ticketingHost(context);
+  if (host.confirm && confirmedHost !== host.host) throw new DoubleRefusal(`${host.host} was not confirmed on this machine (got ${confirmedHost ?? 'none'}); nothing was sent`);
   const projectId = adapter === 'github' ? context.ticketing.project : assertProjectId(context.ticketing.project);
   const base = apiBaseUrl.replace(/\/+$/, '');
   const call = async (method, path, body) => {
