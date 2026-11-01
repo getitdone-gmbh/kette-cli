@@ -8,6 +8,8 @@ import { detectApps, detectWorkspace } from '../src/detect.mjs';
 
 const STACKS = ['nextjs-ts-tailwind', 'nestjs-prisma', 'nestjs-mongoose', 'python-fastapi', 'react-native-expo'];
 const DEFAULTS = { 'nextjs-ts-tailwind': 'apps/web', 'nestjs-prisma': 'apps/api', 'nestjs-mongoose': 'apps/api', 'python-fastapi': 'apps/api', 'react-native-expo': 'apps/mobile' };
+// Repo stacks have no app folder (KETTE-57)
+const REPO_STACKS = ['node-cli', 'ts-library', 'docs', 'static-site'];
 // Same pattern as apps in the schema of kette-engineering
 const APP_FOLDER = '^(\\.|(?!(.*/)?\\.\\.?(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?)$';
 let kh;
@@ -20,10 +22,13 @@ function bundle({ apps = true } = {}) {
   write(d, 'schema/profile.schema.json', JSON.stringify({
     type: 'object',
     additionalProperties: false,
-    required: ['version', 'project', 'stack', 'platform', 'patterns'],
+    required: ['version', 'project', 'stack', 'platform'],
+    // As in kette-engineering: patterns may be left out only when every stack is a repo stack
+    if: { type: 'object', properties: { stack: { type: 'array', items: { enum: REPO_STACKS } } } },
+    else: { type: 'object', required: ['patterns'] },
     properties: {
       $schema: { type: 'string' }, version: { const: 1 }, project: { type: 'object' },
-      stack: { type: 'array', items: { enum: STACKS } },
+      stack: { type: 'array', items: { enum: [...STACKS, ...REPO_STACKS] } },
       ...(apps ? { apps: { type: 'object', additionalProperties: false, properties: Object.fromEntries(STACKS.map((s) => [s, { type: 'string', minLength: 1, default: DEFAULTS[s], pattern: APP_FOLDER }])) } } : {}),
       platform: { type: 'object', required: ['id'], properties: { id: { enum: ['github-docker', 'gitlab'] } } }, patterns: { type: 'array' }, tier: { enum: ['community', 'enterprise'] },
     },
@@ -35,6 +40,10 @@ function bundle({ apps = true } = {}) {
     'nestjs-mongoose': { role: 'api', flags: ['node', 'ts', 'nest', 'mongo'] },
     'python-fastapi': { role: 'api', flags: ['python', 'fastapi', 'postgres'] },
     'react-native-expo': { role: 'mobile', flags: ['node', 'ts', 'expo'] },
+    'node-cli': { role: 'cli', app: false, flags: ['node'] },
+    'ts-library': { role: 'library', app: false, flags: ['node', 'ts'] },
+    docs: { role: 'docs', app: false, flags: [] },
+    'static-site': { role: 'site', app: false, flags: ['node'] },
   }));
   write(d, 'checks/render/index.json', JSON.stringify({ files: [
     { from: 'tsconfig.strict.json', to: 'tsconfig.base.json', when: 'ts' },
@@ -51,14 +60,16 @@ function bundle({ apps = true } = {}) {
       'nestjs-prisma': { manifests: ['[[dir/]]package.json', 'tools/migrate/package.json'], files: [{ from: 'nest/Dockerfile', to: '[[dir/]]Dockerfile' }, { from: 'nest/migrate-package.json', to: 'tools/migrate/package.json', when: 'workspace', note: 'template, add tools/migrate to the workspaces' }] },
       'python-fastapi': { files: [{ from: 'py/Dockerfile', to: '[[dir/]]Dockerfile' }] },
       'react-native-expo': { skip: 'mobile app, no container' },
+      ...Object.fromEntries(REPO_STACKS.map((stack) => [stack, { files: [] }])),
     },
-    files: [{ from: 'root/compose.yaml', to: 'compose.yaml' }, { from: 'root/ci.yml', to: '.github/workflows/ci.yml' }],
+    files: [{ from: 'root/compose.yaml', to: 'compose.yaml', when: 'web|api|spa' }, { from: 'root/ci.yml', to: '.github/workflows/ci.yml', when: 'web|api|spa' }, { from: 'repo/ci.yml', to: '.github/workflows/ci.yml', when: '!web,!api,!spa' }],
   }));
   write(d, `${tpl}/next/Dockerfile`, 'FROM node\n# kette:if workspace\n[[manifests]]\n# kette:end\nCOPY [[dir]] [[dir]]\n');
   write(d, `${tpl}/nest/Dockerfile`, 'FROM node\nCOPY [[dir]] [[dir]]\n');
   write(d, `${tpl}/nest/migrate-package.json`, '{ "name": "migrate", "private": true }\n');
   write(d, `${tpl}/py/Dockerfile`, 'FROM python\nCOPY [[dir]] [[dir]]\n');
   write(d, `${tpl}/root/compose.yaml`, 'services:\n# kette:if api\n  api: { dockerfile: [[api/]]Dockerfile }\n# kette:end\n# kette:if web\n  web: { dockerfile: [[web/]]Dockerfile }\n# kette:end\n');
+  write(d, `${tpl}/repo/ci.yml`, 'jobs:\n  check: npm run check --if-present\n');
   write(d, `${tpl}/root/ci.yml`, 'jobs:\n# kette:if node\n  node: npm ci\n# kette:end\n# kette:if python\n  python: uv sync\n# kette:end\n');
   return d;
 }
@@ -220,6 +231,34 @@ test('react-native-expo gets no container files and the reason is shown', async 
   const { root, out } = await init('react-native-expo');
   assert.deepEqual(files(root), ['.gitleaks.toml', 'eslint.config.mjs', 'package.json', 'tsconfig.base.json']);
   assert.match(out, /No templates for react-native-expo: mobile app, no container/);
+});
+
+test('KETTE-57: add of a repo stack writes the checks of its flags, no app folder, no Dockerfile or compose; its CI only with --scaffold (CR-DOC-1)', async () => {
+  install(bundle());
+  const cases = {
+    'node-cli': [{ 'package.json': JSON.stringify({ name: 'tool', bin: { tool: 'bin/tool.mjs' } }), 'bin/tool.mjs': '' }, ['.gitleaks.toml', 'bin/tool.mjs', 'package.json']],
+    'ts-library': [{ 'package.json': JSON.stringify({ name: 'lib', exports: './dist/index.js', devDependencies: { typescript: '5' } }) }, ['.gitleaks.toml', 'eslint.config.mjs', 'package.json', 'tsconfig.base.json']],
+    docs: [{ 'rules/a.md': '# A\n', 'rules/b.md': '# B\n', 'rules/c.md': '# C\n' }, ['.gitleaks.toml', 'rules/a.md', 'rules/b.md', 'rules/c.md']],
+  };
+  const cwd = process.cwd();
+  try {
+    for (const [stack, [given, want]] of Object.entries(cases)) {
+      const root = tmp();
+      for (const [f, c] of Object.entries(given)) write(root, f, c);
+      process.chdir(root);
+      const { out } = await capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker']));
+      assert.deepEqual(files(root), want, `${stack}: connection files and checks only`);
+      assert.deepEqual(profileOf(root).stack, [stack]);
+      assert.equal('apps' in profileOf(root), false, `${stack}: no apps entry`);
+      assert.equal('patterns' in profileOf(root), false, `${stack}: no patterns`);
+      assert.match(out, /Platform templates \(\.github\/workflows\/ci\.yml\) left out: .*kette add --scaffold/, `${stack}: the CI is named as a scaffold`);
+      await capture(() => main(['add', '--yes', '--no-plugins', '--scaffold']));
+      assert.deepEqual(files(root), [...want, '.github/workflows/ci.yml'].sort(), `${stack}: --scaffold adds the repo CI, never Dockerfile or compose`);
+      assert.match(read(root, '.github/workflows/ci.yml'), /npm run check --if-present/);
+    }
+  } finally {
+    process.chdir(cwd);
+  }
 });
 
 test('an older bundle without apps in the schema: no apps field, no templates, hint to update', async () => {

@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tmp, write } from './helpers.mjs';
 import { detectPlatform, detectStack } from '../src/detect.mjs';
+import { validate } from '../src/validate.mjs';
 import { describe as describePlan, apply } from '../src/plan.mjs';
 
 
@@ -53,6 +54,97 @@ test('react-spa needs Vite, React and an index.html, and no framework, native ap
     if (html) write(d, 'index.html', '<div id="root"></div>');
     assert.equal(detectStack(d).includes('react-spa'), want, name);
   }
+});
+
+test('KETTE-57: repo stacks for a repo without an app: node-cli, ts-library, static-site, docs', () => {
+  const repo = (files) => { const d = tmp(); for (const [f, c] of Object.entries(files)) write(d, f, typeof c === 'string' ? c : JSON.stringify(c)); return d; };
+  const pages = { 'docs/a.md': '# A\n', 'docs/b.md': '# B\n', 'rules/c.md': '# C\n' };
+  const cases = [
+    ['Node bin package', { 'package.json': { bin: { tool: 'bin/tool.mjs' } }, 'bin/tool.mjs': '' }, ['node-cli']],
+    ['TypeScript CLI with main but no types', { 'package.json': { bin: 'dist/cli.js', main: 'dist/cli.js', devDependencies: { typescript: '5' } } }, ['node-cli']],
+    ['TypeScript library with exports', { 'package.json': { exports: { '.': './dist/index.js' }, devDependencies: { typescript: '5' } } }, ['ts-library']],
+    ['TypeScript library with types, tsconfig and a bin facade', { 'package.json': { main: 'dist/index.js', types: 'dist/index.d.ts', bin: { x: 'scripts/x.mjs' } }, 'tsconfig.json': '{}' }, ['ts-library']],
+    ['JavaScript package with exports and no TypeScript', { 'package.json': { exports: './index.js' } }, []],
+    ['build script producing HTML pages', { 'package.json': { scripts: { build: 'node build.mjs' } }, 'src/index.html': '<h1>Hi</h1>' }, ['static-site']],
+    ['Astro site', { 'package.json': { dependencies: { astro: '5' } } }, ['static-site']],
+    ['build script without HTML', { 'package.json': { scripts: { build: 'node build.mjs' } } }, []],
+    ['mostly Markdown with a check script', { 'package.json': { scripts: { build: 'node scripts/build.mjs' } }, 'scripts/build.mjs': '', ...pages }, ['docs']],
+    ['Markdown without a manifest', pages, ['docs']],
+    ['README, CHANGELOG and two pages are no docs repo', { 'README.md': '# R\n', 'CHANGELOG.md': '# C\n', 'docs/a.md': '', 'docs/b.md': '' }, []],
+    ['more code than Markdown', { ...pages, 'src/a.py': '', 'src/b.py': '', 'src/c.py': '' }, []],
+    ['an app stack wins over every repo stack', { 'package.json': { bin: { tool: 'x' }, dependencies: { next: '16' } }, ...pages }, ['nextjs-ts-tailwind']],
+  ];
+  for (const [name, files, want] of cases) assert.deepEqual(detectStack(repo(files)), want, name);
+});
+
+// The 18 repos of the KETTE-57 review and the 4 of its re-check: apps kette has no stack for stop (no repo stack), repo stacks only without any app signal
+test('KETTE-57 review fixtures: an app without a kette stack never becomes a repo stack (CR-DET-1, CR-DET-2, CR-DET-3)', () => {
+  const many = (prefix, count, ext, content = 'x') => Object.fromEntries(Array.from({ length: count }, (_, i) => [`${prefix}${i + 1}.${ext}`, content]));
+  const fixtures = {
+    cov: [{ 'package.json': { main: 'index.js', scripts: { build: 'babel src -d lib' } }, 'coverage/index.html': '<p/>', 'src/a.js': 'x' }, []],
+    dj: [{ 'requirements.txt': 'django', 'manage.py': 'x', ...many('docs/p', 3, 'md'), ...many('src/proj/app/views/v', 5, 'py') }, []],
+    'exp-e2e': [{ 'package.json': { dependencies: { fastify: '4' } }, 'e2e/package.json': { types: 'x.d.ts', devDependencies: { typescript: '5' } } }, []],
+    'express-bin': [{ 'package.json': { name: 'api', bin: { api: 'bin/server.js' }, dependencies: { express: '4' } }, 'src/index.js': 'x' }, []],
+    'express-html': [{ 'package.json': { name: 'api', scripts: { build: 'tsc' }, dependencies: { express: '4' } }, 'public/index.html': '<p/>', 'src/server.ts': 'x' }, []],
+    gosvc: [{ 'go.mod': 'module x', 'cmd/server/main.go': 'x', ...many('docs/p', 5, 'md'), ...many('internal/api/handlers/h', 5, 'go') }, []],
+    jslib: [{ 'package.json': { exports: './index.js', scripts: { build: 'rollup -c' } }, 'index.js': 'x', 'demo/index.html': '<p/>' }, []],
+    kc: [{ 'README.md': '# R', 'CLAUDE.md': '@.kette/README.md', '.kette/README.md': '# Kette', '.github/PULL_REQUEST_TEMPLATE.md': '# PR', 'docs/adr/0000-template.md': '# ADR' }, []],
+    mixed: [{ 'pyproject.toml': 'fastapi', 'tools/cli/package.json': { bin: { x: 'a.js' } } }, ['python-fastapi']],
+    mono: [{ 'package.json': { private: true, workspaces: ['apps/*', 'packages/*'] }, 'apps/web/package.json': { dependencies: { next: '14' } }, 'packages/ui/package.json': { exports: './src/index.ts', devDependencies: { typescript: '5' } } }, ['nextjs-ts-tailwind']],
+    nextdocs: [{ 'package.json': { dependencies: { next: '14', react: '18' } }, 'app/page.tsx': 'x', ...many('docs/p', 30, 'md') }, ['nextjs-ts-tailwind']],
+    ng: [{ 'package.json': { scripts: { build: 'ng build' }, dependencies: { '@angular/core': '17' }, devDependencies: { typescript: '5' } }, 'src/index.html': '<p/>', 'src/app/app.component.ts': 'x' }, []],
+    nuxt: [{ 'package.json': { scripts: { build: 'nuxt build' }, dependencies: { nuxt: '3' } }, 'pages/index.vue': 'x' }, []],
+    rust: [{ 'Cargo.toml': '[package]', 'src/main.rs': 'x', ...many('docs/p', 3, 'md') }, []],
+    sk: [{ 'package.json': { scripts: { build: 'vite build' }, devDependencies: { '@sveltejs/kit': '2', typescript: '5' } }, 'src/app.html': '<p/>', 'src/routes/+page.svelte': 'x' }, []],
+    spring: [{ 'pom.xml': '<p/>', ...many('docs/adr/000', 4, 'md'), ...many('src/main/java/com/acme/svc/C', 8, 'java') }, []],
+    tscli: [{ 'package.json': { bin: { x: 'dist/cli.js' }, types: 'dist/index.d.ts', devDependencies: { typescript: '5' } }, 'src/cli.ts': 'x' }, ['node-cli']],
+    vue: [{ 'package.json': { scripts: { build: 'vite build' }, dependencies: { vue: '3' }, devDependencies: { vite: '5' } }, 'index.html': '<p/>', 'src/App.vue': 'x' }, []],
+    // Re-check: a dependency-free node:http server with Markdown pages is no docs repo; a static site keeps its preview server
+    'http-server': [{ 'package.json': { scripts: { start: 'node server.mjs' } }, 'server.mjs': "import http from 'node:http';", ...many('docs/p', 4, 'md') }, []],
+    'dev-server': [{ 'package.json': { scripts: { dev: 'node watch.mjs' } }, ...many('docs/p', 4, 'md') }, []],
+    'serve-cli': [{ 'package.json': { bin: { x: 'bin/x.mjs' }, scripts: { serve: 'node bin/x.mjs serve' } } }, []],
+    'site-with-preview': [{ 'package.json': { scripts: { build: 'node build.mjs', start: 'node server.mjs', dev: 'node build.mjs && node server.mjs' } }, 'src/index.html': '<p/>' }, ['static-site']],
+  };
+  assert.equal(Object.keys(fixtures).length, 22);
+  for (const [name, [files, want]] of Object.entries(fixtures)) {
+    const d = tmp();
+    for (const [f, c] of Object.entries(files)) write(d, f, typeof c === 'string' ? c : JSON.stringify(c));
+    assert.deepEqual(detectStack(d), want, name);
+  }
+});
+
+test('KETTE-57: docs counts code at any depth and skips dot folders, agent notes and the kette ADR template (CR-DET-2)', () => {
+  const d = tmp();
+  for (const f of ['docs/a.md', 'docs/b.md', 'docs/c.md', 'docs/d.md']) write(d, f, '# x');
+  for (const f of ['src/main/java/com/acme/a/A.java', 'src/main/java/com/acme/a/B.java', 'src/main/java/com/acme/a/C.java', 'src/main/java/com/acme/a/D.java']) write(d, f, 'x');
+  assert.deepEqual(detectStack(d), [], 'four deep Java files weigh as much as four pages');
+  const notes = tmp();
+  for (const f of ['CLAUDE.md', 'AGENTS.md', 'docs/adr/0000-template.md', '.claude/agents/a.md', '.github/ISSUE_TEMPLATE/b.md', 'docs/guide.md', 'docs/faq.md']) write(notes, f, '# x');
+  assert.deepEqual(detectStack(notes), [], 'two pages of its own are too few');
+  write(notes, 'docs/setup.md', '# x');
+  assert.deepEqual(detectStack(notes), ['docs']);
+});
+
+test('KETTE-57: repo stacks never become app folders', async () => {
+  const { detectAppFolders } = await import('../src/detect.mjs');
+  const d = tmp();
+  write(d, 'package.json', JSON.stringify({ bin: { tool: 'bin/tool.mjs' } }));
+  assert.deepEqual(detectAppFolders(d), { apps: {}, unusable: {} });
+});
+
+test('KETTE-57: the validator reads if, then and else, so patterns are optional only for profiles of repo stacks', () => {
+  const schema = {
+    type: 'object', required: ['stack'],
+    properties: { stack: { type: 'array', minItems: 1 }, patterns: { type: 'array', minItems: 1 } },
+    if: { type: 'object', properties: { stack: { type: 'array', items: { enum: ['node-cli', 'docs'] } } } },
+    else: { type: 'object', required: ['patterns'] },
+  };
+  assert.deepEqual(validate(schema, { stack: ['docs', 'node-cli'] }), []);
+  assert.deepEqual(validate(schema, { stack: ['nestjs-prisma'] }), ['$: required field patterns is missing']);
+  assert.deepEqual(validate(schema, { stack: ['docs', 'nestjs-prisma'] }), ['$: required field patterns is missing']);
+  assert.deepEqual(validate(schema, { stack: ['docs'], patterns: [] }), ['$.patterns: needs at least 1 entry']);
+  assert.deepEqual(validate({ if: { const: 1 }, then: { const: 1 } }, 2), [], 'without else a failed if adds nothing');
+  assert.deepEqual(validate(schema, 'x'), ['$: must be an object'], 'one type error, not one per branch (CR-VAL-1)');
 });
 
 test('erkennt Plattformen an CI- und IaC-Dateien', () => {

@@ -4,6 +4,8 @@ export function validate(schema, value, path = '$') {
   const errors = [];
   const at = (p, msg) => errors.push(`${p}: ${msg}`);
   if ('const' in schema && value !== schema.const) at(path, `must be ${JSON.stringify(schema.const)}`);
+  // if decides by its own errors, which are never reported; then or else adds its errors at the same path
+  if (schema.if) errors.push(...validate((validate(schema.if, value, path).length ? schema.else : schema.then) || {}, value, path));
   if (schema.enum && !schema.enum.includes(value)) at(path, `unknown value ${JSON.stringify(value)}, allowed: ${schema.enum.join(', ')}`);
   if (schema.type === 'string') {
     if (typeof value !== 'string') at(path, 'must be a string');
@@ -33,5 +35,6 @@ export function validate(schema, value, path = '$') {
       }
     }
   }
-  return errors;
+  // if, then and else can report the same type error as the schema itself
+  return [...new Set(errors)];
 }

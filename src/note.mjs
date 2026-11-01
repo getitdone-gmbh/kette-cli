@@ -85,7 +85,7 @@ const enterpriseFlow = ({ gates, batch }) => `## Flow for every change
 Apply small fixes (a typo, one line) directly and check them with step 4. Everything else runs like this, each role as its own subagent:
 
 1. Requirements: \`design-system-agents:requirements-engineer\` writes testable requirements with IDs.
-2. Architecture: \`design-system-agents:software-architect\` picks the pattern (skill \`architecture-patterns\`), cuts modules and interfaces and records hard-to-reverse decisions as ADRs in \`docs/adr/\`.
+2. Architecture: \`design-system-agents:software-architect\` picks the pattern (skill \`architecture-patterns\`, not for repo stacks), cuts modules and interfaces and records hard-to-reverse decisions as ADRs in \`docs/adr/\`.
 3. Implementation: \`design-system-agents:fullstack-developer\` builds in small, tested steps following \`engineering-rules\` and \`platform-profile\`.
 ${gates}
 5. Findings go back to the role that caused them (skill \`evidence-and-defect-routing\`), then the gate checks again. A change is done only when all gates pass.
@@ -104,7 +104,7 @@ Create infrastructure only as code and check it with plan or what-if. A human ru
 export const CORE_TOPICS = ['readability', 'structure', 'errors', 'tests', 'security', 'dependencies', 'logging-operations', 'changes', 'comments'];
 
 const communityFlow = ({ step4 }) => `## Flow for every change
-1. Before building: pick the architecture pattern (skill \`architecture-patterns\`, under \`patterns\` in the profile) and record hard-to-reverse decisions as ADRs in \`docs/adr/\` (template \`docs/adr/0000-template.md\`, in older projects \`docs/adr/0000-vorlage.md\`).
+1. Before building: pick the architecture pattern (skill \`architecture-patterns\`, under \`patterns\` in the profile, not for repo stacks) and record hard-to-reverse decisions as ADRs in \`docs/adr/\` (template \`docs/adr/0000-template.md\`, in older projects \`docs/adr/0000-vorlage.md\`).
 2. While building: load the skill \`engineering-rules\` and follow it (${CORE_TOPICS.join(', ')}).
 3. After implementing: have the subagent \`kette-engineering-core:kette-check\` check the diff against the core rules and the chosen pattern, fix every finding and have it check again. For UI changes also check against the skills \`ui-laws\`, \`interaction-principles\` and \`a11y-standards\`.
 ${step4}

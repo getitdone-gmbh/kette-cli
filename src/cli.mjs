@@ -38,6 +38,10 @@ const STACKS = [
   { value: 'python-fastapi', label: 'Python + FastAPI' },
   { value: 'react-native-expo', label: 'React Native + Expo (mobile)' },
   { value: 'react-spa', label: 'React + Vite (single page app)' },
+  { value: 'node-cli', label: 'Node CLI (no app, npm package with bin)' },
+  { value: 'ts-library', label: 'TypeScript library (no app, package other code imports)' },
+  { value: 'docs', label: 'Docs and rules (no app, mostly Markdown)' },
+  { value: 'static-site', label: 'Static site (no app, HTML built by a script or generator)' },
 ];
 const PLATFORMS = [
   { value: 'github-docker', label: 'GitHub + Docker on your own server' },
@@ -199,7 +203,11 @@ function loadSchema(bundleDir) {
 // Stacks without --stack and detection: the default for a new or empty repo, the profile's own, otherwise none, never a guess (KETTE-53)
 const fallbackStack = (root, isNew) => (isNew || emptyRepo(root) ? DEFAULT_STACK : existingProfile(root)?.stack || []);
 
-const NO_STACK = `No app stack detected in this repo (no Next.js, NestJS, FastAPI, Expo or Vite app) and kette does not guess one. Name it with --stack <id> (${STACKS.map((s) => s.value).join(', ')}).`;
+const STACK_IDS = () => STACKS.map((s) => s.value).join(', ');
+// unknown: stacks detected but missing from the installed rulebook, so the message does not claim nothing was found (CR-CLI-2)
+const noStack = (unknown = []) => (unknown.length
+  ? `Detected ${unknown.join(', ')}, but the installed rulebook does not know ${unknown.length > 1 ? 'them' : 'it'} yet. Load the current one with: ${cmd('kette update')}, or name a stack with --stack <id> (${STACK_IDS()}).`
+  : `No stack detected in this repo (no Next.js, NestJS, FastAPI, Expo or Vite app, no CLI, TypeScript library, static site or Markdown docs; an app kette has no stack for, such as Express, Vue or Spring, stops here too) and kette does not guess one. Name it with --stack <id> (${STACK_IDS()}).`);
 
 // The stack question; without anything to preselect the person has to choose, an empty answer asks again
 async function askStack(preselected) {
@@ -211,7 +219,16 @@ async function askStack(preselected) {
   }
 }
 
-async function buildProfile(root, opts, detected, tier, instance, isNew) {
+// Repo stacks of the installed rulebook ("app": false in its stack index); a rulebook from before them has none
+function repoStacksOf(bundleDir) {
+  const f = path.join(bundleDir, 'profiles', 'stack', 'index.json');
+  if (!fs.existsSync(f)) return new Set();
+  const index = JSON.parse(fs.readFileSync(f, 'utf8'));
+  return new Set(Object.keys(index).filter((id) => index[id]?.app === false));
+}
+
+// repoStacks: a profile of only repo stacks gets no patterns unless --patterns names them (KETTE-57)
+async function buildProfile(root, opts, detected, tier, instance, isNew, repoStacks = new Set()) {
   // The repo name from its origin, so a worktree or a clone into another folder keeps it (KETTE-53)
   const name = opts.name || originName(root) || path.basename(path.resolve(root));
   const fallback = fallbackStack(root, isNew);
@@ -224,17 +241,19 @@ async function buildProfile(root, opts, detected, tier, instance, isNew) {
       const def = String((PLATFORMS.findIndex((x) => x.value === platform) + 1) || 1);
       [platform] = await choose('Where is it built and run?', PLATFORMS, def);
     }
-    if (!patterns) patterns = await choose('Which architecture patterns? (if unsure, 1)', PATTERNS, '1');
   }
-  if (!stack.length && !fallback.length) throw new ExitError(NO_STACK);
+  const chosen = stack.length ? stack : fallback;
+  const onlyRepoStacks = chosen.length > 0 && chosen.every((s) => repoStacks.has(s));
+  if (!opts.yes && !patterns && !onlyRepoStacks) patterns = await choose('Which architecture patterns? (if unsure, 1)', PATTERNS, '1');
+  if (!stack.length && !fallback.length) throw new ExitError(noStack(detected.unknown));
   return {
     $schema: 'https://kette.itdone.de/schema/profile.schema.json',
     version: 1,
     project: { name },
     ...(instance ? { instance: instance.name } : {}),
-    stack: stack.length ? stack : fallback,
+    stack: chosen,
     platform: { id: platform || DEFAULT_PLATFORM },
-    patterns: patterns?.length ? patterns : ['modular-monolith'],
+    ...(onlyRepoStacks && !patterns?.length ? {} : { patterns: patterns?.length ? patterns : ['modular-monolith'] }),
     tier,
   };
 }
@@ -289,7 +308,9 @@ function withApps(profile, schema, detected, unusable = {}) {
   const accepted = (s, dir) => dir && (!known[s].pattern || new RegExp(known[s].pattern).test(dir));
   const apps = Object.fromEntries((profile.stack || []).filter((s) => known[s] && !(s in unusable)).map((s) => [s, detected[s] || known[s].default]).filter(([s, dir]) => accepted(s, dir)));
   const merged = { ...apps, ...profile.apps };
-  return 'apps' in profile ? { ...profile, apps: merged } : insertAfter(profile, 'stack', 'apps', merged);
+  if ('apps' in profile) return { ...profile, apps: merged };
+  // Repo stacks (node-cli, docs, ...) have no app folder, so their profile gets no empty apps field
+  return Object.keys(merged).length ? insertAfter(profile, 'stack', 'apps', merged) : profile;
 }
 
 // New projects get the English ADR template; a project with the German one from CLI 0.5 gets no second one; older bundles only ship the German file
@@ -405,7 +426,9 @@ const pipelineNote = (root, files) => {
   return own.length ? ` and its own pipeline (${own.join(', ')})` : '';
 };
 
-const scaffoldHint = (root, files) => `Platform templates (Dockerfile, compose, CI, deploy workflow) left out: this repo already has files${pipelineNote(root, files)}. Add them with: ${cmd('kette add --scaffold')}`;
+// A repo stack only gets its CI, so the hint names what is left out instead of the whole app set
+const leftOut = (files) => (files.some((f) => /(^|\/)Dockerfile$|^compose\.ya?ml$/.test(f.path)) ? 'Dockerfile, compose, CI, deploy workflow' : files.map((f) => f.path).join(', '));
+const scaffoldHint = (root, files) => `Platform templates (${leftOut(files)}) left out: this repo already has files${pipelineNote(root, files)}. Add them with: ${cmd('kette add --scaffold')}`;
 
 const unusableFolder = (dir, stack) => `Folder "${dir}" (${stack}) can't be used as an app folder. Rename it (letters, digits, . _ - only) or point apps to another folder in .kette/profile.json.`;
 
@@ -434,7 +457,8 @@ function detectFor(root, isNew, schema) {
   const found = detectAppFolders(root);
   const stacks = detectStack(root);
   const folders = { apps: pick(found.apps), unusable: pick(found.unusable) };
-  return { folders, detected: { stack: stacks.filter(keep), platform: detectPlatform(root), apps: folders.apps }, unknown: stacks.filter((s) => !keep(s)) };
+  const unknown = stacks.filter((s) => !keep(s));
+  return { folders, detected: { stack: stacks.filter(keep), platform: detectPlatform(root), apps: folders.apps, unknown }, unknown };
 }
 
 const notFound = (name) => `Kette project ${printable(name)} not found on this machine. Create it with ${cmd(`kette project create ${printable(name)}`)} or clone it with ${cmd(`kette project create ${printable(name)} --from <git-url>`)}`;
@@ -501,7 +525,7 @@ async function setup(root, opts, isNew) {
   if (tier === ENTERPRISE) for (const [stack, dir] of Object.entries(folders.unusable)) console.log(`${status('warn', 'WARN')} ${unusableFolder(dir, stack)}`);
   // apps says where the templates go, so only Enterprise writes it; a Community project gets it from detection when it is upgraded
   const appsSchema = tier === ENTERPRISE ? schema : {};
-  const profile = withApps(await buildProfile(root, opts, detected, tier, instance, isNew), appsSchema, detected.apps, folders.unusable);
+  const profile = withApps(await buildProfile(root, opts, detected, tier, instance, isNew, repoStacksOf(bundleDir)), appsSchema, detected.apps, folders.unusable);
   const errors = validate(schema, forSchema(schema, profile));
   if (errors.length) throw new Error(`Invalid profile: ${errors.join('; ')}`);
 

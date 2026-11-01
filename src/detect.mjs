@@ -42,9 +42,80 @@ const manifests = (dir) => [
   ...listFiles(dir, 2).filter((f) => /(pyproject\.toml|requirements\.txt)$/.test(f)),
 ];
 
+// Signs of an app kette has no app stack for (Express, Vue, Angular, SvelteKit, Spring, Django, Go, Rust, ...): such a repo gets no repo stack, it stops and asks for --stack (KETTE-57, CR-DET-1)
+const APP_DEPS = ['express', 'fastify', 'koa', 'hono', '@hapi/hapi', '@nestjs/core', 'next', 'nuxt', 'vue', 'svelte', '@sveltejs/kit', '@angular/core', 'solid-js', 'preact', 'react-native', 'expo', 'electron', '@react-router/dev', '@tanstack/react-start'];
+const OTHER_MANIFESTS = ['pom.xml', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', 'go.mod', 'Cargo.toml', 'manage.py', 'Gemfile', 'composer.json', 'pyproject.toml', 'requirements.txt', 'setup.py', 'Pipfile', 'mix.exs', 'Package.swift', 'pubspec.yaml'];
+const OTHER_PROJECT = /\.(csproj|fsproj|sln)$/;
+
+function hasAppDeps(file) {
+  if (path.basename(file) !== 'package.json') return false;
+  const p = readJson(file) || {};
+  const deps = { ...p.dependencies, ...p.devDependencies };
+  // react-dom as a runtime dependency renders an app; a component library keeps it in dev or peer dependencies
+  return APP_DEPS.some((d) => deps[d]) || Object.keys(deps).some((d) => d.startsWith('@remix-run/')) || Boolean(p.dependencies?.['react-dom']);
+}
+
+// A start, dev or serve script runs something; a static site keeps such a script to preview its pages, so only there it is no app signal
+const SERVER_SCRIPTS = ['start', 'dev', 'serve'];
+const runsServer = (file) => path.basename(file) === 'package.json' && SERVER_SCRIPTS.some((s) => (readJson(file) || {}).scripts?.[s]) && repoStackOf(file) !== 'static-site';
+
+const hasAppSignal = (dir, found) => found.some((f) => hasAppDeps(f) || runsServer(f)) || listFiles(dir, 3).some((f) => OTHER_MANIFESTS.includes(path.basename(f)) || OTHER_PROJECT.test(f));
+
+// Static site generators; without one a build script next to HTML pages at the root or in src/ counts as a static site
+const SITE_GENERATORS = ['astro', '@11ty/eleventy'];
+const hasPages = (dir) => listFiles(dir, 0).some((f) => f.endsWith('.html')) || listFiles(path.join(dir, 'src'), 2).some((f) => f.endsWith('.html'));
+const isTypeScript = (file, p, deps) => Boolean(p.types || p.typings || deps.typescript) || exists(path.dirname(file), 'tsconfig.json');
+const binTargets = (p) => (typeof p.bin === 'string' ? [p.bin] : Object.values(p.bin || {})).map((f) => path.posix.normalize(String(f)));
+// The entry other code imports: exports, or main when it is not one of the bin scripts
+const importEntry = (p) => Boolean(p.exports) || (Boolean(p.main) && !binTargets(p).includes(path.posix.normalize(String(p.main))));
+
+// Repo stack of one package.json (a repository that is not an app): a TypeScript package with a public API, a CLI with bin, a static site
+function repoStackOf(file) {
+  if (path.basename(file) !== 'package.json') return null;
+  const p = readJson(file) || {};
+  const deps = { ...p.dependencies, ...p.devDependencies };
+  // A library may carry a small bin facade beside its own import entry; a bin with types only is a CLI (CR-DET-3)
+  if (importEntry(p) && isTypeScript(file, p, deps)) return 'ts-library';
+  if (p.bin) return 'node-cli';
+  if (p.exports || p.main || p.types) return null;
+  if (SITE_GENERATORS.some((d) => deps[d]) || (p.scripts?.build && hasPages(path.dirname(file)))) return 'static-site';
+  return null;
+}
+
+// README, CHANGELOG and the like at the root, agent notes and the files kette writes come with many repos and make no docs repo
+const ROOT_TEXT = /^(README|CHANGELOG|LICENSE|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY)(\.|$)/i;
+const AGENT_NOTES = ['CLAUDE.md', 'AGENTS.md'];
+const KETTE_ADR_TEMPLATE = /^docs\/adr\/0000-/;
+const CODE = /\.(m?[jt]sx?|c[jt]s|py|go|rs|java|kt|kts|scala|swift|rb|php|cs|fs|vue|svelte|sh|html|css)$/i;
+// Folders of dependencies, build output and tools; dot folders (.github, .kette, .claude) are skipped as a whole
+const NOT_SOURCE = ['node_modules', 'vendor', 'dist', 'build', 'target', 'coverage', 'out'];
+// A few pages of their own, so a starter repo with a README stays empty
+const MIN_DOCS_PAGES = 3;
+
+// Every file of the repo without dependencies, build output and dot folders, at any depth
+const sourceFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+  if (e.name.startsWith('.') || NOT_SOURCE.includes(e.name)) return [];
+  const p = path.join(dir, e.name);
+  return e.isDirectory() ? sourceFiles(p) : [p];
+});
+
+// Mostly Markdown: at least a few pages of its own and more Markdown pages than code files
+function isDocs(dir) {
+  const files = sourceFiles(dir).map((f) => path.relative(dir, f).split(path.sep).join('/'));
+  const pages = files.filter((f) => /\.mdx?$/i.test(f) && !(!f.includes('/') && ROOT_TEXT.test(f)) && !AGENT_NOTES.includes(path.posix.basename(f)) && !KETTE_ADR_TEMPLATE.test(f));
+  return pages.length >= MIN_DOCS_PAGES && pages.length > files.filter((f) => CODE.test(f)).length;
+}
+
 // Detects stacks from the package files in the repo and in apps/*, packages/*
+// Repo stacks (node-cli, ts-library, static-site, docs) only without any sign of an app, so an app kette has no stack for stops instead of losing its rules
 export function detectStack(dir) {
-  return [...new Set(manifests(dir).flatMap(stacksOf))];
+  const found = manifests(dir);
+  const apps = [...new Set(found.flatMap(stacksOf))];
+  if (apps.length) return apps;
+  if (!fs.existsSync(dir) || hasAppSignal(dir, found)) return [];
+  const repo = [...new Set(found.map(repoStackOf).filter(Boolean))];
+  if (repo.length) return repo;
+  return isDocs(dir) ? ['docs'] : [];
 }
 
 // Same rule as apps in the profile schema: plain folder names joined by /, so a detected folder always makes a valid profile
