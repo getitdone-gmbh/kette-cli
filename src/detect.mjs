@@ -55,7 +55,11 @@ function hasAppDeps(file) {
   return APP_DEPS.some((d) => deps[d]) || Object.keys(deps).some((d) => d.startsWith('@remix-run/')) || Boolean(p.dependencies?.['react-dom']);
 }
 
-const hasAppSignal = (dir, found) => found.some(hasAppDeps) || listFiles(dir, 3).some((f) => OTHER_MANIFESTS.includes(path.basename(f)) || OTHER_PROJECT.test(f));
+// A start, dev or serve script runs something; a static site keeps such a script to preview its pages, so only there it is no app signal
+const SERVER_SCRIPTS = ['start', 'dev', 'serve'];
+const runsServer = (file) => path.basename(file) === 'package.json' && SERVER_SCRIPTS.some((s) => (readJson(file) || {}).scripts?.[s]) && repoStackOf(file) !== 'static-site';
+
+const hasAppSignal = (dir, found) => found.some((f) => hasAppDeps(f) || runsServer(f)) || listFiles(dir, 3).some((f) => OTHER_MANIFESTS.includes(path.basename(f)) || OTHER_PROJECT.test(f));
 
 // Static site generators; without one a build script next to HTML pages at the root or in src/ counts as a static site
 const SITE_GENERATORS = ['astro', '@11ty/eleventy'];

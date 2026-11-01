@@ -77,7 +77,7 @@ test('KETTE-57: repo stacks for a repo without an app: node-cli, ts-library, sta
   for (const [name, files, want] of cases) assert.deepEqual(detectStack(repo(files)), want, name);
 });
 
-// The 18 repos of the KETTE-57 review: apps kette has no stack for stop (no repo stack), repo stacks only without any app signal
+// The 18 repos of the KETTE-57 review and the 4 of its re-check: apps kette has no stack for stop (no repo stack), repo stacks only without any app signal
 test('KETTE-57 review fixtures: an app without a kette stack never becomes a repo stack (CR-DET-1, CR-DET-2, CR-DET-3)', () => {
   const many = (prefix, count, ext, content = 'x') => Object.fromEntries(Array.from({ length: count }, (_, i) => [`${prefix}${i + 1}.${ext}`, content]));
   const fixtures = {
@@ -99,8 +99,13 @@ test('KETTE-57 review fixtures: an app without a kette stack never becomes a rep
     spring: [{ 'pom.xml': '<p/>', ...many('docs/adr/000', 4, 'md'), ...many('src/main/java/com/acme/svc/C', 8, 'java') }, []],
     tscli: [{ 'package.json': { bin: { x: 'dist/cli.js' }, types: 'dist/index.d.ts', devDependencies: { typescript: '5' } }, 'src/cli.ts': 'x' }, ['node-cli']],
     vue: [{ 'package.json': { scripts: { build: 'vite build' }, dependencies: { vue: '3' }, devDependencies: { vite: '5' } }, 'index.html': '<p/>', 'src/App.vue': 'x' }, []],
+    // Re-check: a dependency-free node:http server with Markdown pages is no docs repo; a static site keeps its preview server
+    'http-server': [{ 'package.json': { scripts: { start: 'node server.mjs' } }, 'server.mjs': "import http from 'node:http';", ...many('docs/p', 4, 'md') }, []],
+    'dev-server': [{ 'package.json': { scripts: { dev: 'node watch.mjs' } }, ...many('docs/p', 4, 'md') }, []],
+    'serve-cli': [{ 'package.json': { bin: { x: 'bin/x.mjs' }, scripts: { serve: 'node bin/x.mjs serve' } } }, []],
+    'site-with-preview': [{ 'package.json': { scripts: { build: 'node build.mjs', start: 'node server.mjs', dev: 'node build.mjs && node server.mjs' } }, 'src/index.html': '<p/>' }, ['static-site']],
   };
-  assert.equal(Object.keys(fixtures).length, 18);
+  assert.equal(Object.keys(fixtures).length, 22);
   for (const [name, [files, want]] of Object.entries(fixtures)) {
     const d = tmp();
     for (const [f, c] of Object.entries(files)) write(d, f, typeof c === 'string' ? c : JSON.stringify(c));
