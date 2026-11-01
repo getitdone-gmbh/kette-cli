@@ -36,14 +36,14 @@ test('Enterprise instance: connect writes only the ticketing block, then every c
   const app = await enterpriseRepo(box, 'acme', { stations: ['prototype', { id: 'app', definitionOfDone: 'Live on shop.acme.test, deploy run checked' }] });
   const wallet = path.join(app, '.kette', 'wallet.json');
 
-  const dry = ok(await step(box, ['ticket', 'connect', 'workload-zero', '--project', 'p-acme', '--dry-run'], { cwd: app }));
-  assert.match(dry.out, /Would change \(instance acme\):[\s\S]*instance\.json\s+ticketing: workload-zero p-acme[\s\S]*wallet\.json\s+declares KETTE_TICKETING_WORKBASE_TOKEN/);
+  const dry = ok(await step(box, ['ticket', 'connect', 'workload-zero', '--board', 'p-acme', '--dry-run'], { cwd: app }));
+  assert.match(dry.out, /Would change \(Kette project acme\):[\s\S]*instance\.json\s+ticketing: workload-zero p-acme[\s\S]*wallet\.json\s+declares KETTE_TICKETING_WORKBASE_TOKEN/);
   assert.deepEqual(dry.all, [], 'dry run changes nothing');
-  const refused = ok(await step(box, ['ticket', 'connect', 'workload-zero', '--project', 'p-acme'], { cwd: app }), 1);
+  const refused = ok(await step(box, ['ticket', 'connect', 'workload-zero', '--board', 'p-acme'], { cwd: app }), 1);
   assert.match(refused.out, /needs a yes: run it in a terminal or add --yes\. Nothing was written/);
   assert.deepEqual(refused.all, []);
 
-  const con = ok(await step(box, ['ticket', 'connect', 'workload-zero', '--project', 'p-acme', '--yes'], { cwd: app }));
+  const con = ok(await step(box, ['ticket', 'connect', 'workload-zero', '--board', 'p-acme', '--yes'], { cwd: app }));
   assert.deepEqual(con.all.filter((p) => !p.startsWith('home/.kette/locks')).sort(), ['home/.kette/instances/acme/instance.json', rel(box, app, '.kette/wallet.json')].sort());
   assert.deepEqual(readInstanceFile(box, 'acme').ticketing, { adapter: 'workload-zero', project: 'p-acme' });
   assert.ok(JSON.parse(fs.readFileSync(wallet, 'utf8')).secrets.some((s) => s.name === TOKEN));
@@ -112,11 +112,11 @@ test('a Community instance is refused for every ticket command and nothing is wr
   const box = sandbox();
   await licensed(box);
   const com = path.join(box.work, 'com');
-  ok(await step(box, ['instance', 'create', 'oss', '--edition', 'community']));
-  ok(await step(box, ['init', com, '--instance', 'oss', '--no-plugins', ...SETUP], { projects: [com] }));
-  for (const argv of [['list'], ['connect', 'workload-zero', '--project', 'p', '--yes'], ['new', 'x', '--by', 'a', '--source', 's', '--stations', 'app', '--yes'], ['hook', 'install'], ['check', 'KD-0001/app/x', '--yes']]) {
+  ok(await step(box, ['project', 'create', 'oss', '--edition', 'community']));
+  ok(await step(box, ['init', com, '--project', 'oss', '--no-plugins', ...SETUP], { projects: [com] }));
+  for (const argv of [['list'], ['connect', 'workload-zero', '--board', 'p', '--yes'], ['new', 'x', '--by', 'a', '--source', 's', '--stations', 'app', '--yes'], ['hook', 'install'], ['check', 'KD-0001/app/x', '--yes']]) {
     const r = ok(await step(box, ['ticket', ...argv], { cwd: com }), 1);
-    assert.match(r.out, /Ticketing is part of Kette Enterprise \(Die Kette\)\. Setup: https:\/\/kette\.itdone\.de\/einrichten#ticketing Instance oss is Community/);
+    assert.match(r.out, /Ticketing is part of Kette Enterprise \(Die Kette\)\. Setup: https:\/\/kette\.itdone\.de\/einrichten#ticketing Kette project oss is Community/);
     assert.deepEqual(r.all, [], `kette ticket ${argv[0]} wrote nothing`);
   }
   assert.equal(readInstanceFile(box, 'oss').ticketing, undefined);
@@ -132,7 +132,7 @@ test('two instances with different boards on one machine: each repo reaches only
   const b = await connected(box, 'beta', 'p-beta', tb);
   noSecret(box, ok(await step(box, ['ticket', 'new', 'Alpha only', '--by', 'lead@alpha.test', '--source', 'chat:s', '--stations', 'app:alpha-app', '--yes'], { cwd: a })), [ta, tb]);
   const listB = noSecret(box, ok(await step(box, ['ticket', 'list'], { cwd: b })), [ta, tb]);
-  assert.match(listB.out, /No decisions on the board of instance beta yet/);
+  assert.match(listB.out, /No decisions on the board of Kette project beta yet/);
   assert.match(noSecret(box, ok(await step(box, ['ticket', 'list'], { cwd: a })), [ta, tb]).out, /KD-0001 .*Alpha only/);
   // Only the member of beta may decide in beta, the station targets are beta's repos
   const cross = ok(await step(box, ['ticket', 'new', 'x', '--by', 'lead@alpha.test', '--source', 'chat:s', '--stations', 'app:alpha-app', '--yes'], { cwd: b }), 1);
@@ -152,9 +152,9 @@ test('a repo without instance and a folder without project get a clear message a
   const solo = path.join(box.work, 'solo');
   ok(await step(box, ['init', solo, '--no-plugins', ...SETUP], { projects: [solo] }));
   const r = ok(await step(box, ['ticket', 'list'], { cwd: solo }), 1);
-  assert.match(r.out, /Ticketing is set per Kette instance and this repo has none\. Join one with kette instance use <name>/);
+  assert.match(r.out, /Ticketing is set per Kette project and this repo has none\. Join one with kette project use <name>/);
   assert.deepEqual(r.all, []);
-  const none = ok(await step(box, ['ticket', 'connect', '--project', 'p', '--yes']), 1);
+  const none = ok(await step(box, ['ticket', 'connect', '--board', 'p', '--yes']), 1);
   assert.match(none.out, /No kette project in this folder/);
   assert.deepEqual(none.all, []);
 });
@@ -163,10 +163,10 @@ test('missing board credential: a clear next step, no value asked for or printed
   const box = sandbox();
   await licensed(box);
   const app = await enterpriseRepo(box, 'acme', { walletProject: 'wallet-empty' });
-  const con = ok(await step(box, ['ticket', 'connect', 'workload-zero', '--project', 'p-acme', '--yes'], { cwd: app }));
+  const con = ok(await step(box, ['ticket', 'connect', 'workload-zero', '--board', 'p-acme', '--yes'], { cwd: app }));
   assert.match(con.out, /Next: KETTE_TICKETING_WORKBASE_TOKEN has no value in dev\. Declare the credential/);
   const list = ok(await step(box, ['ticket', 'list'], { cwd: app }), 1);
-  assert.match(list.out, /No access to the ticket board of instance acme\. KETTE_TICKETING_WORKBASE_TOKEN has no value in dev\. .*kette wallet set KETTE_TICKETING_WORKBASE_TOKEN --env dev/);
+  assert.match(list.out, /No access to the ticket board of Kette project acme\. KETTE_TICKETING_WORKBASE_TOKEN has no value in dev\. .*kette wallet set KETTE_TICKETING_WORKBASE_TOKEN --env dev/);
   assert.deepEqual(list.all, []);
   fs.rmSync(path.join(app, '.kette', 'wallet.json'));
   assert.match(ok(await step(box, ['ticket', 'list'], { cwd: app }), 1).out, /This project has no secret wallet yet, create it with kette wallet init/);
@@ -209,12 +209,12 @@ test('hook install and remove touch only the project settings and only kette\'s 
 test('setup offers to connect a board in a terminal after the wallet step, a run without terminal never asks', { skip: posixOnly || needsBoard.skip }, async () => {
   const box = sandbox();
   await licensed(box);
-  ok(await step(box, ['instance', 'create', 'acme', '--edition', 'enterprise']));
+  ok(await step(box, ['project', 'create', 'acme', '--edition', 'enterprise']));
   const quiet = path.join(box.work, 'quiet');
-  ok(await step(box, ['init', quiet, '--instance', 'acme', '--no-plugins', ...SETUP], { projects: [quiet] }));
+  ok(await step(box, ['init', quiet, '--project', 'acme', '--no-plugins', ...SETUP], { projects: [quiet] }));
   assert.equal(readInstanceFile(box, 'acme').ticketing, undefined, 'no question, no board without a terminal');
   box.env = { ...box.env, ...env() };
-  const r = await interactive(box, ['init', 'asked', '--instance', 'acme', '--no-plugins', '--stack', 'nestjs-prisma', '--platform', 'github-docker', '--patterns', 'layered'], [
+  const r = await interactive(box, ['init', 'asked', '--project', 'acme', '--no-plugins', '--stack', 'nestjs-prisma', '--platform', 'github-docker', '--patterns', 'layered'], [
     ['Create these files?', 'y'],
     ['Set up the secret wallet', 'n'],
     ['Track decisions as tickets', 'y'],
@@ -223,5 +223,5 @@ test('setup offers to connect a board in a terminal after the wallet step, a run
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.outside, []);
   assert.deepEqual(readInstanceFile(box, 'acme').ticketing, { adapter: 'workload-zero', project: 'p-setup' });
-  assert.match(r.out, /Instance acme uses workload-zero p-setup for decisions/);
+  assert.match(r.out, /Kette project acme uses workload-zero p-setup for decisions/);
 });

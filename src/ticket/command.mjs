@@ -9,8 +9,8 @@ import { loadTicketing, ticketingDir } from './module.mjs';
 import { TOKEN_NAME, apiUrl, boardToken, contextOf, requireBoard, ticketProject } from './project.mjs';
 import { hook } from './hook.mjs';
 
-export const TICKET_HELP = `kette ticket connect [workload-zero] --project <id>
-                        Ticketing (Enterprise): connect the board of this repo's instance; decisions become tickets
+export const TICKET_HELP = `kette ticket connect [workload-zero] --board <id>
+                        Ticketing (Enterprise): connect the board of this repo's Kette project; decisions become tickets
   kette ticket new "<words>" --by <member> --source <ref> --stations a,b
                         Record a decision in the words of who decided (--paraphrase, --statement, --rationale, --label,
                         an accepted session proposal: --proposed-by <session> --acceptance "<words>")
@@ -21,7 +21,7 @@ export const TICKET_HELP = `kette ticket connect [workload-zero] --project <id>
                         Follow-through: per station its definition of done and what is still open (reads only)
   kette ticket hook install | status | remove | trust
                         The intake hook in this project's .claude/settings.json (never the user settings); trust confirms
-                        the intake model host of the instance on this machine`;
+                        the intake model host of the Kette project on this machine`;
 
 const USAGE = `Usage: ${TICKET_HELP.split('\n').filter((l) => l.trim().startsWith('kette')).map((l) => l.trim()).join(' | ')}`;
 const say = (kind, msg) => console.log(`${status(kind, kind === 'ok' ? 'OK  ' : kind.toUpperCase())} ${msg}`);
@@ -124,7 +124,7 @@ const newLock = (project) => `ticket-new-${project.instance.name}`;
 // not on the board yet (its last write may still be on the way) is named too, so a list right after the kill never stays silent (K16-02)
 function incompleteLines(project, half) {
   const lines = half.map((h) => `${status('warn', 'WARN')} ${printable(h.id)} is incomplete (missing ${h.missing.map(printable).join(', ')}): ${cmd(`kette ticket repair ${h.id}`)}`);
-  if (!half.length && interrupted(newLock(project))) lines.push(`${status('warn', 'WARN')} The last ${cmd('kette ticket new')} of instance ${printable(project.instance.name)} on this machine was interrupted; its decision may still reach the board. Run ${cmd('kette ticket list')} again in a moment: it then shows the decision as incomplete with ${cmd('kette ticket repair <KD>')}.`);
+  if (!half.length && interrupted(newLock(project))) lines.push(`${status('warn', 'WARN')} The last ${cmd('kette ticket new')} of Kette project ${printable(project.instance.name)} on this machine was interrupted; its decision may still reach the board. Run ${cmd('kette ticket list')} again in a moment: it then shows the decision as incomplete with ${cmd('kette ticket repair <KD>')}.`);
   return lines;
 }
 
@@ -146,7 +146,7 @@ const isMember = (project, id) => project.instance.members.some((m) => m.id.toLo
 
 async function newDecision(project, opts, args) {
   const words = need(args.join(' ').trim(), 'kette ticket new "<words>" --by <member> --source <ref> --stations a,b');
-  if (!opts.by) throw new ExitError(`--by names who decided, a member of instance ${project.instance.name} (${project.instance.members.map((m) => printable(m.id)).join(', ') || `none yet: ${cmd('kette instance members add <id> --role owner')}`})`);
+  if (!opts.by) throw new ExitError(`--by names who decided, a member of Kette project ${project.instance.name} (${project.instance.members.map((m) => printable(m.id)).join(', ') || `none yet: ${cmd('kette project members add <id> --role owner')}`})`);
   const stations = list(opts.stations);
   if (!stations.length) throw new ExitError('--stations names the stations the decision reaches, e.g. --stations prototype,app:<repo>');
   const board = await open(project, opts);
@@ -180,7 +180,7 @@ async function extendDecision(project, opts, args) {
 
 async function route(project, opts, args) {
   const id = decisionId(args, 'kette ticket route <KD>');
-  await write(await open(project, opts), opts, 'route', { id, actor: actorOf(opts) }, (changed) => (changed.length ? `Owners and builders from the routing of instance ${project.instance.name}:\n${changed.map(itemLine).join('\n')}` : `Every item of ${id} already has the owner and builder the routing names.`));
+  await write(await open(project, opts), opts, 'route', { id, actor: actorOf(opts) }, (changed) => (changed.length ? `Owners and builders from the routing of Kette project ${project.instance.name}:\n${changed.map(itemLine).join('\n')}` : `Every item of ${id} already has the owner and builder the routing names.`));
   return 0;
 }
 
@@ -195,7 +195,7 @@ async function repair(project, opts, args) {
 async function itemCommand(project, opts, args, action) {
   const key = need(args[0], `kette ticket ${action} <item key, e.g. KD-0001/app/<repo>>`);
   if (action === 'pick' && !opts.as) throw new ExitError('--as names who picks the item (a member, session or agent)');
-  if (action !== 'link' && opts.as && isMember(project, opts.as)) await asPerson(`${action} ${key} as ${printable(opts.as)}, a person of instance ${project.instance.name}`);
+  if (action !== 'link' && opts.as && isMember(project, opts.as)) await asPerson(`${action} ${key} as ${printable(opts.as)}, a person of Kette project ${project.instance.name}`);
   if (action === 'check' && opts['approved-by']) await asPerson(`${printable(opts['approved-by'])} approves ${key}`);
   const board = await open(project, opts);
   const actor = actorOf(opts);
@@ -241,7 +241,7 @@ async function listCmd(project, opts) {
   }
   const decisions = await refused(lib, () => p.list());
   if (json(opts, decisions)) return 0;
-  if (!decisions.length) console.log(`No decisions on the board of instance ${project.instance.name} yet. Record one with ${cmd('kette ticket new')}.`);
+  if (!decisions.length) console.log(`No decisions on the board of Kette project ${project.instance.name} yet. Record one with ${cmd('kette ticket new')}.`);
   for (const d of [...decisions].sort((a, b) => a.decision.id.localeCompare(b.decision.id))) console.log(decisionLine(d));
   for (const l of incompleteLines(project, await refused(lib, () => p.incomplete()))) console.log(l);
   return 0;
@@ -251,7 +251,7 @@ async function show(project, opts, args) {
   const id = decisionId(args, 'kette ticket show <KD>');
   const { lib, p } = await open(project, opts);
   const found = await refused(lib, () => p.get(id));
-  if (!found) throw new ExitError(`${printable(id)} is not on the board of instance ${project.instance.name}.`, 1);
+  if (!found) throw new ExitError(`${printable(id)} is not on the board of Kette project ${project.instance.name}.`, 1);
   if (json(opts, found)) return 0;
   showDecision(found);
   return 0;
@@ -302,36 +302,44 @@ async function whyCmd(project, opts, args, deps) {
   return 0;
 }
 
+// The board id: --board; 0.11 took it as --project, which now names a Kette project, so a --project with a value still counts here
+function boardId(opts) {
+  if (opts.board) return opts.board;
+  if (typeof opts.project !== 'string') return null;
+  console.log(dim(`--project names a Kette project since kette 0.12, read here as the board id. Use --board ${printable(opts.project)}.`));
+  return opts.project;
+}
+
 // kette ticket connect: the board goes into instance.json (under its lock) after the plan was shown; the credential only as a name
 async function connect(project, opts, args) {
   const { lib } = await loadTicketing(project.bundleDir);
   const adapter = await refused(lib, async () => lib.adapterId(args[0] || 'workload-zero'));
-  const id = opts.project;
-  if (!id) throw new ExitError('Usage: kette ticket connect workload-zero --project <id> (the workload.zero project id)');
-  if (!PROJECT_PATTERN.test(id)) throw new ExitError(`--project must be a board project id (letters, digits, dash, underscore, at most 64): ${JSON.stringify(printable(id).slice(0, 80))}. Nothing written.`);
+  const id = boardId(opts);
+  if (!id) throw new ExitError('Usage: kette ticket connect workload-zero --board <id> (the workload.zero project id)');
+  if (!PROJECT_PATTERN.test(id)) throw new ExitError(`--board must be a board project id (letters, digits, dash, underscore, at most 64): ${JSON.stringify(printable(id).slice(0, 80))}. Nothing written.`);
   const next = { adapter, project: id };
   const name = project.instance.name;
   const current = project.instance.ticketing;
   if (current && (lib.adapterId(current.adapter) !== adapter || current.project !== id)) {
-    throw new ExitError(`Instance ${name} already uses ${printable(current.adapter)} ${printable(current.project)}. One ticket system per project, no sync between two (Q3). Change ticketing in ${tilde(instanceFile(name))} by hand if the project moves.`, 1);
+    throw new ExitError(`Kette project ${name} already uses ${printable(current.adapter)} ${printable(current.project)}. One ticket system per Kette project, no sync between two (Q3). Change ticketing in ${tilde(instanceFile(name))} by hand if the board moves.`, 1);
   }
   const wallet = readWallet(project.root);
   const declare = wallet && !wallet.secrets.some((s) => s.name === TOKEN_NAME);
   const changes = current ? [] : [`  ~ update ${file(tilde(instanceFile(name)))}  ${dim(`ticketing: ${adapter} ${printable(id)}`)}`];
   if (declare) changes.push(`  ~ update ${file(WALLET_PATH)}  ${dim(`declares ${TOKEN_NAME} (the name only, the value stays in your provider)`)}`);
-  if (!changes.length) say('ok', `Instance ${name} is connected to ${adapter} ${printable(id)} already.`);
+  if (!changes.length) say('ok', `Kette project ${name} is connected to ${adapter} ${printable(id)} already.`);
   else {
-    console.log(`${opts.dryRun ? 'Would change' : 'Plan'} (instance ${name}):`);
+    console.log(`${opts.dryRun ? 'Would change' : 'Plan'} (Kette project ${name}):`);
     for (const c of changes) console.log(c);
     if (opts.dryRun) { console.log(dim('--dry-run: nothing written.')); return 0; }
     if (!(await approved(opts, 'Connect the board?'))) throw new ExitError('Not confirmed, nothing written.', 1);
     if (!current) {
       updateInstance(name, (i) => {
-        if (i.ticketing && (i.ticketing.adapter !== adapter || i.ticketing.project !== id)) throw new ExitError(`Instance ${name} got another board in the meantime (${printable(i.ticketing.adapter)} ${printable(i.ticketing.project)}). Nothing written.`, 1);
+        if (i.ticketing && (i.ticketing.adapter !== adapter || i.ticketing.project !== id)) throw new ExitError(`Kette project ${name} got another board in the meantime (${printable(i.ticketing.adapter)} ${printable(i.ticketing.project)}). Nothing written.`, 1);
         return i.ticketing ? i : { ...i, ticketing: next };
       });
-      say('ok', `Instance ${name} uses ${adapter} ${printable(id)} for decisions`);
-      if (instanceSource(name).kind !== 'local') console.log(dim(`instance.json lives in the instance repo ${tilde(instanceSource(name).path)}. Commit and push it so the team sees the board.`));
+      say('ok', `Kette project ${name} uses ${adapter} ${printable(id)} for decisions`);
+      if (instanceSource(name).kind !== 'local') console.log(dim(`instance.json lives in the repo of the Kette project ${tilde(instanceSource(name).path)}. Commit and push it so the team sees the board.`));
     }
     if (declare) {
       writeWallet(project.root, { ...wallet, secrets: [...wallet.secrets, { name: TOKEN_NAME, note: 'ticket board access' }] });
@@ -346,7 +354,7 @@ async function probe(project, opts) {
   let board;
   try { board = await open(project, opts); } catch (err) {
     if (!(err instanceof ExitError)) throw err;
-    console.log(`Next: ${err.message.replace(/^No access to the ticket board of instance [^.]+\.\s*/, '')}`);
+    console.log(`Next: ${err.message.replace(/^No access to the ticket board of Kette project [^.]+\.\s*/, '')}`);
     return 0;
   }
   try {
@@ -364,21 +372,21 @@ export async function offerTicketing(root, opts, { resolveProject }) {
   let project;
   try { project = ticketProject(root, { resolveProject }); } catch { return; }
   if (project.effective.ticketing || !ticketingDir(project.bundleDir)) return;
-  if (!(await confirm(`\nTrack decisions as tickets on a workload.zero board for instance ${project.instance.name}?`))) return;
+  if (!(await confirm(`\nTrack decisions as tickets on a workload.zero board for Kette project ${project.instance.name}?`))) return;
   const id = await ask('workload.zero project id (empty skips)');
   if (!id) return;
   try {
-    await connect(project, { ...opts, project: id, yes: true }, ['workload-zero']);
+    await connect(project, { ...opts, board: id, yes: true }, ['workload-zero']);
   } catch (err) {
     if (!(err instanceof ExitError)) throw err;
-    console.log(`${status('warn', 'WARN')} ${err.message} Later with: ${cmd(`kette ticket connect workload-zero --project ${id}`)}`);
+    console.log(`${status('warn', 'WARN')} ${err.message} Later with: ${cmd(`kette ticket connect workload-zero --board ${id}`)}`);
   }
 }
 
 const COMMANDS = { new: newDecision, edit: editDecision, extend: extendDecision, route, close, repair, list: listCmd, show, inbox, report };
 
 export async function ticket(sub, opts, deps) {
-  if (!sub || sub === 'help') { console.log(`Ticketing (Enterprise): decisions become tickets on the board of the instance and travel down the chain.\n\n  ${TICKET_HELP}`); return 0; }
+  if (!sub || sub === 'help') { console.log(`Ticketing (Enterprise): decisions become tickets on the board of the Kette project and travel down the chain.\n\n  ${TICKET_HELP}`); return 0; }
   const args = opts._.slice(2);
   // The hook runs on every prompt in Claude Code: it never fails and never asks
   if (sub === 'hook' && args[0] === 'run') return hook('run', opts, { ...deps, root: '.' });

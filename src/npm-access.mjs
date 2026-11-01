@@ -152,7 +152,8 @@ export async function npmCommand(sub) {
 export const globalScope = () => blockHasScope(readFile(readState().npm?.file || npmUserConfig()));
 
 // Lines for kette doctor: block, token valid (not with --ci), project .npmrc, tokens in tracked files
-export async function npmChecks(root, { line, warn }, opts) {
+// inProject: the folder has a kette profile; the scope line of the project .npmrc is only checked there (KETTE-53)
+export async function npmChecks(root, { line, warn, info }, opts, { inProject = true } = {}) {
   const file = readState().npm?.file || npmUserConfig();
   const token = blockToken(readFile(file));
   if (token) {
@@ -165,9 +166,10 @@ export async function npmChecks(root, { line, warn }, opts) {
     if (code === null) warn(`Registry ${registryUrl()} not reachable, token not checked`);
     else line(code === 200, 'npm token valid', `npm token rejected (response ${code}), issue a new one with: ${cmd('kette update')}`);
   }
-  const project = projectScope(readFile(path.join(root, '.npmrc')));
+  const project = inProject ? projectScope(readFile(path.join(root, '.npmrc'))) : null;
   // Since 0.10 the scope line is per project, an Enterprise project without it cannot install the design system packages
-  if (token && !project) line(false, '', `.npmrc of this Enterprise project has no ${SCOPE} scope line, npm cannot find the design system packages. Add it with: ${cmd('kette add')}`);
+  if (token && inProject && !project) line(false, '', `.npmrc of this Enterprise project has no ${SCOPE} scope line, npm cannot find the design system packages. Add it with: ${cmd('kette add')}`);
+  if (token && !inProject) info(`The ${SCOPE} scope line lives in the .npmrc of each Enterprise project, ${cmd('kette doctor')} checks it inside a project.`);
   if (blockHasScope(readFile(file))) warn(`${fileName(file)} still points ${SCOPE} to Die Kette for every folder (set up before 0.10). Move the line into the projects with: ${cmd(MOVE_SCOPE)}`);
   if (project?.includes(GITHUB_PACKAGES)) warn(`.npmrc in the project points ${SCOPE} to ${GITHUB_PACKAGES}. For Die Kette customers: ${scopeLine().trim()}`);
   const leaked = trackedTokenFiles(root);

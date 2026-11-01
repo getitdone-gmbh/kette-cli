@@ -29,10 +29,10 @@ test('KETTE-30: the real Claude Code lists kette-intake and /intake in an Enterp
   const allow = [...CLAUDE_REGISTRY, ...MCP_USER, /^\.claude\/(backups|projects|shell-snapshots|statsig|todos|plugins)(\/|$)/, /^\.config(\/|$)/, /^Library\/Caches(\/|$)/, /^\.cache(\/|$)/];
   const [ent, com] = [path.join(box.work, 'ent'), path.join(box.work, 'com')];
   ok(await kette(box, ['login', KEY, '--no-npm'], { allow }));
-  ok(await kette(box, ['instance', 'create', 'acme', '--edition', 'enterprise'], { allow }));
-  ok(await kette(box, ['instance', 'create', 'oss', '--edition', 'community'], { allow }));
-  ok(await kette(box, ['init', ent, '--instance', 'acme', ...SETUP], { projects: [ent], allow }));
-  ok(await kette(box, ['init', com, '--instance', 'oss', ...SETUP], { projects: [com], allow }));
+  ok(await kette(box, ['project', 'create', 'acme', '--edition', 'enterprise'], { allow }));
+  ok(await kette(box, ['project', 'create', 'oss', '--edition', 'community'], { allow }));
+  ok(await kette(box, ['init', ent, '--project', 'acme', ...SETUP], { projects: [ent], allow }));
+  ok(await kette(box, ['init', com, '--project', 'oss', ...SETUP], { projects: [com], allow }));
   const e = init(box, ent);
   const c = init(box, com);
   assert.ok(e.agents.includes('kette-ticketing:kette-intake'), `Enterprise agents: ${e.agents.join(', ')}`);

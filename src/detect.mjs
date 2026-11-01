@@ -76,6 +76,10 @@ export const detectApps = (dir) => detectAppFolders(dir).apps;
 // npm workspaces at the repository root: the Node apps then share one install and one lockfile
 export const detectWorkspace = (dir) => Boolean(readJson(path.join(dir, 'package.json'))?.workspaces);
 
+// CI files of a pipeline the repo already runs, relative paths
+const PIPELINES = ['.github/workflows', '.gitlab-ci.yml', 'azure-pipelines.yml', '.woodpecker.yml', '.woodpecker', 'Jenkinsfile', 'bitbucket-pipelines.yml', '.circleci'];
+export const detectPipeline = (dir) => PIPELINES.filter((f) => exists(dir, f));
+
 // Detects the platform from CI and infrastructure files
 export function detectPlatform(dir) {
   const files = listFiles(dir, 3).map((f) => path.relative(dir, f));

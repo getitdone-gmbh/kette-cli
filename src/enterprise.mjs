@@ -68,7 +68,7 @@ export async function login(rawKey, opts, cli, refreshProject) {
   await refreshProject?.();
   const seats = g.seats?.max ? `, devices ${g.seats.used} of ${g.seats.max}` : '';
   console.log(`\nSigned in: ${editionLabel(ENTERPRISE)}, version ${g.version}, updates until ${formatDate(g.updates_until)}${seats}.`);
-  console.log(`Projects get the Enterprise plugins, templates and the flow with agents and gates with: ${cmd('kette add')} (or ${cmd('kette instance use <name>')} for an Enterprise instance). Community projects and instances stay Community.`);
+  console.log(`Projects get the Enterprise plugins, templates and the flow with agents and gates with: ${cmd('kette add')} (or ${cmd('kette project use <name>')} for an Enterprise Kette project). Community repos and Kette projects stay Community.`);
   return 0;
 }
 

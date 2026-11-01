@@ -369,3 +369,14 @@ test('D3: doctor names an Enterprise project without the scope line in its own .
   const { out } = await inDir(project, () => run('doctor', '--ci'));
   assert.match(out, /FAIL \.npmrc of this Enterprise project has no @getitdone-gmbh scope line.*kette add/);
 });
+
+test('KETTE-53: doctor outside a project never fails on the scope line of a project .npmrc, it says where the line lives', async () => {
+  await run('login', KEY, '--no-plugins');
+  const { out, result } = await inDir(tmp(), () => run('doctor', '--ci'));
+  assert.doesNotMatch(out, /FAIL \.npmrc of this Enterprise project/);
+  assert.match(out, /INFO The @getitdone-gmbh scope line lives in the \.npmrc of each Enterprise project, kette doctor checks it inside a project\./);
+  assert.equal(result, 1, 'only --ci counts the missing profile');
+  assert.match(out, /FAIL \.kette\/profile\.json missing/);
+  const plain = await inDir(tmp(), () => run('doctor'));
+  assert.doesNotMatch(plain.out, /FAIL/);
+});

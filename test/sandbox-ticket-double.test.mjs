@@ -43,7 +43,7 @@ test('double: two instances on one machine reach only their own board with their
   const a = await kit.connected(box, 'alpha', 'p-alpha', ta);
   const b = await kit.connected(box, 'beta', 'p-beta', tb);
   noSecret(box, ok(await kit.step(box, [...NEW('lead@alpha.test', 'app:alpha-app'), '--yes'], { cwd: a })), [ta, tb]);
-  assert.match(noSecret(box, ok(await kit.step(box, ['ticket', 'list'], { cwd: b })), [ta, tb]).out, /No decisions on the board of instance beta yet/);
+  assert.match(noSecret(box, ok(await kit.step(box, ['ticket', 'list'], { cwd: b })), [ta, tb]).out, /No decisions on the board of Kette project beta yet/);
   for (const [token, project] of [[ta, 'p-alpha'], [tb, 'p-beta']]) {
     assert.deepEqual(board.requests.filter((r) => r.token === token && /\/tasks\/project\//.test(r.path) && !r.path.endsWith(`/${project}`)), [], `${project} token never reads another project`);
   }
@@ -54,9 +54,9 @@ test('double: a missing credential is a clear next step, nothing is sent', async
   const box = sandbox();
   await kit.licensed(box);
   const app = await kit.enterpriseRepo(box, 'acme', { walletProject: 'wallet-dbl-empty' });
-  ok(await kit.step(box, ['ticket', 'connect', 'workload-zero', '--project', 'p-acme', '--yes'], { cwd: app }));
+  ok(await kit.step(box, ['ticket', 'connect', 'workload-zero', '--board', 'p-acme', '--yes'], { cwd: app }));
   const r = ok(await kit.step(box, ['ticket', 'list'], { cwd: app }), 1);
-  assert.match(r.out, /No access to the ticket board of instance acme\. KETTE_TICKETING_WORKBASE_TOKEN has no value in dev/);
+  assert.match(r.out, /No access to the ticket board of Kette project acme\. KETTE_TICKETING_WORKBASE_TOKEN has no value in dev/);
   assert.deepEqual(r.all, []);
   assert.deepEqual(board.requests.filter((q) => q.token === ''), []);
 });
@@ -67,8 +67,8 @@ test('double: project ids with path or query characters are refused at connect a
   await kit.licensed(box);
   const app = await kit.connected(box, 'acme', 'p-acme', token);
   for (const id of ['../../tasks/deleted', 'a/b', 'x?y=1#z', '..', 'proj-acme/../../tasks/deleted']) {
-    const r = ok(await kit.step(box, ['ticket', 'connect', 'workload-zero', '--project', id, '--yes'], { cwd: app }), 2);
-    assert.match(r.out, /--project must be a board project id/);
+    const r = ok(await kit.step(box, ['ticket', 'connect', 'workload-zero', '--board', id, '--yes'], { cwd: app }), 2);
+    assert.match(r.out, /--board must be a board project id/);
     assert.deepEqual(r.all, []);
   }
   const f = path.join(box.home, '.kette', 'instances', 'acme', 'instance.json');
@@ -82,6 +82,12 @@ test('double: project ids with path or query characters are refused at connect a
   }
   fs.writeFileSync(f, good);
   assert.equal(readInstanceFile(box, 'acme').ticketing.project, 'p-acme');
+  // KETTE-46: 0.11 named the board with --project; on connect a value there still counts as the board id, with a hint to --board
+  const legacy = ok(await kit.step(box, ['ticket', 'connect', 'workload-zero', '--project', 'p-acme', '--yes'], { cwd: app }));
+  assert.match(legacy.out, /--project names a Kette project since kette 0\.12, read here as the board id\. Use --board p-acme\./);
+  assert.match(legacy.out, /Kette project acme is connected to workload-zero p-acme already/);
+  const other = ok(await kit.step(box, ['ticket', 'connect', 'workload-zero', '--project', 'p-other', '--yes'], { cwd: app }), 1);
+  assert.match(other.out, /Kette project acme already uses workload-zero p-acme/);
 });
 
 test('double: the shared session file is only used when the instance enables it (ticketing.session)', async () => {
@@ -93,15 +99,15 @@ test('double: the shared session file is only used when the instance enables it 
   fs.writeFileSync(session, JSON.stringify({ accessToken: token, refreshToken: 'unused' }));
   const app = await kit.enterpriseRepo(box, 'acme', { walletProject: 'wallet-dbl-session' });
   fs.rmSync(path.join(app, '.kette', 'wallet.json'));
-  ok(await kit.step(box, ['ticket', 'connect', 'workload-zero', '--project', 'p-acme', '--yes'], { cwd: app, env: { WORKBASE_SESSION_FILE: session } }));
+  ok(await kit.step(box, ['ticket', 'connect', 'workload-zero', '--board', 'p-acme', '--yes'], { cwd: app, env: { WORKBASE_SESSION_FILE: session } }));
   board.boards.set(token, { project: 'p-acme' });
   const off = ok(await kit.step(box, ['ticket', 'list'], { cwd: app, env: { WORKBASE_SESSION_FILE: session } }), 1);
-  assert.match(off.out, /No access to the ticket board of instance acme\. This project has no secret wallet yet/);
+  assert.match(off.out, /No access to the ticket board of Kette project acme\. This project has no secret wallet yet/);
   assert.equal(board.requests.filter((r) => r.token === token).length, 0, 'the session token is not used without the switch');
   const f = path.join(box.home, '.kette', 'instances', 'acme', 'instance.json');
   const inst = JSON.parse(fs.readFileSync(f, 'utf8'));
   fs.writeFileSync(f, JSON.stringify({ ...inst, ticketing: { ...inst.ticketing, session: true } }));
   const on = noSecret(box, ok(await kit.step(box, ['ticket', 'list'], { cwd: app, env: { WORKBASE_SESSION_FILE: session } })), [token]);
-  assert.match(on.out, /No decisions on the board of instance acme yet/);
+  assert.match(on.out, /No decisions on the board of Kette project acme yet/);
   assert.equal(TICKET_TOKEN, 'KETTE_TICKETING_WORKBASE_TOKEN');
 });

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmp, write } from './helpers.mjs';
-import { inherit, localId, newInstance, normalizeUrl, printable, readInstance, redact, repoIdentity, validName, validateInstance, withRepo, writeInstance } from '../src/instance/config.mjs';
+import { inherit, localId, newInstance, normalizeUrl, originName, printable, readInstance, redact, repoIdentity, validName, validateInstance, withRepo, writeInstance } from '../src/instance/config.mjs';
 import { TEMP_PATTERN, projectPlugins, renewIgnore, renewLocalSettings, renewSettings, settingsStatus, userScopePlugins } from '../src/project-plugins.mjs';
 import { buildMarketplace, marketDir } from '../src/marketplace.mjs';
 import { enterpriseLeftovers, recordTemplates, removeLeftovers } from '../src/leftovers.mjs';
@@ -42,7 +42,8 @@ test('CR-SEC-1, CR-INST-2: origins are normalised, user info dropped, ssh, scp a
   const keys = new Set(forms.map((u) => normalizeUrl(u).key));
   assert.deepEqual([...keys], ['github.com/acme/web']);
   for (const u of forms) assert.doesNotMatch(normalizeUrl(u).url, /ghp_secret|x-access-token/);
-  assert.equal(normalizeUrl('ssh://git@github.com/acme/web').url, 'ssh://git@github.com/acme/web', 'the ssh user git stays, it is needed to clone');
+  assert.deepEqual([...new Set(forms.map((u) => normalizeUrl(u).url))], ['https://github.com/acme/web'], 'KETTE-53: every form is stored as one https url');
+  assert.equal(normalizeUrl('ssh://git@git.acme.example:2222/team/app.git').url, 'https://git.acme.example/team/app', 'no ssh user and no port in the stored url');
   assert.equal(normalizeUrl('C:/repos/app.git').url, path.resolve('C:/repos/app.git'), 'a Windows drive path is a local repo, not a URL with the scheme c:');
 });
 
@@ -56,8 +57,8 @@ test('readInstance refuses a folder whose instance.json names another instance a
   assert.equal(readInstance('acme').edition, 'community');
   assert.equal(readInstance('none'), null);
   write(path.join(process.env.KETTE_HOME, 'instances', 'copy'), 'instance.json', JSON.stringify(newInstance('acme', 'community')));
-  assert.throws(() => readInstance('copy'), /names the instance "acme", its folder is "copy"/);
-  assert.throws(() => readInstance('../etc'), /Invalid instance name/);
+  assert.throws(() => readInstance('copy'), /names the Kette project "acme", its folder is "copy"/);
+  assert.throws(() => readInstance('../etc'), /Invalid Kette project name/);
 });
 
 test('CR-INST-2: withRepo matches the same origin in another form; QA-08: two repos without origin and with one name both get an entry', () => {
@@ -101,6 +102,28 @@ test('QA-08: a worktree and its main checkout are one repo, a folder inside anot
   git(main, 'remote', 'add', 'origin', 'https://tok@github.com/acme/main.git');
   assert.deepEqual([repoIdentity(main).key, repoIdentity(wt).key], ['github.com/acme/main', 'github.com/acme/main']);
   assert.equal(repoIdentity(main).url, 'https://github.com/acme/main');
+  assert.equal(repoIdentity(wt).name, 'main', 'KETTE-53: the worktree folder main-wt is named after its origin');
+});
+
+test('KETTE-53: the repo name comes from the origin, the folder name only without one', () => {
+  const dir = path.join(tmp(), 'kette-cli-kette-46');
+  fs.mkdirSync(dir);
+  execFileSync('git', ['init', '-q', dir]);
+  assert.equal(originName(dir), null, 'no origin, no name from it');
+  assert.equal(repoIdentity(dir).name, 'kette-cli-kette-46');
+  execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'git@github.com:getitdone-gmbh/kette-cli.git']);
+  assert.equal(originName(dir), 'kette-cli');
+  assert.equal(repoIdentity(dir).name, 'kette-cli');
+  assert.equal(originName(path.join(dir, 'missing')), null, 'a folder kette init has not created yet');
+});
+
+test('KETTE-53: a file of 0.11 with ssh and https urls is stored with one form on its next write, matching stays by key', () => {
+  const f = path.join(process.env.KETTE_HOME, 'instances', 'mixed', 'instance.json');
+  write(path.dirname(f), 'instance.json', JSON.stringify({ ...newInstance('mixed', 'community'), repos: [{ name: 'web', url: 'git@github.com:acme/web.git' }, { name: 'api', url: 'git@GitHub.com:acme/api' }, { name: 'docs', url: 'https://github.com/acme/docs.git' }] }));
+  const i = readInstance('mixed');
+  assert.equal(withRepo(i, { name: 'x', ...normalizeUrl('https://github.com/acme/web') }).added, false, 'an old ssh entry matches the https form');
+  writeInstance(i);
+  assert.deepEqual(JSON.parse(fs.readFileSync(f, 'utf8')).repos.map((r) => r.url), ['https://github.com/acme/web', 'https://github.com/acme/api', 'https://github.com/acme/docs']);
 });
 
 test('inherit: the instance gives edition and shared settings, repo values win', () => {
@@ -301,11 +324,14 @@ test('renewProfile with an instance sets instance after project and follows its 
   assert.equal(JSON.parse(renewProfile(current, 'community', null)).tier, 'enterprise', 'without an instance tier is never lowered (ADR-0001)');
 });
 
-test('--instance takes a name, alone it means the instance of the repo in this folder', () => {
-  assert.equal(parse(['doctor', '--instance']).instance, true);
-  assert.equal(parse(['doctor', '--instance', '--ci']).instance, true);
-  assert.equal(parse(['add', '--instance', 'acme', '--yes']).instance, 'acme');
-  assert.equal(parse(['instance', 'create', 'acme', '--edition', 'community', '--from', 'git@x:y.git']).from, 'git@x:y.git');
+test('--project takes a name, alone it means the Kette project of the repo in this folder; --instance of 0.11 is the same option', () => {
+  for (const flag of ['--project', '--instance']) {
+    assert.equal(parse(['doctor', flag]).project, true);
+    assert.equal(parse(['doctor', flag, '--ci']).project, true);
+    assert.equal(parse(['add', flag, 'acme', '--yes']).project, 'acme');
+  }
+  assert.equal(parse(['project', 'create', 'acme', '--edition', 'community', '--from', 'git@x:y.git']).from, 'git@x:y.git');
+  assert.equal(parse(['ticket', 'connect', '--board', 'p-acme']).board, 'p-acme');
 });
 
 test('QA-29: a join killed after instance.json but before state.json is repaired by the next run, the repo ends up in one instance', async () => {

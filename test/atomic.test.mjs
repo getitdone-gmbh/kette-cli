@@ -41,19 +41,19 @@ async function killedWhileWriting(box, repo, file, argv, allow = CLAUDE_REGISTRY
 test('a kette killed while writing a project file leaves it whole: profile, README block, settings, local settings, .npmrc, templates record', async () => {
   const box = sandbox();
   ok(await kette(box, ['login', KEY], { allow: NPMRC }));
-  ok(await kette(box, ['instance', 'create', 'acme', '--edition', 'enterprise']));
-  ok(await kette(box, ['instance', 'create', 'oss', '--edition', 'community']));
+  ok(await kette(box, ['project', 'create', 'acme', '--edition', 'enterprise']));
+  ok(await kette(box, ['project', 'create', 'oss', '--edition', 'community']));
   const app = path.join(box.work, 'app');
-  ok(await kette(box, ['init', app, '--instance', 'acme', ...SETUP], { projects: [app], allow: CLAUDE_REGISTRY }));
+  ok(await kette(box, ['init', app, '--project', 'acme', ...SETUP], { projects: [app], allow: CLAUDE_REGISTRY }));
   write(app, '.npmrc', `save-exact=true\n${fs.readFileSync(path.join(app, '.npmrc'), 'utf8')}`);
   // A template changed by hand stays recorded, so leaving Enterprise rewrites .kette/templates.json instead of removing it
   fs.appendFileSync(path.join(app, 'compose.yaml'), '# mine\n');
   // Joining a Community instance rewrites every one of them, in this order; each run is killed at the next file
   for (const file of ['.kette/profile.json', '.kette/README.md', '.claude/settings.json', '.claude/settings.local.json', '.npmrc', '.kette/templates.json']) {
-    await killedWhileWriting(box, app, file, ['instance', 'use', 'oss']);
+    await killedWhileWriting(box, app, file, ['project', 'use', 'oss']);
   }
   // After the kills the next run finishes and no temp file of a killed run stays in the project
-  ok(await kette(box, ['instance', 'use', 'oss'], { cwd: app, allow: CLAUDE_REGISTRY }));
+  ok(await kette(box, ['project', 'use', 'oss'], { cwd: app, allow: CLAUDE_REGISTRY }));
   assert.equal(JSON.parse(fs.readFileSync(path.join(app, '.kette', 'profile.json'), 'utf8')).instance, 'oss');
   assert.equal(fs.readFileSync(path.join(app, '.npmrc'), 'utf8'), 'save-exact=true\n');
   const temps = fs.readdirSync(app, { recursive: true }).filter((n) => /\.\d+\.[0-9a-f]+\.tmp$/.test(String(n)));

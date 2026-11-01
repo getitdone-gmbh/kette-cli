@@ -9,7 +9,7 @@ import { PART_FILES } from '../scripts/ticketing-part.mjs';
 
 // Harness of the sandbox tests: every command of the CLI in a fresh sandbox HOME (HOME, ~/.kette, ~/.npmrc and the Claude Code config all in temp folders,
 // delivery service and mirror as local fake servers), followed by a file system diff: outside the project folder only the
-// allowed machine files may change. KETTE_MATRIX_OUT=<file> writes the results as JSON for the matrix in docs/instances.md.
+// allowed machine files may change. KETTE_MATRIX_OUT=<file> writes the results as JSON for the matrix in docs/kette-projects.md.
 
 export const BIN = fileURLToPath(new URL('../bin/kette.mjs', import.meta.url));
 export const KEY = 'CDP-AAAAA-BBBBB-CCCCC-00001';
@@ -59,9 +59,9 @@ export const state = { ci: [], valid: new Set() };
 export const MACHINE = [/^\.kette\/(credentials|device-id|state\.json(\.bak)?)$/, /^\.kette\/bundles(\/|$)/, /^\.kette\/instances(\/|$)/, /^\.kette\/locks$/, /^\.kette$/];
 // Global files Claude Code itself keeps for plugins of any scope (marketplace names, plugin cache), never the user settings
 export const CLAUDE_REGISTRY = [/^\.claude\/plugins(\/|$)/, /^\.claude$/];
-// Licence-bound npm auth of kette login (docs/instances.md, open decision D3)
+// Licence-bound npm auth of kette login (docs/kette-projects.md, open decision D3)
 export const NPMRC = [/^\.npmrc$/];
-// itdone MCP server of kette cloud setup in the user scope of Claude Code (docs/instances.md, open decision D4)
+// itdone MCP server of kette cloud setup in the user scope of Claude Code (docs/kette-projects.md, open decision D4)
 export const MCP_USER = [/^\.claude\/\.claude\.json$/];
 
 // Fake delivery service, mirror and provider stand-ins for one test file
@@ -208,7 +208,8 @@ export function instanceRepo(box, name, edition) {
 }
 
 // Runs the CLI in a pseudo terminal (python pty) and answers each prompt once it shows up, like a person at the keyboard
-export async function interactive(box, argv, answers, { cwd = box.work, allow = [], scenario = 'onboarding' } = {}) {
+// root: the project folder whose changes are allowed, by default the folder kette init names
+export async function interactive(box, argv, answers, { cwd = box.work, allow = [], scenario = 'onboarding', root = path.join(cwd, argv[1] || '.') } = {}) {
   const before = snapshot(box.root);
   // python3 -I: isolated mode, nothing from the working folder is imported
   const child = spawn('python3', ['-I', '-c', 'import pty, sys; sys.exit(pty.spawn(sys.argv[1:]) >> 8)', process.execPath, BIN, ...argv], { cwd, env: box.env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -231,7 +232,7 @@ export async function interactive(box, argv, answers, { cwd = box.work, allow = 
   const timer = setTimeout(() => { out += '\n[killed after 60 s waiting for a prompt]'; child.kill('SIGKILL'); }, 60000);
   const code = await new Promise((resolve) => child.on('close', resolve));
   clearTimeout(timer);
-  const outside = changed(before, snapshot(box.root)).filter((p) => !p.startsWith(path.join(cwd, argv[1] || '.'))).filter((p) => {
+  const outside = changed(before, snapshot(box.root)).filter((p) => !p.startsWith(root)).filter((p) => {
     const rel = path.relative(box.home, p).split(path.sep).join('/');
     return rel.startsWith('..') || ![...MACHINE, ...allow].some((r) => r.test(rel));
   });
@@ -296,20 +297,20 @@ export function ticketKit(board) {
     return { ...r, all: changed(before, snapshot(box.root)).map((p) => path.relative(box.root, p).split(path.sep).join('/')) };
   }
   const licensed = async (box) => ok(await step(box, ['login', KEY, '--no-plugins', '--no-npm']));
-  // An Enterprise repo of instance name with a wallet; extra goes into instance.json (stations, ticketing.session)
+  // An Enterprise repo of Kette project name with a wallet; extra goes into instance.json (stations, ticketing.session)
   async function enterpriseRepo(box, name, { stations = ['prototype', 'app'], walletProject = `wallet-${name}`, extra = {} } = {}) {
     const dir = path.join(box.work, `${name}-app`);
-    ok(await step(box, ['instance', 'create', name, '--edition', 'enterprise']));
-    ok(await step(box, ['instance', 'members', 'add', `lead@${name}.test`, '--role', 'owner', '--instance', name]));
+    ok(await step(box, ['project', 'create', name, '--edition', 'enterprise']));
+    ok(await step(box, ['project', 'members', 'add', `lead@${name}.test`, '--role', 'owner', '--project', name]));
     const f = path.join(box.home, '.kette', 'instances', name, 'instance.json');
     fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), stations, ...extra }, null, 2));
-    ok(await step(box, ['init', dir, '--instance', name, '--no-plugins', ...SETUP], { projects: [dir] }));
+    ok(await step(box, ['init', dir, '--project', name, '--no-plugins', ...SETUP], { projects: [dir] }));
     ok(await step(box, ['wallet', 'init', '--yes'], { cwd: dir, env: { KETTE_WALLET_PROJECT: walletProject } }));
     return dir;
   }
   async function connected(box, name, project, token, opts = {}) {
     const dir = await enterpriseRepo(box, name, opts);
-    noSecret(box, ok(await step(box, ['ticket', 'connect', 'workload-zero', '--project', project, '--yes'], { cwd: dir })), [token]);
+    noSecret(box, ok(await step(box, ['ticket', 'connect', 'workload-zero', '--board', project, '--yes'], { cwd: dir })), [token]);
     noSecret(box, ok(await step(box, ['wallet', 'set', TICKET_TOKEN, '--env', 'dev', '--stdin'], { cwd: dir, input: `${token}\n` })), [token]);
     board.boards.set(token, { project });
     return dir;

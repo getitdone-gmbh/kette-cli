@@ -143,7 +143,7 @@ test('add never writes a root package.json; with npm workspaces the migrate hint
   process.chdir(root);
   let out;
   try {
-    ({ out } = await capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker', '--patterns', 'layered'])));
+    ({ out } = await capture(() => main(['add', '--yes', '--scaffold', '--no-plugins', '--platform', 'github-docker', '--patterns', 'layered'])));
   } finally {
     process.chdir(cwd);
   }
@@ -159,7 +159,7 @@ test('an existing profile without platform: templates and checks skipped with th
   process.chdir(root);
   let out;
   try {
-    ({ out } = await capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker'])));
+    ({ out } = await capture(() => main(['add', '--yes', '--scaffold', '--no-plugins', '--platform', 'github-docker'])));
   } finally {
     process.chdir(cwd);
   }
@@ -185,7 +185,7 @@ test('add on backend/ (NestJS) and frontend/ (Next.js): templates in those folde
   const cwd = process.cwd();
   process.chdir(root);
   try {
-    const { out } = await capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker', '--patterns', 'layered']));
+    const { out } = await capture(() => main(['add', '--yes', '--scaffold', '--no-plugins', '--platform', 'github-docker', '--patterns', 'layered']));
     assert.match(out, /App folders: nestjs-prisma backend, nextjs-ts-tailwind frontend/);
   } finally {
     process.chdir(cwd);
@@ -206,7 +206,7 @@ test('add follows the folders of an existing profile and never rewrites it', asy
   const cwd = process.cwd();
   process.chdir(root);
   try {
-    await capture(() => main(['add', '--yes', '--no-plugins']));
+    await capture(() => main(['add', '--yes', '--scaffold', '--no-plugins']));
   } finally {
     process.chdir(cwd);
   }
@@ -234,7 +234,7 @@ async function addIn(root, args = []) {
   const cwd = process.cwd();
   process.chdir(root);
   try {
-    return await capture(() => main(['add', '--yes', '--no-plugins', ...args]));
+    return await capture(() => main(['add', '--yes', '--scaffold', '--no-plugins', ...args]));
   } finally {
     process.chdir(cwd);
   }
@@ -413,4 +413,30 @@ test('a detected folder the profile cannot hold ("Web App", umlauts) gets no app
   write(community, 'Web App/package.json', JSON.stringify({ dependencies: { next: '16' } }));
   assert.doesNotMatch((await addIn(community, ['--platform', 'github-docker', '--patterns', 'layered'])).out, /can't be used as an app folder/);
   assert.equal(profileOf(existing).tier, 'enterprise');
+});
+
+test('KETTE-53: add in a repo with files and its own pipeline writes only the checks; Dockerfile, compose and CI need --scaffold or an empty repo', async () => {
+  install(bundle());
+  const root = tmp();
+  write(root, 'backend/package.json', JSON.stringify({ dependencies: { '@nestjs/core': '11', '@prisma/client': '7' } }));
+  write(root, '.github/workflows/release.yml', 'on: push\n');
+  const cwd = process.cwd();
+  process.chdir(root);
+  let out;
+  try {
+    ({ out } = await capture(() => main(['add', '--yes', '--no-plugins', '--platform', 'github-docker', '--patterns', 'layered'])));
+  } finally {
+    process.chdir(cwd);
+  }
+  assert.deepEqual(files(root), ['.github/workflows/release.yml', '.gitleaks.toml', 'backend/package.json', 'eslint.config.mjs', 'tsconfig.base.json'], 'checks only, no Dockerfile, compose or CI');
+  assert.match(out, /Platform templates \(Dockerfile, compose, CI, deploy workflow\) left out: this repo already has files and its own pipeline \(\.github\/workflows\)\. Add them with: kette add --scaffold/);
+  assert.doesNotMatch(out, /No templates for github-docker yet/);
+  const empty = tmp();
+  process.chdir(empty);
+  try {
+    await capture(() => main(['add', '--yes', '--no-plugins', '--stack', 'nestjs-prisma', '--platform', 'github-docker', '--patterns', 'layered']));
+  } finally {
+    process.chdir(cwd);
+  }
+  assert.ok(files(empty).includes('compose.yaml') && files(empty).includes('.github/workflows/ci.yml'), 'an empty repo gets the platform templates');
 });
