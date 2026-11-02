@@ -1,0 +1,6 @@
+# Default gitleaks rules plus an exception for example files
+[extend]
+useDefault = true
+
+[allowlist]
+paths = ['''\.env\.example$''']

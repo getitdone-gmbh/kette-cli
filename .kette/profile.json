@@ -1,0 +1,15 @@
+{
+  "$schema": "https://kette.itdone.de/schema/profile.schema.json",
+  "version": 1,
+  "project": {
+    "name": "kette-cli"
+  },
+  "instance": "kette",
+  "stack": [
+    "node-cli"
+  ],
+  "platform": {
+    "id": "github-docker"
+  },
+  "tier": "enterprise"
+}

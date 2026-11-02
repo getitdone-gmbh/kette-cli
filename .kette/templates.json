@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "files": {
+    ".gitleaks.toml": "434942291a52cba56de531e4cfd22740d5c4f3e02af337c9383a79a67c3312bb"
+  },
+  "npmrc": "@getitdone-gmbh:registry=https://npm.kette.itdone.de/"
+}
