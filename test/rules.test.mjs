@@ -2,7 +2,7 @@ import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { capture, fakeClaude, tmp, write } from './helpers.mjs';
+import { capture, fakeClaude, tmp, write, outsideProject } from './helpers.mjs';
 import { main } from '../src/cli.mjs';
 import { symbols } from '../src/out.mjs';
 
@@ -58,7 +58,7 @@ test('rules ohne Thema zeigt Edition, Version, Kern-Regeln und Muster, in Commun
 
 test('rules in Enterprise zeigt Stack- und Plattform-Profile mit Status', async () => {
   rulebook('enterprise', { profiles: true });
-  const { out } = await run('rules');
+  const { out } = await outsideProject(() => run('rules'));
   assert.match(out, /edition Enterprise \(Die Kette\)/);
   assert.match(out, /nestjs-prisma\s+Backend mit relationalen Daten/);
   assert.match(out, /github-docker\s+GitHub \+ Docker, belegt/);
@@ -145,8 +145,8 @@ test('rules mit einem Enterprise-Profil in Community verweist auf kette login', 
 
 test('rules in Enterprise liest Stack- und Plattform-Profile', async () => {
   rulebook('enterprise', { profiles: true });
-  assert.match((await run('rules', 'github-docker')).out, /^PROFIL: GITHUB \+ DOCKER/);
-  assert.match((await run('rules', 'nestjs-prisma')).out, /^STACK: NESTJS \+ PRISMA/);
+  assert.match((await outsideProject(() => run('rules', 'github-docker'))).out, /^PROFIL: GITHUB \+ DOCKER/);
+  assert.match((await outsideProject(() => run('rules', 'nestjs-prisma'))).out, /^STACK: NESTJS \+ PRISMA/);
 });
 
 test('rules ohne installiertes Regelwerk nennt den nächsten Schritt', async () => {
