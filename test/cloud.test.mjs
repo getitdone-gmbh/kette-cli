@@ -1,6 +1,6 @@
 import { after, afterEach, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { capture, fakeClaude, serve, tmp } from './helpers.mjs';
+import { capture, fakeClaude, serve, tmp, outsideProject } from './helpers.mjs';
 import { main } from '../src/cli.mjs';
 import { MCP_URL, REGISTER_URL, addArgs, canOpenBrowser, fixedClient, fixedClientReady, openBrowser, openerFor, preflightUrl, registerUrl } from '../src/cloud.mjs';
 
@@ -221,7 +221,7 @@ test('cloud with an unknown action stops with usage and exit 2', async () => {
   await assert.rejects(() => main(['cloud', 'deploy']), (err) => err.exitCode === 2 && /Usage: kette cloud setup/.test(err.message));
 });
 
-test('doctor names the itdone MCP as OK or INFO and never counts it as a problem', async () => {
+test('doctor names the itdone MCP as OK or INFO and never counts it as a problem', () => outsideProject(async () => {
   claude = fakeClaude();
   let r = await run('doctor');
   assert.match(r.out, /\nINFO Live deploy: kette cloud setup\n/);
@@ -234,7 +234,7 @@ test('doctor names the itdone MCP as OK or INFO and never counts it as a problem
   claude = fakeClaude([], '', {}, { itdone: { url: MCP_URL, port: 53761 } });
   assert.ok((await run('doctor')).out.includes(`OK   itdone MCP registered (${MCP_URL}), sign-in: fixed client, callback port 53761`));
   assert.doesNotMatch((await run('doctor', '--ci')).out, /itdone/);
-});
+}));
 
 test('opener per platform; Windows quotes the link for cmd and refuses unsafe characters', () => {
   assert.deepEqual(openerFor(REGISTER_URL, 'darwin'), { command: 'open', args: [REGISTER_URL], options: {} });

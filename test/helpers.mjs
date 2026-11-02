@@ -19,6 +19,13 @@ delete process.env.FORCE_COLOR;
 export const write = (dir, f, c) => { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); };
 export const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
+// Runs fn in a temporary folder: a test about "outside a project" must not see the profile of the repo it runs in (kette-cli is a Kette project itself)
+export async function outsideProject(fn) {
+  const cwd = process.cwd();
+  process.chdir(tmp());
+  try { return await fn(); } finally { process.chdir(cwd); }
+}
+
 // Packt einen Ordner als .tgz und liefert Inhalt und Prüfsumme
 export function tarball(srcDir, entries = ['.']) {
   const out = path.join(tmp(), 'pkg.tgz');

@@ -2,7 +2,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { capture, fakeBundle, fakeClaude, json, serve, tmp, write } from './helpers.mjs';
+import { capture, fakeBundle, fakeClaude, json, serve, tmp, write, outsideProject } from './helpers.mjs';
 import { main } from '../src/cli.mjs';
 import { tierOf } from '../src/enterprise.mjs';
 
@@ -342,7 +342,7 @@ test('login in a project enables the Enterprise plugins for that project only, n
 test('login outside a project enables no plugin and says plugins are enabled per project', { skip: process.platform === 'win32' }, async () => {
   const claude = fakeClaude([], 'kette-engineering-core@kette\nui-laws@kette\n');
   let out;
-  try { ({ out } = await run('login', KEYS.ok, '--no-npm')); } finally { claude.restore(); }
+  try { ({ out } = await outsideProject(() => run('login', KEYS.ok, '--no-npm'))); } finally { claude.restore(); }
   assert.match(out, /Claude Code plugins are enabled per project: run kette add in each project\./);
   assert.ok(!claude.calls().some((c) => /plugin (install|uninstall)|marketplace add/.test(c)), 'plugins of older versions in the user scope stay as they are');
 });

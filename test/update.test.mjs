@@ -2,7 +2,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { capture, fakeBundle, fakeClaude, json, serve, tmp, write } from './helpers.mjs';
+import { capture, fakeBundle, fakeClaude, json, serve, tmp, write, outsideProject } from './helpers.mjs';
 import { main } from '../src/cli.mjs';
 
 // Community bundles before and after the agent pack renamed ui-gesetze to ui-laws
@@ -67,7 +67,7 @@ test('Community update outside a project leaves Claude Code alone', { skip: proc
   current = NEW;
   const claude = fakeClaude([], 'kette-engineering-core@kette\n');
   let out;
-  try { ({ out } = await run('update')); } finally { claude.restore(); }
+  try { ({ out } = await outsideProject(() => run('update'))); } finally { claude.restore(); }
   assert.ok(!claude.calls().some((c) => /^plugin (install|uninstall|marketplace)/.test(c)));
   assert.match(out, /Claude Code plugins are enabled per project/);
 });
