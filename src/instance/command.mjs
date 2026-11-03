@@ -298,6 +298,13 @@ export async function doctorInstance(opts, { doctor }) {
       else failed = true;
     }
   }
+  // No checkout here means nothing was checked, so the summary never says "all good" for it (KETTE-58)
+  if (!total) {
+    const why = instance.repos.length ? `none of its ${instance.repos.length} repo${instance.repos.length === 1 ? ' is' : 's are'} checked out on this machine` : 'it has no repos yet';
+    console.log(`\n${bold(`Kette project ${name}: no repo checked, ${why}`)}`);
+    console.log(`Connect a checkout with: ${cmd(`kette project add-repo <path> --project ${name}`)}`);
+    return failed ? 1 : 0;
+  }
   console.log(`\n${bold(`Kette project ${name}: ${good} of ${total} repo${total === 1 ? '' : 's'} all good`)}${away ? dim(`, ${away} not checked out here`) : ''}`);
   return failed ? 1 : 0;
 }
