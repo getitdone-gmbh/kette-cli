@@ -209,6 +209,23 @@ test('doctor --instance checks every repo and names a broken one', async () => {
   assert.match(r.out, /Kette project oss: 1 of 3 repos all good/);
 });
 
+test('doctor --project without a checkout here never says all good and names the way to connect one (KETTE-58)', async () => {
+  const box = sandbox();
+  const rec = { record: 'doctor-instance-none' };
+  ok(await kette(box, ['project', 'create', 'far', '--edition', 'community'], rec));
+  const empty = ok(await kette(box, ['doctor', '--project', 'far'], rec), 1);
+  assert.match(empty.out, /Kette project far: no repo checked, it has no repos yet/);
+  assert.match(empty.out, /kette project add-repo <path> --project far/);
+  assert.doesNotMatch(empty.out, /0 of 0/);
+  const file = path.join(box.home, '.kette', 'instances', 'far', 'instance.json');
+  const instance = readInstanceFile(box, 'far');
+  fs.writeFileSync(file, JSON.stringify({ ...instance, repos: [{ name: 'api', url: 'https://github.com/acme/api' }, { name: 'web', url: 'https://github.com/acme/web' }] }, null, 2));
+  const away = ok(await kette(box, ['doctor', '--project', 'far'], rec), 1);
+  assert.match(away.out, /api not checked out on this machine/);
+  assert.match(away.out, /Kette project far: no repo checked, none of its 2 repos are checked out on this machine/);
+  assert.doesNotMatch(away.out, /all good\n*$/);
+});
+
 test('an instance from a git repo is cloned, its settings are inherited, kette never deletes it', async () => {
   const box = sandbox();
   const app = path.join(box.work, 'app');
