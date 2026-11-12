@@ -8,7 +8,7 @@ test('jeder Fehlercode aus dem Vertrag hat einen eigenen Text mit nächstem Schr
     [401, { error: 'invalid_key' }, /do not know this license key/],
     [403, { error: 'revoked' }, /revoked or refunded/],
     [403, { error: 'wrong_offer' }, /different offer/],
-    [403, { error: 'licence_expired', message: 'Licence expired on 25 November 2027. Renew: https://kette.itdone.de/en/renew', expired_at: '2027-11-25T10:00:00.000Z', renew_url: 'https://kette.itdone.de/en/renew' }, /^Licence expired on 25 November 2027\. Renew: https:\/\/kette\.itdone\.de\/en\/renew Renewing keeps your key/],
+    [403, { error: 'licence_expired', message: 'Licence expired on 25 November 2027. Renew: https://kette.itdone.de/en/renew', expired_at: '2027-11-25T10:00:00.000Z', renew_url: 'https://kette.itdone.de/en/renew' }, /^Licence expired on 25 November 2027\. Renew: https:\/\/kette\.itdone\.de\/en\/renew On that page you can subscribe again with the same key/],
     [429, { error: 'device_limit', seats: { used: 20, max: 20 } }, /20 of 20 devices/],
     [429, { error: 'rate_limited' }, /Wait a minute/],
     [503, { error: 'unavailable' }, /cannot provide the Enterprise bundle right now.*info@itdone\.de.*Community edition keeps working/],
