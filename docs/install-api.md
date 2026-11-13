@@ -1,6 +1,6 @@
 # Install API (contract between kette-cli and chain-delivery)
 
-As of 2026-10-23. Both sides build against this contract. Change it only together, in kette-cli and chain-delivery at the same time.
+As of 2026-11-13 (KETTE-70: Solo one year, Team yearly subscription). Both sides build against this contract. Change it only together, in kette-cli and chain-delivery at the same time.
 
 ## Editions
 - **Community (free):** public under `https://kette.itdone.de/dl` (manifest, CLI, bundle `kette-community-<version>.tgz`). No key.
@@ -12,7 +12,9 @@ Format `CDP-XXXXX-XXXXX-XXXXX-XXXXX` (as in chain-delivery). Valid for offers of
 ## Devices and term
 - On the first `kette login` the CLI creates a random device ID (UUID v4) and stores it in `~/.kette/device-id`.
 - Limits: Solo 3 devices, Team (up to 10 people) 20 devices. A known device does not count again.
-- Updates for 12 months from purchase (`updates_until`). After that the API delivers the newest version published before `updates_until`. Use stays allowed for good.
+- Die Kette (KETTE-70): Solo is a one-time licence for one year without automatic renewal, renewable on request on the licence page; Team is a yearly subscription that renews automatically until cancelled. `updates_until` is the end of access: Solo the end of its year, Team the end of the paid year, plus up to 14 days while a renewal payment is still being retried.
+- When access has ended (Solo year over, Team subscription cancelled, deleted or finally unpaid), every call that hands out something answers `403 { "error": "licence_expired", "message": "Licence expired on <date>. Renew: <url>", "expired_at": "<ISO, end of the paid year>", "renew_url": "<licence page>" }`: `/install/token`, `/install/latest`, `/install/download/*`, `/registry/token`, `/registry/ci-tokens/create`, `/figma/links`, `/figma/download/*` and every registry request (message also as HTTP status line). Still allowed: `/registry/token/revoke`, `/registry/ci-tokens/list`, `/registry/ci-tokens/revoke`. Renewing on the licence page with the same key makes key and tokens work again; the CLI shows `message` as it is.
+- Licences without a subscription (one-time packs): updates for 12 months from purchase, the newest version published before `updates_until` stays available.
 
 ## Endpoints (base: delivery service, default `https://app-kette-delivery-833790b5.itdone.cloud`, overridable in the CLI with `KETTE_DELIVERY`)
 
@@ -27,6 +29,7 @@ Responses:
 - `401` `{ "error": "invalid_key" }` (unknown)
 - `403` `{ "error": "revoked" }` (revoked or fully refunded)
 - `403` `{ "error": "wrong_offer" }` (key does not belong to the family kette)
+- `403` `{ "error": "licence_expired", "message", "expired_at", "renew_url" }` (access of the yearly subscription ended, see Devices and term)
 - `429` `{ "error": "device_limit", "seats": { "used": 3, "max": 3 } }`
 - `503` `{ "error": "unavailable" }` (bundle source not reachable or no matching version available)
 - Rate limit against guessing: at most 10 requests per minute per licence key; failed requests (bad_request, invalid_key) also count against at most 60 per minute per reported IP, then `429 { "error": "rate_limited" }`. (The platform only reports node addresses, so the key leads.)
@@ -62,6 +65,7 @@ Auth: `Authorization: Bearer kt_...` (that is how npm, pnpm and yarn send `_auth
 Errors (JSON `{ "error": ... }`):
 - `401 unauthorized`: token missing, unknown, revoked or device freed.
 - `403 licence_ended`: licence refunded or revoked.
+- `403 licence_expired`: access of the yearly subscription ended; body as for `/install/*`, the status line carries `message`.
 - `403 outside_update_window`: tarball of a version after `updates_until`; also `message`, `updates_until`, `newest_allowed`, and the status line names the date and the newest allowed version (npm shows it).
 - `404 not_found`, `429 rate_limited` with `Retry-After`, `502 upstream_error`, `503 unavailable`, `503 registry_not_configured`.
 
@@ -100,7 +104,7 @@ type RegistryToken = { token: `kt_${string}`; registry: string; scope: '@getitdo
 type CiToken = { id: string; token: `kt_${string}`; label: string; registry: string; kind: 'ci' };
 type CiTokenInfo = { id: string; label: string; prefix: string; created_at: string; last_used_at: string | null };
 type FigmaLinks = { version: string; updates_until: string; guide_url: string | null; files: { name: string; title: string; size: number; sha256: string; url: string; expires_at: string }[] };
-type RegistryError = { error: 'unauthorized' | 'licence_ended' | 'outside_update_window' | 'rate_limited' | 'not_found' | 'read_only' | 'upstream_error' | 'unavailable' | 'registry_not_configured' | 'figma_not_configured' | 'device_unknown' | 'ci_token_limit' | 'bad_request' };
+type RegistryError = { error: 'unauthorized' | 'licence_ended' | 'licence_expired' | 'outside_update_window' | 'rate_limited' | 'not_found' | 'read_only' | 'upstream_error' | 'unavailable' | 'registry_not_configured' | 'figma_not_configured' | 'device_unknown' | 'ci_token_limit' | 'bad_request' };
 ```
 
 ## Where the bundles come from

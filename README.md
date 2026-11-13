@@ -28,7 +28,7 @@ Read the rules without installing: the Community bundle (MIT) is a plain tarball
 | Secret wallet `kette wallet`: credentials and access per environment, Infisical by default or your own provider | | yes |
 | Live deploy to itdone.cloud (`kette cloud setup`) | yes | yes |
 | Access | free, no key | with a licence key of Die Kette (Solo or Team), `kette login <key>` |
-| Updates | any time | 12 months from purchase, the installed version stays usable for good |
+| Updates | any time | every update while the licence runs: Solo one year without automatic renewal, renewable on request at 60 %; Team a yearly subscription that renews automatically at 60 %, cancellable to the end of the year |
 
 The project profile names the edition in the field `tier`: `community` or `enterprise`. The values `free` and `kette` from version 0.1.0 are still read, `kette doctor` points to the new name.
 

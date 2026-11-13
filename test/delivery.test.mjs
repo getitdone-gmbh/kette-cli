@@ -8,6 +8,7 @@ test('jeder Fehlercode aus dem Vertrag hat einen eigenen Text mit nächstem Schr
     [401, { error: 'invalid_key' }, /do not know this license key/],
     [403, { error: 'revoked' }, /revoked or refunded/],
     [403, { error: 'wrong_offer' }, /different offer/],
+    [403, { error: 'licence_expired', message: 'Licence expired on 25 November 2027. Renew: https://kette.itdone.de/en/renew', expired_at: '2027-11-25T10:00:00.000Z', renew_url: 'https://kette.itdone.de/en/renew' }, /^Licence expired on 25 November 2027\. Renew: https:\/\/kette\.itdone\.de\/en\/renew On that page you can renew with the same key/],
     [429, { error: 'device_limit', seats: { used: 20, max: 20 } }, /20 of 20 devices/],
     [429, { error: 'rate_limited' }, /Wait a minute/],
     [503, { error: 'unavailable' }, /cannot provide the Enterprise bundle right now.*info@itdone\.de.*Community edition keeps working/],
@@ -25,4 +26,8 @@ test('Download-Fehler nennen Ursache und nächsten Schritt', () => {
   assert.match(downloadErrorText({ status: 410 }), /expired.*run the command again/);
   assert.match(downloadErrorText({ status: 404 }), /invalid.*Run the command again/);
   assert.match(downloadErrorText({ checksum: true }), /checksum/);
+});
+
+test('an expired licence without message from an older service still names date and renewal page', () => {
+  assert.match(errorFor(403, { error: 'licence_expired', expired_at: '2027-11-25T10:00:00.000Z' }).message, /^License expired on 2027-11-25\. Renew: https:\/\/kette\.itdone\.de\/en\/renew /);
 });
