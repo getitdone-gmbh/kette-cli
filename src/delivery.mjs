@@ -19,8 +19,8 @@ const MESSAGES = {
   invalid_key: () => `We do not know this license key. Check for typos and copy the key from the purchase confirmation. If it still does not work, ${SUPPORT}.`,
   revoked: () => `This license key was revoked or refunded and no longer unlocks Enterprise. For a new key, ${SUPPORT}. The Community edition keeps working.`,
   wrong_offer: () => 'This key belongs to a different offer, not to Die Kette. Use the key from the Die Kette purchase confirmation (Solo or Team).',
-  // yearly licence whose subscription ended (KETTE-70): the service sends the sentence with date and licence page
-  licence_expired: (body) => `${body.message || `License expired${body.expired_at ? ` on ${String(body.expired_at).slice(0, 10)}` : ''}. Renew: ${body.renew_url || RENEW_URL}`} On that page you can subscribe again with the same key, it works right after payment. Everything already in your projects stays usable, the Community edition keeps working.`,
+  // licence past its end (KETTE-70, Solo one year or Team subscription ended): the service sends the sentence with date and licence page
+  licence_expired: (body) => `${body.message || `License expired${body.expired_at ? ` on ${String(body.expired_at).slice(0, 10)}` : ''}. Renew: ${body.renew_url || RENEW_URL}`} On that page you can renew with the same key, it works right after payment. Everything already in your projects stays usable, the Community edition keeps working.`,
   device_limit: (body) => `The device limit of this license is reached${seatsText(body.seats)}. Support can release an old device, ${SUPPORT}. The Team license allows more devices.`,
   rate_limited: () => 'Too many requests in a short time. Wait a minute and try again.',
   unavailable: () => `The delivery service cannot provide the Enterprise bundle right now. Try again in a few minutes, if it persists ${SUPPORT}. The Community edition keeps working.`,

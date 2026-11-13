@@ -1,6 +1,6 @@
 # Install API (contract between kette-cli and chain-delivery)
 
-As of 2026-11-12 (KETTE-70: yearly subscription). Both sides build against this contract. Change it only together, in kette-cli and chain-delivery at the same time.
+As of 2026-11-13 (KETTE-70: Solo one year, Team yearly subscription). Both sides build against this contract. Change it only together, in kette-cli and chain-delivery at the same time.
 
 ## Editions
 - **Community (free):** public under `https://kette.itdone.de/dl` (manifest, CLI, bundle `kette-community-<version>.tgz`). No key.
@@ -12,8 +12,8 @@ Format `CDP-XXXXX-XXXXX-XXXXX-XXXXX` (as in chain-delivery). Valid for offers of
 ## Devices and term
 - On the first `kette login` the CLI creates a random device ID (UUID v4) and stores it in `~/.kette/device-id`.
 - Limits: Solo 3 devices, Team (up to 10 people) 20 devices. A known device does not count again.
-- Die Kette is a yearly subscription (KETTE-70): first year at the list price, then it renews automatically every year at 60 % until cancelled, cancellable any time to the end of the current year. `updates_until` is the end of access: the end of the paid year, plus a 7 day grace while the subscription renews so the renewal can be paid.
-- When access has ended (subscription cancelled, deleted or finally unpaid), every call that hands out something answers `403 { "error": "licence_expired", "message": "Licence expired on <date>. Renew: <url>", "expired_at": "<ISO, end of the paid year>", "renew_url": "<licence page>" }`: `/install/token`, `/install/latest`, `/install/download/*`, `/registry/token`, `/registry/ci-tokens/create`, `/figma/links`, `/figma/download/*` and every registry request (message also as HTTP status line). Still allowed: `/registry/token/revoke`, `/registry/ci-tokens/list`, `/registry/ci-tokens/revoke`. Subscribing again on the licence page with the same key makes key and tokens work again; the CLI shows `message` as it is.
+- Die Kette (KETTE-70): Solo is a one-time licence for one year without automatic renewal, renewable on request on the licence page; Team is a yearly subscription that renews automatically until cancelled. `updates_until` is the end of access: Solo the end of its year, Team the end of the paid year, plus up to 14 days while a renewal payment is still being retried.
+- When access has ended (Solo year over, Team subscription cancelled, deleted or finally unpaid), every call that hands out something answers `403 { "error": "licence_expired", "message": "Licence expired on <date>. Renew: <url>", "expired_at": "<ISO, end of the paid year>", "renew_url": "<licence page>" }`: `/install/token`, `/install/latest`, `/install/download/*`, `/registry/token`, `/registry/ci-tokens/create`, `/figma/links`, `/figma/download/*` and every registry request (message also as HTTP status line). Still allowed: `/registry/token/revoke`, `/registry/ci-tokens/list`, `/registry/ci-tokens/revoke`. Renewing on the licence page with the same key makes key and tokens work again; the CLI shows `message` as it is.
 - Licences without a subscription (one-time packs): updates for 12 months from purchase, the newest version published before `updates_until` stays available.
 
 ## Endpoints (base: delivery service, default `https://app-kette-delivery-833790b5.itdone.cloud`, overridable in the CLI with `KETTE_DELIVERY`)
