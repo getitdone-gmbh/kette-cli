@@ -69,3 +69,12 @@ test('uninstall without any runner says so and exits 0', async () => {
   assert.equal(await runner('uninstall', {}, m.io), 0);
   assert.match(m.out(), /No runner set up by kette/);
 });
+
+test('uninstall --no-service removes the unit without systemctl (E2E-04)', async () => {
+  const { homeDir } = sandboxHome();
+  await runner('install', opts(fakeRunnerPackage(), { 'no-service': true }), machine(homeDir).io);
+  const m = machine(homeDir);
+  assert.equal(await runner('uninstall', { 'no-service': true }, m.io), 0);
+  assert.deepEqual(systemCalls(m.calls), []);
+  assert.ok(!fs.existsSync(path.join(homeDir, '.config', 'systemd', 'user', 'kette-runner.service')));
+});

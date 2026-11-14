@@ -153,6 +153,7 @@ Options:
   --api url             With kette runner install, another run protocol address (test servers)
   --sha256 hex          With kette runner install and update --from <tgz>, the checksum of a local runner package
   --purge               With kette runner uninstall, also remove the work folder ~/.kette/runner-work
+  --no-service          With kette runner, write the service file but never call systemctl, launchctl or loginctl (CI, tests)
   --color, --no-color   Force colors on or off (default: on in a terminal, off in pipes, CI and with NO_COLOR)
 
 kette theme writes a drop-in replacement for the Community theme.css. Enterprise extends the token source in kette-tokens instead.
@@ -172,7 +173,7 @@ const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
   '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--dcr': 'dcr', '--help': 'help', '-h': 'help', '--version': 'version',
   '--preview': 'preview', '--json': 'json', '--stdin': 'stdin', '--effective': 'effective', '--paraphrase': 'paraphrase', '--scaffold': 'scaffold',
-  '--code-stdin': 'code-stdin', '--accept-unsandboxed': 'accept-unsandboxed', '--no-agent-push': 'no-agent-push', '--replace': 'replace', '--purge': 'purge',
+  '--code-stdin': 'code-stdin', '--accept-unsandboxed': 'accept-unsandboxed', '--no-agent-push': 'no-agent-push', '--replace': 'replace', '--purge': 'purge', '--no-service': 'no-service',
 };
 const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out', '--primary', '--accent', '--neutral', '--radius', '--font', '--provider', '--env', '--app', '--note', '--github-env', '--repo', '--edition', '--from', '--role',
   '--board', '--by', '--as', '--source', '--stations', '--statement', '--words', '--rationale', '--label', '--comment', '--member', '--station', '--status',

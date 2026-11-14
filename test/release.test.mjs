@@ -193,3 +193,16 @@ test('ZERO-768: the runner part goes through the word filters of ticketing; node
   assert.match(found, /dist\/adapters\/x\.js: internal word \(spark\)/);
   assert.match(found, /README\.md: internal word \(alexfriedl\)/);
 });
+
+test('SEC768-05: the bundled zero-wallet in node_modules goes through the word filters too', async () => {
+  const { runnerForbidden } = await import('../scripts/runner-part.mjs');
+  const { tmp, write } = await import('./helpers.mjs');
+  for (const wallet of ['zero-agent-runner/node_modules/zero-wallet', 'zero-agent-runner/node_modules/@scope/zero-wallet']) {
+    const dir = tmp();
+    write(dir, `${wallet}/README.md`, 'see the Spark setup');
+    write(dir, 'zero-agent-runner/node_modules/playwright-core/x.js', "const lan = '10.0.0.1';");
+    const found = runnerForbidden(dir).join('\n');
+    assert.match(found, /zero-wallet\/README\.md: internal word \(spark\)/, wallet);
+    assert.doesNotMatch(found, /playwright-core/);
+  }
+});

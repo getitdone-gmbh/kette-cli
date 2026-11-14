@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fakeRunnerPackage, machine, runnerCalls, sandboxHome } from './runner-helpers.mjs';
+import { fakeRunnerPackage, machine, registerCount, runnerCalls, sandboxHome } from './runner-helpers.mjs';
 import { runner } from '../src/runner/index.mjs';
 
 const systemCalls = (calls) => calls.filter((c) => ['systemctl', 'launchctl'].includes(path.basename(c.cmd))).map((c) => [path.basename(c.cmd), ...c.args].join(' '));
@@ -18,7 +18,7 @@ test('update: installs the new package, moves current, rewrites the unit and res
   assert.equal(read, false);
   assert.equal(fs.readlinkSync(path.join(ketteHome, 'runner', 'current')), '0.3.1');
   assert.deepEqual(systemCalls(m.calls), ['systemctl --user daemon-reload', 'systemctl --user restart kette-runner.service']);
-  assert.ok(!runnerCalls(homeDir).some((c) => c.command === 'register' && c.stdin === '' ), 'no second register');
+  assert.equal(registerCount(homeDir), 1, 'no second register');
   assert.match(m.out(), /0\.3\.0 to 0\.3\.1/);
 });
 

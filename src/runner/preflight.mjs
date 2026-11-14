@@ -23,13 +23,17 @@ export function checkNode(version, min = 22) {
 export function findOnPath(name, pathEnv = '') {
   for (const dir of String(pathEnv).split(path.delimiter).filter(Boolean)) {
     const f = path.join(dir, name);
-    try { if (fs.statSync(f).isFile()) { fs.accessSync(f, fs.constants.X_OK); return f; } } catch { /* next */ }
+    try {
+      if (fs.statSync(f).isFile()) { fs.accessSync(f, fs.constants.X_OK); return f; }
+    } catch {
+      // not here, try the next folder
+    }
   }
   return null;
 }
 
 // Installed and signed in, without a billable call and without reading credentials: --version, then auth status when this claude
-// knows it, otherwise only whether the credentials exist (Linux file, macOS keychain entry without -w); an own ANTHROPIC_API_KEY counts
+// knows it, otherwise only whether the credentials exist (Linux file under CLAUDE_CONFIG_DIR like the runner, macOS keychain entry without -w); an own ANTHROPIC_API_KEY counts
 export function claudeStatus(io) {
   const bin = findOnPath('claude', io.env.PATH);
   if (!bin || io.exec(bin, ['--version']).status !== 0) return { installed: false, signedIn: false, bin: null };
@@ -37,7 +41,7 @@ export function claudeStatus(io) {
   const help = io.exec(bin, ['auth', '--help']);
   if (help.status === 0 && /\bstatus\b/.test(help.stdout || '')) return { installed: true, signedIn: io.exec(bin, ['auth', 'status']).status === 0, bin };
   if (io.platform === 'darwin') return { installed: true, signedIn: io.exec('security', ['find-generic-password', '-s', 'Claude Code-credentials']).status === 0, bin };
-  return { installed: true, signedIn: fs.existsSync(path.join(io.homeDir, '.claude', '.credentials.json')), bin };
+  return { installed: true, signedIn: fs.existsSync(path.join(io.env.CLAUDE_CONFIG_DIR || path.join(io.homeDir, '.claude'), '.credentials.json')), bin };
 }
 
 export function checkClaude(io) {
@@ -83,14 +87,15 @@ export function walletOption(opts) {
   return 'file';
 }
 
-export const UNSANDBOXED = 'Agents will run without a sandbox: they can read your home folder and use your own git and gh login. Continue?';
+// The runner checks the sandbox itself (a working bwrap, not only one on PATH) and refuses before the code with its own text;
+// kette shows that text and asks, it keeps no copy of it (CR768-09, SEC768-04)
+export const RUNNER_ASKS_CONSENT = /--accept-unsandboxed/;
+// What the runner says when every check passed and only the code was missing (the dry run gets an empty stdin)
+export const RUNNER_WANTS_CODE = /does not look like a registration code|No code read/;
 
-// Linux with bwrap runs agents in a sandbox; everything else needs a yes or --accept-unsandboxed (KR-38, E6)
-export async function sandboxConsent(opts, io) {
-  const bwrap = io.platform === 'linux' && io.exec('bwrap', ['--version']).status === 0;
-  if (bwrap) return false;
-  if (opts['accept-unsandboxed']) return true;
-  if (!io.hasTerminal) throw new ExitError(`Agents would run without a sandbox${io.platform === 'linux' ? ' (bwrap not found)' : ''}: they can read your home folder and use your own git and gh login. Pass --accept-unsandboxed to allow it.`, 1);
-  if (!(await io.confirm(UNSANDBOXED))) throw new ExitError('Cancelled, nothing was installed.', 1);
-  return true;
+// The text of the runner goes out unchanged
+export async function confirmUnsandboxed(text, io) {
+  if (!io.hasTerminal) throw new ExitError(`${text}\nPass --accept-unsandboxed to allow it.`, 1);
+  io.print(text);
+  if (!(await io.confirm('Continue?'))) throw new ExitError('Cancelled, nothing was installed.', 1);
 }

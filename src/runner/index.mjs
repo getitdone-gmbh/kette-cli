@@ -9,9 +9,9 @@ import { ENTERPRISE } from '../editions.mjs';
 import { installedBundle } from '../manifest.mjs';
 import { ask, askSecret, confirm } from '../prompt.mjs';
 import { cmd, status } from '../out.mjs';
-import { SIGN_IN, SIGN_IN_CLAUDE, checkClaude, checkNode, checkPlatform, checkTokenFile, claudeStatus, findOnPath, repoList, sandboxConsent, walletOption } from './preflight.mjs';
-import { currentEntry, currentVersion, installPackage, minNode, packageFromBundle, packageFromFile, removePackages, setCurrent } from './package.mjs';
-import { SERVICE, enableService, removeService, restartService, serviceFile, serviceStatus, writeService } from './service.mjs';
+import { RUNNER_ASKS_CONSENT, RUNNER_WANTS_CODE, SIGN_IN, SIGN_IN_CLAUDE, checkClaude, checkNode, checkPlatform, checkTokenFile, claudeStatus, confirmUnsandboxed, findOnPath, repoList, walletOption } from './preflight.mjs';
+import { currentEntry, currentVersion, discardIfUnused, installPackage, minNode, packageFromBundle, packageFromFile, removePackages, setCurrent } from './package.mjs';
+import { SERVICE, UNIT, enableService, removeService, restartService, serviceFile, serviceStatus, writeService } from './service.mjs';
 import { readCode, readStdinLine } from './secret-input.mjs';
 
 // Production address of the run protocol; --api or KETTE_RUNNER_API for a test server
@@ -77,6 +77,14 @@ function source(opts) {
   return found;
 }
 
+// The JSON line of zero-runner preflight, null for a package without it
+function runnerPreflight(io, bin) {
+  const r = io.exec(io.nodeBin, [bin, 'preflight']);
+  if (r.status !== 0) return null;
+  const j = lastJson(r.stdout);
+  return j && typeof j.consentRequired === 'boolean' ? j : null;
+}
+
 function requireLogin() {
   if (credentialsStatus() !== 'valid') throw new ExitError(SIGN_IN, 1);
 }
@@ -99,40 +107,78 @@ async function install(opts, io) {
   }
   const src = source(opts);
   if (src.node) checkNode(io.nodeVersion, minNode(src.node));
-  const unsandboxed = await sandboxConsent(opts, io);
+  const hadService = fs.existsSync(serviceFile(io));
   const pkg = installPackage(src);
-  const code = await readCode(opts, io);
-
-  const args = [
+  const bin = path.join(pkg.dir, pkg.entry);
+  const args = (accept) => [
     'register', '--api', apiBase(opts, io),
     ...repos.flatMap((r) => ['--repo', r]),
     ...(tokenFile ? ['--git-token-file', tokenFile] : []),
     ...(opts['no-agent-push'] ? ['--no-agent-push'] : []),
     ...(wallet ? ['--wallet', wallet] : []),
     ...(opts.name ? ['--name', opts.name] : []),
-    ...(unsandboxed ? ['--accept-unsandboxed'] : []),
+    ...(accept ? ['--accept-unsandboxed'] : []),
     ...(opts.replace ? ['--replace'] : []),
   ];
-  const r = io.exec(io.nodeBin, [path.join(pkg.dir, pkg.entry), ...args], { input: `${code}\n` });
-  if (r.stderr) io.printError(scrub(r.stderr, code).trimEnd());
-  if (r.status !== 0) throw new ExitError(`The runner registration failed (exit ${r.status}). The service was not set up; fix the cause and run the command again with a new code if the code was used.`, 1);
+  let accept = Boolean(opts['accept-unsandboxed']);
+  let code;
+  let r;
+  try {
+    // zero-runner preflight decides the sandbox with the runner's own probe and owns the consent text (CR768-09, SEC768-04)
+    const pre = runnerPreflight(io, bin);
+    if (pre?.claude && pre.claude.signedIn === false) throw new ExitError(pre.claude.installed ? SIGN_IN_CLAUDE : 'Install Claude Code first: https://docs.claude.com/en/docs/claude-code/setup', 1);
+    if (pre?.consentRequired && !accept) {
+      await confirmUnsandboxed(String(pre.consentText || '').trim(), io);
+      accept = true;
+    }
+    // Dry run with an empty stdin: the runner runs all its own checks (sandbox, claude, config, socket path) and stops only at the missing code;
+    // a package without preflight answers here with its consent text
+    let dry = io.exec(io.nodeBin, [bin, ...args(accept)], { input: '' });
+    if (!accept && dry.status !== 0 && RUNNER_ASKS_CONSENT.test(dry.stderr)) {
+      await confirmUnsandboxed(String(dry.stderr).trim(), io);
+      accept = true;
+      dry = io.exec(io.nodeBin, [bin, ...args(accept)], { input: '' });
+    }
+    if (dry.status === 0 || !RUNNER_WANTS_CODE.test(dry.stderr)) {
+      throw new ExitError(`The runner refused the setup, no code was read:\n${String(dry.stderr || dry.stdout).trim()}`, 1);
+    }
+    code = await readCode(opts, io);
+    r = io.exec(io.nodeBin, [bin, ...args(accept)], { input: `${code}\n` });
+    if (r.stderr) io.printError(scrub(r.stderr, code).trimEnd());
+    if (r.status !== 0) throw new ExitError(`The runner registration failed (exit ${r.status}). The service was not set up; fix the cause and run the command again with a new code if the code was used.`, 1);
+  } catch (err) {
+    discardIfUnused(pkg);
+    throw err;
+  }
   const info = lastJson(scrub(r.stdout, code)) || {};
 
   setCurrent(pkg.version);
   writeService(io, { entry: currentEntry(pkg.entry), claudeBin: claude.bin });
-  let hints;
-  try { hints = enableService(io); } catch (err) {
-    throw new ExitError(`The runner is registered, but the service ${SERVICE} did not start: ${err.message}. Fix it and run ${cmd('kette runner update')}.`, 1);
+  let hints = [];
+  if (opts['no-service']) hints = [noServiceHint(io)];
+  else {
+    try {
+      hints = enableService(io);
+      // enable --now leaves a running unit on the old token; a replaced install restarts it (CR768-10)
+      if (hadService && io.platform !== 'darwin') restartService(io);
+    } catch (err) {
+      throw new ExitError(`The runner is registered, but the service ${SERVICE} did not start: ${err.message}. Fix it and run ${cmd('kette runner update')}.`, 1);
+    }
   }
+  const unsandboxed = info.sandbox === 'none' || (accept && !info.sandbox);
   const licence = info.licence ? (info.licence.usable ? 'active' : `${info.licence.state || 'not usable'}, agents get no new runs until it is active`) : 'reported with the first heartbeat';
   io.print(`${status('ok', 'OK  ')} Runner ${pkg.version} connected: ${info.executorName || 'this machine'} in workspace ${info.workspaceName || '(unknown)'}.`);
   io.print(`${status('ok', 'OK  ')} Licence ${licence}.`);
-  io.print(`${status('ok', 'OK  ')} Service ${SERVICE} set up (${serviceFile(io)}).`);
+  io.print(`${status('ok', 'OK  ')} Service ${SERVICE} ${opts['no-service'] ? 'written' : 'set up'} (${serviceFile(io)}).`);
   if (unsandboxed) io.print(`${status('warn', 'WARN')} Agents run without a sandbox on this machine.`);
   for (const h of hints) io.print(`${status('info', 'INFO')} ${h}`);
   io.print(`Check it with: ${cmd('kette runner status')}`);
   return 0;
 }
+
+const noServiceHint = (io) => (io.platform === 'darwin'
+  ? `Service files written, not started (--no-service). Start it with: launchctl bootstrap gui/${io.uid} ${serviceFile(io)}`
+  : `Service files written, not started (--no-service). Start it with: systemctl --user daemon-reload && systemctl --user enable --now ${UNIT}`);
 
 const ago = (ms) => (ms < 120_000 ? `${Math.max(0, Math.round(ms / 1000))} s ago` : ms < 7_200_000 ? `${Math.round(ms / 60_000)} min ago` : `${Math.round(ms / 3_600_000)} h ago`);
 
@@ -161,7 +207,8 @@ function runnerStatus(opts, io) {
   if (opts.json) { io.print(JSON.stringify(result, null, 2)); return ok ? 0 : 1; }
   const line = (good, text) => io.print(`${good ? status('ok', 'OK  ') : status('fail', 'FAIL')} ${text}`);
   io.print(`Runner ${result.version || result.package || '(unknown version)'} · ${result.executorName || 'unnamed'} in workspace ${result.workspaceName || '(unknown)'}`);
-  line(service.active, service.active ? `Service ${SERVICE} is running` : `Service ${SERVICE} is not running (${service.detail}). ${io.platform === 'darwin' ? `Log: ~/Library/Logs/${SERVICE}.log` : `Log: journalctl --user -u ${SERVICE}`}`);
+  if (service.tokenRefused) line(false, `Runner token revoked, run ${cmd('kette runner install --replace')} with a new code`);
+  else line(service.active, service.active ? `Service ${SERVICE} is running` : `Service ${SERVICE} is not running (${service.detail}). ${io.platform === 'darwin' ? `Log: ~/Library/Logs/${SERVICE}.log` : `Log: journalctl --user -u ${SERVICE}`}`);
   line(heartbeat.ok, age === null ? 'No heartbeat yet' : `Last heartbeat ${ago(age)}`);
   if (!licence) line(false, 'Licence not reported yet');
   else line(licence.usable === true, licence.usable === true ? `Licence ${licence.state || 'active'}${licence.stale ? ' (last known state, the check is late)' : ''}` : `Licence ${licence.state || 'not usable'}: agents get no new runs`);
@@ -189,9 +236,9 @@ async function update(opts, io) {
   if (pkg.version !== before) {
     setCurrent(pkg.version);
     writeService(io, { entry: currentEntry(pkg.entry), claudeBin: findOnPath('claude', io.env.PATH) });
-    restartService(io, { reload: true });
+    if (!opts['no-service']) restartService(io, { reload: true });
     io.print(`${status('ok', 'OK  ')} Runner updated from ${before || '(none)'} to ${pkg.version}.`);
-  } else restartService(io);
+  } else if (!opts['no-service']) restartService(io);
   if (repos) io.print(`${status('ok', 'OK  ')} Agents may work on: ${repos.join(', ')}`);
   return 0;
 }
@@ -205,7 +252,7 @@ function uninstall(opts, io) {
     if (opts.purge && fs.existsSync(work)) fs.rmSync(work, { recursive: true, force: true });
     return 0;
   }
-  if (removeService(io)) io.print(`${status('ok', 'OK  ')} Service ${SERVICE} stopped and removed.`);
+  if (removeService(io, { noService: Boolean(opts['no-service']) })) io.print(`${status('ok', 'OK  ')} Service ${SERVICE} stopped and removed.`);
   if (existing.kind === 'kette') {
     const entry = currentEntry();
     const r = fs.existsSync(entry) ? io.exec(io.nodeBin, [entry, 'unregister']) : { status: 1, stdout: '', stderr: '' };

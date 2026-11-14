@@ -48,11 +48,23 @@ export function packageFromFile(from, sha256) {
 // The lowest major Node a manifest asks for (">=22"); unknown forms count as 22
 export const minNode = (range) => Number(/(\d+)/.exec(String(range || ''))?.[1] || 22);
 
-// Verifies and unpacks; nothing is left behind when a check fails. Returns { version, dir, entry } of ~/.kette/runner/<version>
+// The service runs this code: folders 755, files 644 (755 when executable), whatever the umask of the user (E2E-05)
+function normalizeModes(dir) {
+  fs.chmodSync(dir, 0o755);
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const f = path.join(dir, e.name);
+    if (e.isSymbolicLink()) continue;
+    if (e.isDirectory()) normalizeModes(f);
+    else fs.chmodSync(f, fs.statSync(f).mode & 0o111 ? 0o755 : 0o644);
+  }
+}
+
+// Verifies and unpacks; nothing is left behind when a check fails. Returns { version, dir, entry, created } of ~/.kette/runner/<version>
 export function installPackage(source) {
   const actual = sha256Of(source.file);
   if (actual !== source.sha256) throw new ExitError(`Checksum does not match for ${path.basename(source.file)}, nothing was installed.`, 1);
   fs.mkdirSync(runnerDir(), { recursive: true });
+  fs.chmodSync(runnerDir(), 0o755);
   sweepDead(runnerDir(), /^\.unpack\.(\d+)\.[0-9a-f]+$/);
   const temp = path.join(runnerDir(), `.unpack.${process.pid}.${crypto.randomBytes(4).toString('hex')}`);
   try {
@@ -65,12 +77,15 @@ export function installPackage(source) {
     const entry = source.entry || DEFAULT_ENTRY;
     if (!fs.existsSync(path.join(temp, entry))) throw new ExitError(`The runner package misses ${entry}, nothing was installed.`, 1);
     const dir = path.join(runnerDir(), version);
+    normalizeModes(temp);
+    let created = false;
     withLock(`runner-${version}`, () => {
       if (fs.existsSync(path.join(dir, entry))) return;
       fs.rmSync(dir, { recursive: true, force: true });
       fs.renameSync(temp, dir);
+      created = true;
     });
-    return { version, dir, entry };
+    return { version, dir, entry, created };
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
@@ -88,6 +103,14 @@ export function setCurrent(version) {
   fs.symlinkSync(version, tmpLink);
   fs.renameSync(tmpLink, currentLink());
 }
+
+// A version this attempt unpacked and that current does not use goes again, so a refused setup leaves no code behind
+export function discardIfUnused(pkg) {
+  if (pkg?.created && currentVersion() !== pkg.version) fs.rmSync(pkg.dir, { recursive: true, force: true });
+}
+
+// Marker the LaunchAgent wrapper leaves when the runner ended with exit 3 (token refused); install and update clear it
+export const refusedMarker = () => path.join(runnerDir(), 'api-refused');
 
 export function removePackages() {
   fs.rmSync(runnerDir(), { recursive: true, force: true });

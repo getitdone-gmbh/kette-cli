@@ -8,7 +8,7 @@ Runs on Linux and macOS. Windows is not supported in this version.
 - Kette signed in on this machine: `kette login <key>` (the runner takes no extra device seat) and a current bundle: `kette update`.
 - Node 22 or newer (the Node that runs kette also runs the runner).
 - Claude Code installed and signed in: run `claude` once and log in. The native installer is recommended, an npm install outside `/usr` works without sandbox.
-- Linux: `bwrap` (bubblewrap) for the agent sandbox, e.g. `sudo apt install bubblewrap`. Without it, and always on macOS, agents run without a sandbox and can read your home folder and use your own git and gh login; kette asks for a yes or takes `--accept-unsandboxed`.
+- Linux: `bwrap` (bubblewrap) for the agent sandbox, e.g. `sudo apt install bubblewrap`. Without a working sandbox, and always on macOS, agents run without one; the runner names what that means (your home folder with the runner token, your Kette sign-in and your Claude login, your git and gh login, any network address, and that everyone who can assign tickets to agents can run commands on this machine), kette shows that text and asks for a yes or takes `--accept-unsandboxed`. With the sandbox the agents still read your Claude login, claude needs it.
 - A one-time runner code from workload.zero: Settings, Agents, Connect runner. It is valid for 15 minutes and works once.
 - A fine-grained GitHub token for the agents (below).
 
@@ -40,8 +40,8 @@ kette runner install --repo acme/web --repo acme/api --git-token-file ~/.config/
 What it does, in this order, and it stops before reading the code when a check fails:
 1. Platform (Linux or macOS), the Kette sign-in, Node 22 or newer, Claude Code installed and signed in (`claude --version`, then `claude auth status` where Claude Code has it, otherwise only whether the credentials exist; no billable call, no credential is read).
 2. The repo list, the token file and the wallet option. Without `--repo` kette asks at a terminal; without a terminal it stops with exit 64.
-3. Sandbox: Linux with bwrap uses it; otherwise a yes or `--accept-unsandboxed`.
-4. The runner package from the Enterprise bundle (`runner/manifest.json`, SHA-256 checked), unpacked to `~/.kette/runner/<version>/`.
+3. The runner package from the Enterprise bundle (`runner/manifest.json`, SHA-256 checked), unpacked to `~/.kette/runner/<version>/` (folders 755, files 644, whatever your umask).
+4. A dry run of `zero-runner register` without code: the runner runs its own checks (a sandbox that really works, Claude Code under `CLAUDE_CONFIG_DIR`, the config it would write). Without a working sandbox it answers with its consent text; kette shows it and asks (or takes `--accept-unsandboxed`). Any other refusal stops here, before the code, and a package this attempt unpacked is removed again.
 5. The code: hidden prompt at a terminal, one line of stdin otherwise (`--code-stdin`). kette pipes it to `zero-runner register` on stdin; it never appears in an argument, a log or the output.
 6. `zero-runner register` exchanges the code for the runner's own token and writes `~/.config/zero-runner/token` (600), `config.json` and `state.json`.
 7. `~/.kette/runner/current` points to the new version, then the service `kette-runner` starts.
@@ -50,6 +50,9 @@ Service:
 - Linux: systemd user unit `~/.config/systemd/user/kette-runner.service` (`systemctl --user daemon-reload`, `enable --now`). A user unit stops when you log out; keep it running with `loginctl enable-linger $USER` (kette shows the hint when linger is off). Log: `journalctl --user -u kette-runner`.
 - macOS: LaunchAgent `~/Library/LaunchAgents/de.itdone.kette-runner.plist`, loaded with `launchctl bootstrap gui/<uid>`. Log: `~/Library/Logs/kette-runner.log`.
 - The unit and the plist hold no secret; only `PATH` is set, so the runner finds node, claude and git.
+- A runner whose token the server refused (removed in workload.zero) ends with exit 3 and is not restarted: the unit has `RestartPreventExitStatus=3`, the LaunchAgent starts the runner through `/bin/sh`, turns exit 3 into a clean exit and leaves `~/.kette/runner/api-refused`. `kette runner status` then says "Runner token revoked, run kette runner install --replace".
+- `kette runner install --replace` restarts a running service, so it picks up the new token at once.
+- `--no-service` writes the unit or plist but calls no `systemctl`, `launchctl` or `loginctl` (CI and tests); kette prints the command to start it.
 
 Options:
 
@@ -66,6 +69,7 @@ Options:
 | `--replace` | Register this machine again with a new code; the old runner token is revoked first |
 | `--api <url>` | Another run protocol address, for test servers (also `KETTE_RUNNER_API`) |
 | `--from <tgz> --sha256 <hex>` | Install a local runner package instead of the one in the bundle, for tests |
+| `--no-service` | Write the service file, but start, stop or reload nothing (also for `update` and `uninstall`) |
 
 What the runner may do: the config allows only `repo.write` for the listed repos. Anything more (CI logs, packages, extra hosts, environment variables) is off; a ticket that needs it ends as `capability_missing`, and you extend the policy by hand after the runner README.
 

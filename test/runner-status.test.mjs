@@ -69,3 +69,24 @@ test('status on macOS asks launchctl print', async () => {
   await runner('status', {}, m.io);
   assert.match(m.out(), /OK +Service kette-runner is running/);
 });
+
+test('status names a refused token and the way back (E2E-02)', async () => {
+  const { homeDir, ketteHome } = sandboxHome();
+  await installed(homeDir);
+  state(homeDir, good);
+  const m = machine(homeDir, { now: () => NOW, responses: {
+    'systemctl --user is-active kette-runner.service': { status: 3, stdout: 'inactive\n' },
+    'systemctl --user show kette-runner.service --property=ExecMainStatus': { status: 0, stdout: 'ExecMainStatus=3\n' },
+  } });
+  assert.equal(await runner('status', {}, m.io), 1);
+  assert.match(m.out(), /FAIL +Runner token revoked, run kette runner install --replace/);
+  const { homeDir: h2 } = sandboxHome();
+  config(h2);
+  state(h2, good);
+  write(path.join(h2, 'Library', 'LaunchAgents'), 'de.itdone.kette-runner.plist', '<plist/>');
+  write(path.join(process.env.KETTE_HOME, 'runner'), 'api-refused', '');
+  const mac = machine(h2, { platform: 'darwin', uid: 501, now: () => NOW, responses: { 'launchctl print gui/501/de.itdone.kette-runner': { status: 0, stdout: '\tstate = not running\n' } } });
+  assert.equal(await runner('status', { json: true }, mac.io), 1);
+  assert.equal(JSON.parse(mac.out()).service.tokenRefused, true);
+  void ketteHome;
+});
