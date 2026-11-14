@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+
+## 0.15.0
+- `kette runner install | status | update | uninstall` (ZERO-768, ADR-0004, docs/runner.md): connects this machine (Linux, macOS) as agent runner of a workload.zero workspace. Checks the Kette sign-in, Node 22 or newer, Claude Code installed and signed in (without a billable call and without reading credentials), the repo list (`--repo`, asked at a terminal, exit 64 without one), the GitHub token file (`--git-token-file`, mode 600, never read; `--no-agent-push` for tests) and the sandbox (bwrap on Linux, otherwise a yes or `--accept-unsandboxed`) before it reads the one-time code. The runner package comes from `runner/` of the Enterprise bundle with its SHA-256, or from `--from <tgz> --sha256 <hex>`, and is unpacked to `~/.kette/runner/<version>`. The code comes from a hidden prompt or stdin (`--code-stdin`; `--code` warns about the shell history) and goes to `zero-runner register` on stdin only. `--wallet file`, `--name`, `--api`, `--replace` pass through; `--wallet vault|infisical` ends with exit 64. The service `kette-runner` is a systemd user unit (with the `loginctl enable-linger` hint) or a LaunchAgent bootstrapped in `gui/<uid>`, without secrets. A runner kette did not set up is never touched. `status` reads `~/.config/zero-runner/state.json` and the service, `uninstall` stops the service, revokes the runner token and removes its files (`--purge` also the work folder). Windows: "Runners are not supported on Windows in this version."
+- Release: with `KETTE_RUNNER_REF` the Enterprise bundle gets the part `runner/` (package and `runner/manifest.json`), checked with the word filters of ticketing; without it the bundle stays as before.
+- `--repo` can be given more than once (and comma separated) for `kette runner`; `kette wallet sync github` still reads the last one.
 - Licence term (KETTE-70): the delivery answer `licence_expired` is shown as sent ("Licence expired on <date>. Renew: <link>"), with the hint that you can renew with the same key and that files in your projects stay usable. Contract in docs/install-api.md updated.
 
 ## 0.14.0

@@ -49,10 +49,11 @@ The project profile names the edition in the field `tier`: `community` or `enter
 | `kette figma` | Download the current Figma release of Die Kette, verify checksums, show the import order; `--out folder`. The Figma files follow as an update by 2026-11-30 |
 | `kette cloud setup` / `status` | Live deploy to itdone.cloud: account link and the itdone MCP server in Claude Code, see below |
 | `kette wallet …` | Secret wallet (Enterprise): names in `.kette/wallet.json`, values in Infisical or your own provider, see Secret wallet |
+| `kette runner install \| status \| update \| uninstall` | Agent runner (Enterprise): connect this machine (Linux, macOS) to your workload.zero workspace so agents work on its tickets with your own Claude Code login, see Agent runner |
 | `kette theme` | Free theme generator: a theme.css for the Community components from your brand colour, light and dark, WCAG AA, see Theming |
 | `kette version` | Show the CLI version |
 
-Options: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out folder`, `--have-account`, `--primary`, `--accent`, `--neutral`, `--radius`, `--font`, `--name`, `--preview`, `--json`, `--provider`, `--env`, `--app`, `--note`, `--stdin`, `--github-env`, `--repo`, `--project [name]`, `--board`, `--scaffold`, `--edition`, `--from`, `--role`, `--effective`, `--color` / `--no-color` (default: on in a terminal, off in pipes, CI and with `NO_COLOR`).
+Options: `--dry-run`, `--yes`, `--stack a,b`, `--platform id`, `--patterns a,b`, `--no-plugins`, `--path`, `--no-npm`, `--npm-replace`, `--out folder`, `--have-account`, `--primary`, `--accent`, `--neutral`, `--radius`, `--font`, `--name`, `--preview`, `--json`, `--provider`, `--env`, `--app`, `--note`, `--stdin`, `--github-env`, `--repo`, `--project [name]`, `--board`, `--scaffold`, `--edition`, `--from`, `--role`, `--effective`, `--code-stdin`, `--git-token-file`, `--no-agent-push`, `--wallet`, `--accept-unsandboxed`, `--replace`, `--api`, `--sha256`, `--purge`, `--color` / `--no-color` (default: on in a terminal, off in pipes, CI and with `NO_COLOR`).
 
 ## Kette projects
 Any number of Kette projects run on one machine, each with its own scope: edition (`enterprise` or `community`), repos, members, ticketing, wallet defaults, overlays and chain stations, in `~/.kette/instances/<name>/instance.json`. A Kette project can live in its own git repo (`kette project create <name> --from <git-url>`), so the team and agents share it. One licence covers every Kette project, seats stay per device.
@@ -76,6 +77,17 @@ kette ticket check KD-0001                            # follow-through per stati
 ```
 
 Board, stations and members come from the Kette project, the credential from the secret wallet; every write shows its plan first. Commands and gates: [docs/ticketing.md](docs/ticketing.md), decision: [ADR-0003](docs/adr/0003-ticketing-from-the-enterprise-bundle.md).
+
+### Agent runner (Enterprise)
+
+```sh
+kette runner install --repo acme/web --git-token-file ~/.config/kette-runner-github-token   # asks for the code from workload.zero, hidden
+kette runner status
+kette runner update            # after kette update, or --repo to change the list
+kette runner uninstall         # --purge also removes the work folder
+```
+
+Needs `kette login`, Node 22 or newer and a signed-in Claude Code; on Linux bwrap for the sandbox (macOS and Linux without bwrap only after a yes or `--accept-unsandboxed`). The runner comes from the Enterprise bundle with its SHA-256, the one-time code only from a hidden prompt or stdin and goes to the runner on stdin, never into an argument or the output. The service is `kette-runner` (systemd user unit or LaunchAgent). How to create the fine-grained GitHub token for the agents, all options and exit codes: [docs/runner.md](docs/runner.md), decision: [ADR-0004](docs/adr/0004-runner-install-from-the-enterprise-bundle.md).
 
 ## Review flow (`flow` in the profile)
 How a team reviews changes is set once in `.kette/profile.json`; `kette add` and `kette update` write it into the flow text of `.kette/README.md`, which Claude Code reads in every session.
@@ -266,6 +278,7 @@ The files in the project (`.kette/`, reference line in `CLAUDE.md`, ADR template
 | `KETTE_NO_MODIFY_PATH` | not set | `1` leaves the shell startup file unchanged, the installer then shows the line to add yourself |
 | `KETTE_INSECURE` | not set | `1` allows plain http for mirror, delivery service and registry, only for a trusted test server (localhost is always allowed) |
 | `KETTE_WALLET_TRUST` | not set | `1` trusts the wallet provider of the project without asking, for CI |
+| `KETTE_RUNNER_API` | `https://api.workbase.itdone.de/api/project-manager/api/run-protocol` | Run protocol address for `kette runner install`, only for test servers (`--api` wins) |
 | `KETTE_THEME` | not set | `dark` or `light` for the terminal colors, otherwise taken from `COLORFGBG` |
 | `NO_COLOR` | not set | Turns colors off unless `--color` is given |
 
@@ -276,6 +289,8 @@ The files in the project (`.kette/`, reference line in `CLAUDE.md`, ADR template
 - `private/kette-enterprise-<version>.tgz` with `kette-engineering-core`, `kette-engineering`, `design-system-agents`, `design-review-pack`, and `private/kette-enterprise.json` (`{version, sha256, published_at, agent_pack}`), never public
 
 `npm run release -- --publish-enterprise` also uploads the Enterprise bundle with `gh release create` as release `v<version>` to the private repo `alexfriedl/kette-engineering`, where the delivery service picks it up. The script stops when the repo is not private, kette-engineering has uncommitted changes, the commit is not pushed, or the agent pack state is not a release tag. Without the switch it only prints the command.
+
+With `KETTE_RUNNER_REF=<tag of zero-agent-runner>` (and `KETTE_RUNNER`, default `../zero-agent-runner`) the Enterprise bundle also gets the part `runner/` for `kette runner`: the package from `npm run pack:release` at that tag and `runner/manifest.json` with its SHA-256. The own files of the package go through the word filters of ticketing; a hit stops the release. Without the variable the bundle stays as before. Details: [docs/runner.md](docs/runner.md).
 
 A new CLI version: raise `version` in `package.json`, add an entry to [CHANGELOG.md](CHANGELOG.md), run `npm test`, then `npm run release`.
 
