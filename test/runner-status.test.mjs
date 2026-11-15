@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { unixTest as test } from './runner-helpers.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fakeRunnerPackage, machine, sandboxHome, write } from './runner-helpers.mjs';

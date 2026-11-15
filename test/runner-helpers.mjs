@@ -1,3 +1,4 @@
+import { test as nodeTest } from 'node:test';
 // Shared setup of the kette runner tests: isolated HOME and KETTE_HOME, a fake runner package, a recording exec and a fake claude
 import fs from 'node:fs';
 import path from 'node:path';
@@ -121,3 +122,6 @@ export function tokenFile(homeDir, mode = 0o600) {
 }
 
 export { sha256, tmp, write };
+
+// The fakes for claude, systemctl and launchctl are shell scripts; Windows has its own file runner-windows.test.mjs
+export const unixTest = (name, fn) => nodeTest(name, { skip: process.platform === 'win32' && 'runner runs on macOS and Linux only' }, fn);
