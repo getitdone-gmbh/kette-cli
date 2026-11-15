@@ -18,3 +18,12 @@ test('Windows: every runner action ends with exit 2 and the message, before anyt
     assert.ok(!fs.existsSync(path.join(ketteHome, 'runner')));
   }
 });
+
+test('kette help names the Windows limit at the runner entry (QA768-06)', async () => {
+  const { main } = await import('../src/cli.mjs');
+  const lines = [];
+  const orig = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try { await main(['help']); } finally { console.log = orig; }
+  assert.match(lines.join('\n'), /kette runner install \| status \| update \| uninstall\n\s+.*not supported on Windows in this version/);
+});

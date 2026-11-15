@@ -17,7 +17,7 @@ import { readCode, readStdinLine } from './secret-input.mjs';
 // Production address of the run protocol; --api or KETTE_RUNNER_API for a test server
 export const DEFAULT_API = 'https://api.workbase.itdone.de/api/project-manager/api/run-protocol';
 export const RUNNER_HELP = `kette runner install | status | update | uninstall
-                        Connect this machine as agent runner of your workload.zero workspace (macOS, Linux)`;
+                        Connect this machine as agent runner of your workload.zero workspace (macOS, Linux; not supported on Windows in this version)`;
 const USAGE = 'Usage: kette runner install | status | update | uninstall (see kette help and docs/runner.md)';
 const NONE = `No runner set up by kette on this machine. Set one up with: ${cmd('kette runner install')}`;
 const FOREIGN = 'This machine has a runner that was not set up by kette. Remove it first; kette never changes it.';
@@ -180,6 +180,9 @@ const noServiceHint = (io) => (io.platform === 'darwin'
   ? `Service files written, not started (--no-service). Start it with: launchctl bootstrap gui/${io.uid} ${serviceFile(io)}`
   : `Service files written, not started (--no-service). Start it with: systemctl --user daemon-reload && systemctl --user enable --now ${UNIT}`);
 
+// " (last checked YYYY-MM-DD HH:MM UTC)" for a known time of the last licence check, empty otherwise
+const checkedText = (iso) => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? ` (last checked ${d.toISOString().slice(0, 16).replace('T', ' ')} UTC)` : ''; };
+
 const ago = (ms) => (ms < 120_000 ? `${Math.max(0, Math.round(ms / 1000))} s ago` : ms < 7_200_000 ? `${Math.round(ms / 60_000)} min ago` : `${Math.round(ms / 3_600_000)} h ago`);
 
 function runnerStatus(opts, io) {
@@ -211,7 +214,8 @@ function runnerStatus(opts, io) {
   else line(service.active, service.active ? `Service ${SERVICE} is running` : `Service ${SERVICE} is not running (${service.detail}). ${io.platform === 'darwin' ? `Log: ~/Library/Logs/${SERVICE}.log` : `Log: journalctl --user -u ${SERVICE}`}`);
   line(heartbeat.ok, age === null ? 'No heartbeat yet' : `Last heartbeat ${ago(age)}`);
   if (!licence) line(false, 'Licence not reported yet');
-  else line(licence.usable === true, licence.usable === true ? `Licence ${licence.state || 'active'}${licence.stale ? ' (last known state, the check is late)' : ''}` : `Licence ${licence.state || 'not usable'}: agents get no new runs`);
+  else if (licence.usable !== true && (!licence.state || /unknown/.test(licence.state))) line(false, `Licence status unknown${checkedText(licence.checkedAt)}, the check will be retried`);
+  else line(licence.usable === true, licence.usable === true ? `Licence ${licence.state || 'active'}${licence.stale ? ' (last known state, the check is late)' : ''}` : `Licence ${licence.state}: agents get no new runs`);
   line(claude.signedIn, claude.signedIn ? 'Claude Code signed in' : claude.installed ? SIGN_IN_CLAUDE : 'Claude Code not found');
   return ok ? 0 : 1;
 }

@@ -90,3 +90,17 @@ test('status names a refused token and the way back (E2E-02)', async () => {
   assert.equal(JSON.parse(mac.out()).service.tokenRefused, true);
   void ketteHome;
 });
+
+test('status: an unknown licence says unknown with the time of the last check, not "not usable" (QA768-07)', async () => {
+  const { homeDir } = sandboxHome();
+  await installed(homeDir);
+  state(homeDir, { ...good, licence: { usable: false, state: null, stale: true, checkedAt: '2026-11-14T21:30:00Z' } });
+  const m = machine(homeDir, { ...active, now: () => NOW });
+  assert.equal(await runner('status', {}, m.io), 1);
+  assert.match(m.out(), /FAIL +Licence status unknown \(last checked 2026-11-14 21:30 UTC\), the check will be retried/);
+  assert.doesNotMatch(m.out(), /not usable/);
+  state(homeDir, { ...good, licence: { usable: false, state: 'licence_unknown', stale: false } });
+  const m2 = machine(homeDir, { ...active, now: () => NOW });
+  await runner('status', {}, m2.io);
+  assert.match(m2.out(), /FAIL +Licence status unknown, the check will be retried/);
+});
