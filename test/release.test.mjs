@@ -160,3 +160,49 @@ test('CR-KP-1: the release reads the fragment of Get IT Done under its new name,
   fs.mkdirSync(path.join(none, 'migrations'));
   assert.throws(() => fragmentFile(none), /kette-ticketing has no fragment of Get IT Done \(migrations\/get-it-done-project\.json or migrations\/get-it-done-instance\.json\).*nothing was packed/);
 });
+
+test('ZERO-768: the runner part carries the tgz and runner/manifest.json with the checksum, a wrong checksum stops the release', async () => {
+  const { RUNNER_PART, stageRunnerPart } = await import('../scripts/runner-part.mjs');
+  const { fakeRunnerPackage, tmp } = await import('./runner-helpers.mjs');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const pkg = fakeRunnerPackage('0.3.0');
+  const meta = { name: 'zero-agent-runner', version: '0.3.0', file: path.basename(pkg.file), sha256: pkg.sha256, size: pkg.buf.length, node: '>=22', protocol: '1', root: 'zero-agent-runner', entry: 'zero-agent-runner/dist/bin.js', platforms: ['linux', 'darwin'] };
+  const dest = tmp();
+  const manifest = stageRunnerPart(pkg.file, meta, dest);
+  assert.equal(RUNNER_PART, 'runner');
+  assert.deepEqual(fs.readdirSync(path.join(dest, 'runner')).sort(), ['manifest.json', meta.file].sort());
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dest, 'runner', 'manifest.json'), 'utf8')), manifest);
+  assert.deepEqual(manifest, { version: '0.3.0', file: meta.file, sha256: pkg.sha256, node: '>=22', entry: 'zero-agent-runner/dist/bin.js', protocol: '1', platforms: ['linux', 'darwin'] });
+  assert.throws(() => stageRunnerPart(pkg.file, { ...meta, sha256: 'f'.repeat(64) }, tmp()), /checksum.*nothing was packed/i);
+  assert.throws(() => stageRunnerPart(pkg.file, { ...meta, file: '../x.tgz' }, tmp()), /file name/);
+  assert.throws(() => stageRunnerPart(pkg.file, { ...meta, version: '0.3.0/../x' }, tmp()), /version/);
+});
+
+test('ZERO-768: the runner part goes through the word filters of ticketing; node_modules of third parties are not scanned', async () => {
+  const { runnerForbidden } = await import('../scripts/runner-part.mjs');
+  const { tmp, write } = await import('./helpers.mjs');
+  const clean = tmp();
+  write(clean, 'zero-agent-runner/dist/bin.js', "const api = 'https://api.workbase.itdone.de/api/project-manager/api/run-protocol';");
+  write(clean, 'zero-agent-runner/node_modules/playwright-core/index.js', "const mail = 'dev@example.com'; const lan = '10.0.0.1';");
+  assert.deepEqual(runnerForbidden(clean), []);
+  const dirty = tmp();
+  write(dirty, 'zero-agent-runner/dist/adapters/x.js', "const wrapper = 'spark-run-slot';");
+  write(dirty, 'zero-agent-runner/README.md', 'see github.com/alexfriedl/zero-agent-runner');
+  const found = runnerForbidden(dirty).join('\n');
+  assert.match(found, /dist\/adapters\/x\.js: internal word \(spark\)/);
+  assert.match(found, /README\.md: internal word \(alexfriedl\)/);
+});
+
+test('SEC768-05: the bundled zero-wallet in node_modules goes through the word filters too', async () => {
+  const { runnerForbidden } = await import('../scripts/runner-part.mjs');
+  const { tmp, write } = await import('./helpers.mjs');
+  for (const wallet of ['zero-agent-runner/node_modules/zero-wallet', 'zero-agent-runner/node_modules/@scope/zero-wallet']) {
+    const dir = tmp();
+    write(dir, `${wallet}/README.md`, 'see the Spark setup');
+    write(dir, 'zero-agent-runner/node_modules/playwright-core/x.js', "const lan = '10.0.0.1';");
+    const found = runnerForbidden(dir).join('\n');
+    assert.match(found, /zero-wallet\/README\.md: internal word \(spark\)/, wallet);
+    assert.doesNotMatch(found, /playwright-core/);
+  }
+});

@@ -28,6 +28,7 @@ import { WALLET_HELP, hasWallet, offerWallet, wallet, walletDoctor } from './wal
 import { PROJECT_HELP, askInstance, createPending, doctorInstance, project as projectCommand, joinInstance, prepareJoin, requireEdition } from './instance/command.mjs';
 import { inherit, instanceSource, originName, printable, readInstance } from './instance/config.mjs';
 import { TICKET_HELP, offerTicketing, ticket } from './ticket/command.mjs';
+import { RUNNER_HELP, runner } from './runner/index.mjs';
 
 import { VERSION } from './version.mjs';
 
@@ -89,6 +90,7 @@ Commands:
                         [--radius none|sm|md|lg|full|<px>] [--font "<family>"] [--name <id>] [--out <path>] [--preview] [--json]
   ${WALLET_HELP}
   ${TICKET_HELP}
+  ${RUNNER_HELP}
   kette version
 
 Options:
@@ -101,7 +103,8 @@ Options:
   --scaffold            With kette add in a repo that has files, also add Dockerfile, compose, CI and the deploy workflow (Enterprise)
   --project [name]      With kette init and add, connect the repo to this Kette project; with kette project the Kette project meant
   --edition id          With kette project create: enterprise or community (default: the edition of this machine)
-  --from source         With kette project create, clone a Kette project repo (git URL) or link a folder that has instance.json
+  --from source         With kette project create, clone a Kette project repo (git URL) or link a folder that has instance.json;
+                        with kette runner install and update, a local runner package (with --sha256)
   --role id             With kette project members add: owner or member (default member)
   --effective           With kette profile, add the values the repo inherits from its Kette project
   --path                With kette rules, show file paths instead of content
@@ -113,7 +116,7 @@ Options:
   --neutral kind        With kette theme, warm, cool (default), neutral or a hex colour to tint the greys
   --radius size         With kette theme, none, sm, md (default), lg, full or pixels
   --font family         With kette theme, the font family (default Inter)
-  --name id             With kette init the project name, with kette theme the theme name
+  --name id             With kette init the project name, with kette theme the theme name, with kette runner install the machine name
   --preview             With kette theme, also write theme-preview.html and open it in a terminal
   --json                With kette theme, print the tokens and the contrast report as JSON
   --have-account        With kette cloud setup, do not open the itdone.cloud registration
@@ -124,7 +127,8 @@ Options:
   --note text           With kette wallet add, what the secret is for
   --stdin               With kette wallet set and add, read the value from stdin instead of a hidden prompt
   --github-env name     With kette wallet sync github, the GitHub environment (default: the wallet environment)
-  --repo owner/name     With kette wallet sync github, another repo than the current one
+  --repo owner/name     With kette wallet sync github, another repo than the current one; with kette runner install and update,
+                        a repo the agents may work on (repeat it or comma separated)
   --board id            With kette ticket connect, the board: workload.zero project id, GitHub or GitLab repo path, Jira project
                         key, Linear team key, Azure DevOps project
   --host h, --org o     With kette ticket connect, a self-hosted or site host (Jira site, GitHub Enterprise, GitLab, Azure DevOps
@@ -140,6 +144,16 @@ Options:
   --source ref          With kette ticket new, where it was decided (chat:<session>, meeting:<date>, note:<file>)
   --member id, --station s, --status a,b
                         With kette ticket list and inbox, filter the items
+  --code-stdin          With kette runner install, read the runner code from stdin (default: a hidden prompt at a terminal)
+  --git-token-file path With kette runner install, a file (mode 600) with a fine-grained GitHub token for the repos
+  --no-agent-push       With kette runner install, agents commit locally and never push (tests, no token needed)
+  --wallet file         With kette runner install, an empty file wallet for the agents (vault and infisical by hand)
+  --accept-unsandboxed  With kette runner install, allow agents without a sandbox (macOS, Linux without bwrap)
+  --replace             With kette runner install, register this machine again with a new code
+  --api url             With kette runner install, another run protocol address (test servers)
+  --sha256 hex          With kette runner install and update --from <tgz>, the checksum of a local runner package
+  --purge               With kette runner uninstall, also remove the work folder ~/.kette/runner-work
+  --no-service          With kette runner, write the service file but never call systemctl, launchctl or loginctl (CI, tests)
   --color, --no-color   Force colors on or off (default: on in a terminal, off in pipes, CI and with NO_COLOR)
 
 kette theme writes a drop-in replacement for the Community theme.css. Enterprise extends the token source in kette-tokens instead.
@@ -147,7 +161,8 @@ The installer never creates cloud resources and never deploys. Infrastructure is
 Plugins are enabled per project in .claude/settings.json, never for all projects; a Community project never enables Enterprise plugins.
 kette wallet keeps names in .kette/wallet.json and values in your provider; it never prints a value and never takes one as an argument.
 kette ticket reads its board, stations and members from the Kette project of the repo and its credential from the secret wallet; it writes to a board only after a yes or --yes.
-kette cloud setup only registers the itdone MCP server; Claude Code deploys after you confirm, and kette never handles a password or token.`;
+kette cloud setup only registers the itdone MCP server; Claude Code deploys after you confirm, and kette never handles a password or token.
+kette runner takes the one-time code only from a hidden prompt or stdin, hands it to the runner on stdin and never prints it.`;
 
 // Brand line with version and edition, only on init and help
 const brand = () => brandLine(`kette ${VERSION} ${symbols().sep} ${editionLabel(tierOf())}`);
@@ -158,11 +173,13 @@ const FLAGS = {
   '--dry-run': 'dryRun', '--yes': 'yes', '-y': 'yes', '--no-plugins': 'noPlugins', '--ci': 'ci', '--path': 'path',
   '--no-npm': 'noNpm', '--npm-replace': 'npmReplace', '--have-account': 'haveAccount', '--dcr': 'dcr', '--help': 'help', '-h': 'help', '--version': 'version',
   '--preview': 'preview', '--json': 'json', '--stdin': 'stdin', '--effective': 'effective', '--paraphrase': 'paraphrase', '--scaffold': 'scaffold',
+  '--code-stdin': 'code-stdin', '--accept-unsandboxed': 'accept-unsandboxed', '--no-agent-push': 'no-agent-push', '--replace': 'replace', '--purge': 'purge', '--no-service': 'no-service',
 };
 const VALUES = ['--stack', '--platform', '--patterns', '--name', '--out', '--primary', '--accent', '--neutral', '--radius', '--font', '--provider', '--env', '--app', '--note', '--github-env', '--repo', '--edition', '--from', '--role',
   '--board', '--by', '--as', '--source', '--stations', '--statement', '--words', '--rationale', '--label', '--comment', '--member', '--station', '--status',
   '--pr', '--commit', '--figma', '--review', '--approved-by', '--proposed-by', '--acceptance',
-  '--host', '--org', '--sub-issues', '--deployment', '--decision-type', '--item-type', '--trusted-authors'];
+  '--host', '--org', '--sub-issues', '--deployment', '--decision-type', '--item-type', '--trusted-authors',
+  '--sha256', '--code', '--api', '--wallet', '--git-token-file'];
 // Free text may start with a dash
 const TEXT_VALUES = ['--note', '--statement', '--words', '--rationale', '--comment', '--acceptance'];
 
@@ -181,6 +198,8 @@ export function parse(argv) {
       const value = argv[++i];
       if (value === undefined || (value.startsWith('-') && !TEXT_VALUES.includes(a))) throw new ExitError(`${a} needs a value`);
       opts[a.slice(2)] = value;
+      // kette runner takes several repos; kette wallet sync keeps reading the last --repo
+      if (a === '--repo') opts.repos = [...(opts.repos || []), ...listArg(value)];
     } else if (a.startsWith('-') && a !== '-') throw new ExitError(`Unknown option ${a}`);
     else opts._.push(a);
   }
@@ -1000,6 +1019,8 @@ export async function main(argv) {
     if (command === 'theme') return await theme(opts, { version: VERSION });
     // Ticketing is Enterprise and project scoped: board, stations and members from the instance of the repo in this folder
     if (command === 'ticket') return await ticket(arg, opts, { resolveProject, spawnSync });
+    // The workload.zero runner on this machine (Enterprise, docs/adr/0004); install, update and uninstall check the sign-in themselves
+    if (command === 'runner') return await runner(arg, opts);
     if (command === 'state') { console.log(JSON.stringify({ home: home(), mirror: mirror(), delivery: delivery(), ...redactedState() }, null, 2)); return 0; }
     console.error(`Unknown command: ${command}\n`);
     console.log(help());

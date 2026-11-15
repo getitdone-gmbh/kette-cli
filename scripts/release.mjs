@@ -2,6 +2,7 @@
 // Ohne Option wird nichts veröffentlicht. --publish-enterprise lädt das Enterprise-Paket zusätzlich als Release v<version> in das private Repo alexfriedl/kette-engineering
 // Quellen: KETTE_ENGINEERING (Standard ../kette-engineering, Arbeitsstand), KETTE_AGENT_PACK (Standard ../claude-design-agent-pack) mit KETTE_AGENT_PACK_REF (Standard: neuestes Tag v*)
 // Ticketing (Enterprise, private, docs/adr/0003): KETTE_TICKETING (default ../kette-ticketing) with KETTE_TICKETING_REF (default: newest tag v*), built from git into ticketing/ of the Enterprise bundle
+// Runner (Enterprise, private, docs/adr/0004): only with KETTE_RUNNER_REF (a tag of zero-agent-runner), from KETTE_RUNNER (default ../zero-agent-runner) into runner/ of the Enterprise bundle; without it the bundle stays as before
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -53,7 +54,13 @@ const ticketingCommit = execFileSync('git', ['-C', ticketingRepo, 'rev-parse', `
 const ticketingTagged = execFileSync('git', ['-C', ticketingRepo, 'tag', '--points-at', ticketingCommit], { encoding: 'utf8' }).trim() !== '';
 const ticketingCount = execFileSync('git', ['-C', ticketingRepo, 'rev-list', '--count', ticketingCommit], { encoding: 'utf8' }).trim();
 // Semver, damit Claude Code neue Plugin-Versionen erkennt: 0.<Datum>.<Commits kette-engineering plus Commits Agenten-Pack>; ein neuer Stand in einem der beiden Repos ergibt eine neue Version
-const version = `0.${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${Number(count) + Number(packCount) + Number(ticketingCount)}`;
+// The runner is opt-in: a release without KETTE_RUNNER_REF builds the same bundle as before this part existed
+const runnerRef = process.env.KETTE_RUNNER_REF || '';
+const runnerRepo = path.resolve(process.env.KETTE_RUNNER || path.join(root, '..', 'zero-agent-runner'));
+const runnerCommit = runnerRef ? execFileSync('git', ['-C', runnerRepo, 'rev-parse', `${runnerRef}^{commit}`], { encoding: 'utf8' }).trim() : '';
+const runnerTagged = runnerRef ? execFileSync('git', ['-C', runnerRepo, 'tag', '--points-at', runnerCommit], { encoding: 'utf8' }).trim() !== '' : true;
+const runnerCount = runnerRef ? Number(execFileSync('git', ['-C', runnerRepo, 'rev-list', '--count', runnerCommit], { encoding: 'utf8' }).trim()) : 0;
+const version = `0.${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${Number(count) + Number(packCount) + Number(ticketingCount) + runnerCount}`;
 // Feste Zeit für alle Dateien im Paket (jüngerer der beiden Commits), damit gleicher Inhalt dieselbe Prüfsumme ergibt
 const commitTime = (repo, ref) => Number(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%ct', ref], { encoding: 'utf8' }).trim());
 const sourceTime = new Date(Math.max(commitTime(eng, 'HEAD'), commitTime(agentPack, agentPackCommit), commitTime(ticketingRepo, ticketingCommit)) * 1000);
@@ -111,6 +118,27 @@ const denyWords = denyWordsFrom(JSON.parse(fs.readFileSync(fragmentFile(ticketin
 const internal = [...forbiddenIn(ticketingStage, { denyWords }), ...routingErrors(neutral, agentsIn(path.join(eng, 'plugins'), path.join(packSrc, 'plugins'), ticketingStage)).map((e) => `routing.default.json: ${e}`)];
 if (internal.length) throw new Error(`kette-ticketing ${ticketingRef} would ship internal content, nothing was packed:\n  ${internal.join('\n  ')}`);
 const fromTicketing = [[path.join(ticketingStage, 'ticketing'), 'ticketing'], [path.join(ticketingStage, 'plugin'), `plugins/${TICKETING_PLUGIN}`]];
+// The runner from a clone at its ref (pack:release takes its timestamp from git), packed by its own script, checked and staged as runner/
+const { RUNNER_PART, runnerForbidden, stageRunnerPart } = await import('./runner-part.mjs');
+let runnerManifest = null;
+const runnerStage = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-runner-stage-'));
+if (runnerRef) {
+  const runnerSrc = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-runner-'));
+  execFileSync('git', ['clone', '--quiet', '--no-hardlinks', runnerRepo, runnerSrc], { stdio: 'inherit' });
+  execFileSync('git', ['-C', runnerSrc, 'checkout', '--quiet', '--detach', runnerCommit], { stdio: 'inherit' });
+  execFileSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: runnerSrc, stdio: 'inherit', shell: process.platform === 'win32' });
+  const runnerOut = path.join(runnerSrc, 'release');
+  execFileSync('npm', ['run', 'pack:release', '--', '--out', runnerOut], { cwd: runnerSrc, stdio: 'inherit', shell: process.platform === 'win32' });
+  const meta = JSON.parse(fs.readFileSync(path.join(runnerOut, 'runner-manifest.json'), 'utf8'));
+  const unpacked = path.join(runnerSrc, 'unpacked');
+  fs.mkdirSync(unpacked);
+  execFileSync('tar', ['-xzf', path.join(runnerOut, meta.file), '-C', unpacked]);
+  const runnerInternal = runnerForbidden(unpacked, { denyWords });
+  if (runnerInternal.length) throw new Error(`zero-agent-runner ${runnerRef} would ship internal content, nothing was packed:\n  ${runnerInternal.join('\n  ')}`);
+  runnerManifest = stageRunnerPart(path.join(runnerOut, meta.file), meta, runnerStage);
+  fs.rmSync(runnerSrc, { recursive: true, force: true });
+}
+const fromRunner = runnerManifest ? [[path.join(runnerStage, RUNNER_PART), RUNNER_PART]] : [];
 const fromEng = (p) => path.join(eng, p);
 const fromPack = (name) => [path.join(packSrc, 'plugins', name), `plugins/${name}`];
 // macOS-tar packt sonst Metadaten ein, die GNU tar beim Entpacken als Warnung meldet; Besitzer immer 0, damit das Paket nicht vom Rechner abhängt
@@ -164,13 +192,14 @@ const community = pack(`kette-community-${version}.tgz`, [[fromEng('rules'), 'ru
   'profiles/stack/index.json': fs.readFileSync(path.join(eng, 'profiles/stack/index.json'), 'utf8'),
   'VERSION': version + '\n',
 });
-const enterprise = pack(`private/kette-enterprise-${version}.tgz`, [...['rules', 'schema', 'profiles', 'checks', 'plugins', 'LICENSE'].map((p) => [fromEng(p), p]), ...ENTERPRISE_PACK_PLUGINS.map(fromPack), ...fromTicketing], {
+const enterprise = pack(`private/kette-enterprise-${version}.tgz`, [...['rules', 'schema', 'profiles', 'checks', 'plugins', 'LICENSE'].map((p) => [fromEng(p), p]), ...ENTERPRISE_PACK_PLUGINS.map(fromPack), ...fromTicketing, ...fromRunner], {
   '.claude-plugin/marketplace.json': JSON.stringify(enterpriseMarket, null, 2) + '\n',
   'VERSION': version + '\n',
 });
 fs.rmSync(packSrc, { recursive: true, force: true });
 fs.rmSync(ticketingSrc, { recursive: true, force: true });
 fs.rmSync(ticketingStage, { recursive: true, force: true });
+fs.rmSync(runnerStage, { recursive: true, force: true });
 
 const cliTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kette-cli-'));
 for (const p of ['bin', 'src', 'package.json', 'LICENSE']) fs.cpSync(path.join(root, p), path.join(cliTmp, p), { recursive: true });
@@ -185,7 +214,7 @@ const manifest = {
   cli: { version: cliVersion, url: path.basename(cli), sha256: hash(cli) },
   bundles: { community: { url: path.basename(community), sha256: hash(community) } },
 };
-const enterpriseMeta = { version, sha256: hash(enterprise), published_at: new Date().toISOString(), agent_pack: { ref: agentPackRef, commit: agentPackCommit.slice(0, 7) }, ticketing: { ref: ticketingRef, commit: ticketingCommit.slice(0, 7) } };
+const enterpriseMeta = { version, sha256: hash(enterprise), published_at: new Date().toISOString(), agent_pack: { ref: agentPackRef, commit: agentPackCommit.slice(0, 7) }, ticketing: { ref: ticketingRef, commit: ticketingCommit.slice(0, 7) }, ...(runnerManifest ? { runner: { ref: runnerRef, commit: runnerCommit.slice(0, 7), version: runnerManifest.version, sha256: runnerManifest.sha256 } } : {}) };
 
 // Gleiche Version mit anderem Inhalt würde ein schon gebautes oder verteiltes Paket ersetzen, ohne dass Claude Code es bemerkt
 const readJson = (f) => (fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : null);
@@ -207,7 +236,7 @@ fs.rmSync(dist, { recursive: true, force: true });
 fs.renameSync(out, dist);
 const enterpriseFile = path.join(dist, 'private', path.basename(enterprise));
 const enterpriseInfo = path.join(dist, 'private', 'kette-enterprise.json');
-console.log(`release ${version} · cli ${cliVersion} · claude-design-agent-pack ${agentPackRef} (${agentPackCommit.slice(0, 7)}) · kette-ticketing ${ticketingRef} (${ticketingCommit.slice(0, 7)})\n${fs.readdirSync(dist).join('\n')}\nprivate/${fs.readdirSync(path.join(dist, 'private')).join('\nprivate/')}`);
+console.log(`release ${version} · cli ${cliVersion} · claude-design-agent-pack ${agentPackRef} (${agentPackCommit.slice(0, 7)}) · kette-ticketing ${ticketingRef} (${ticketingCommit.slice(0, 7)})${runnerManifest ? ` · zero-agent-runner ${runnerRef} (${runnerCommit.slice(0, 7)})` : ''}\n${fs.readdirSync(dist).join('\n')}\nprivate/${fs.readdirSync(path.join(dist, 'private')).join('\nprivate/')}`);
 
 // Release-Argumente für gh; das Enterprise-Paket geht nur in ein privates Repo
 const releaseArgs = ['release', 'create', `v${version}`, enterpriseFile, enterpriseInfo, '--repo', ENTERPRISE_REPO, '--target', commit, '--title', `v${version}`, '--notes', `Enterprise-Paket ${version} (kette-engineering ${sha}, claude-design-agent-pack ${agentPackRef}, kette-ticketing ${ticketingRef})`];
@@ -215,6 +244,7 @@ if (publishEnterprise) {
   if (dirty) throw new Error('Mit offenen Änderungen in kette-engineering wird nichts veröffentlicht');
   if (!agentPackTagged) throw new Error(`claude-design-agent-pack ${agentPackRef} ist kein Release-Tag, veröffentlicht wird nur ein getaggter Stand`);
   if (!ticketingTagged) throw new Error(`kette-ticketing ${ticketingRef} is no release tag, only a tagged state is published`);
+  if (!runnerTagged) throw new Error(`zero-agent-runner ${runnerRef} is no release tag, only a tagged state is published`);
   if (!execFileSync('git', ['-C', eng, 'branch', '-r', '--contains', commit], { encoding: 'utf8' }).trim()) throw new Error(`kette-engineering ${sha} ist noch nicht gepusht, das Release-Tag braucht den Commit auf GitHub`);
   const visibility = JSON.parse(execFileSync('gh', ['repo', 'view', ENTERPRISE_REPO, '--json', 'isPrivate'], { encoding: 'utf8' }));
   if (!visibility.isPrivate) throw new Error(`${ENTERPRISE_REPO} ist nicht privat, das Enterprise-Paket wird dort nicht veröffentlicht`);
