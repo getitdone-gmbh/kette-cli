@@ -59,7 +59,7 @@ Options:
 | Option | Meaning |
 |---|---|
 | `--repo owner/name` | A repo the agents may work on; repeat it or separate with commas. This list on your machine is the trust boundary: a job for another repo is refused |
-| `--git-token-file <path>` | The file with the fine-grained GitHub token (mode 600). Required unless `--no-agent-push` |
+| `--git-token-file <path>` | The file with the fine-grained GitHub token (mode 600). Required unless `--no-agent-push`; at a terminal kette asks for the path when it is missing (only the path, the token stays in the file) |
 | `--no-agent-push` | Agents commit locally and never push; for tests without a token |
 | `--wallet file` | An empty file wallet for the agents in `~/.config/zero-runner/wallet` (folder 700). Vault and Infisical are set up by hand after `vendor/zero-wallet/README.md` in the runner package; `--wallet vault` or `infisical` ends with exit 64 |
 | `--name <name>` | Name of this machine in workload.zero (default: the host name) |

@@ -317,3 +317,29 @@ test('the claude check reads CLAUDE_CONFIG_DIR like the runner (CR768-09)', asyn
   write(conf, '.credentials.json', '{}');
   assert.equal(await runner('install', base(fakeRunnerPackage()), m.io), 0);
 });
+
+test('at a terminal install asks for the path of the token file before the code; an empty answer asks again (CR768-GUI-03)', async () => {
+  const { homeDir } = sandboxHome();
+  const pat = tokenFile(homeDir);
+  const answers = ['', pat];
+  const questions = [];
+  let codeRead = false;
+  const m = machine(homeDir, { hasTerminal: true, ask: async (q) => { questions.push(q); return answers.shift(); }, readStdinLine: async () => { codeRead = true; return CODE; } });
+  assert.equal(await runner('install', base(fakeRunnerPackage(), { 'no-agent-push': false }), m.io), 0);
+  assert.equal(questions.length, 2);
+  assert.match(questions[0], /token file.*mode 600/i);
+  assert.ok(codeRead);
+  assert.ok(realRegister(homeDir).args.includes(pat));
+  assert.ok(!m.out().includes('github_pat_value'), 'only the path, never the value');
+});
+
+test('a token file path given at the prompt is checked like --git-token-file, before the code (CR768-GUI-03)', async () => {
+  const { homeDir } = sandboxHome();
+  const loose = tokenFile(homeDir, 0o644);
+  let codeRead = false;
+  const m = machine(homeDir, { hasTerminal: true, ask: async () => loose, readStdinLine: async () => { codeRead = true; return CODE; } });
+  await fails(runner('install', base(fakeRunnerPackage(), { 'no-agent-push': false }), m.io), /chmod 600/, 1);
+  assert.equal(codeRead, false);
+  const m2 = machine(homeDir, { hasTerminal: true, ask: async () => '' });
+  await fails(runner('install', base(fakeRunnerPackage(), { 'no-agent-push': false }), m2.io), /--git-token-file/, 64);
+});

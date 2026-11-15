@@ -61,12 +61,18 @@ export async function repoList(opts, io) {
   return [...new Set(repos)];
 }
 
-// Only the path is checked (exists, a file, owned by the user, mode 600); the value is never read (AD-9)
-export function checkTokenFile(opts, io) {
-  const given = opts['git-token-file'];
+const TOKEN_FILE_NEEDED = 'Pass --git-token-file <path> with a fine-grained GitHub token for the repos (Contents and Pull requests read and write, file mode 600). See docs/runner.md.';
+const TOKEN_FILE_QUESTION = 'Path to the token file with a fine-grained GitHub token for these repos (mode 600, see docs/runner.md)';
+
+// Only the path is checked (exists, a file, owned by the user, mode 600); the value is never read (AD-9). At a terminal a missing
+// --git-token-file is asked for as a path, before the code (CR768-GUI-03); an empty answer asks again, three empty answers stop
+export async function checkTokenFile(opts, io) {
+  let given = opts['git-token-file'];
   if (!given) {
     if (opts['no-agent-push']) return null;
-    throw new ExitError('Pass --git-token-file <path> with a fine-grained GitHub token for the repos (Contents and Pull requests read and write, file mode 600). See docs/runner.md.', 64);
+    if (!io.hasTerminal) throw new ExitError(TOKEN_FILE_NEEDED, 64);
+    for (let i = 0; i < 3 && !given; i++) given = String((await io.ask(TOKEN_FILE_QUESTION)) || '').trim();
+    if (!given) throw new ExitError(TOKEN_FILE_NEEDED, 64);
   }
   const file = path.resolve(given.replace(/^~(?=$|\/)/, io.homeDir));
   let st;

@@ -99,7 +99,7 @@ async function install(opts, io) {
   const claude = checkClaude(io);
   const wallet = walletOption(opts);
   const repos = await repoList(opts, io);
-  const tokenFile = checkTokenFile(opts, io);
+  const tokenFile = await checkTokenFile(opts, io);
   const existing = existingRunner(io);
   if (existing.kind === 'foreign') throw new ExitError(FOREIGN, 1);
   if (existing.kind === 'kette' && existing.token && !opts.replace) {
